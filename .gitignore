@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.tgz
+.superpowers/
+.husky/_/
+
+# Local plans, drafts, progress, and review records
+/.harness-delta/
