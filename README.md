@@ -2,9 +2,11 @@
 
 Local metadata measurement and harness comparison for real development tasks.
 
-**Status: development scaffold.** The measurement CLI, product adapters, domain
-store, and reports are not implemented yet. Current tests validate development
-dependencies and harness checks, not measurement capability.
+**Status: contracts and local storage foundation.** Strict metadata schemas and a
+transactional, versioned SQLite event store are implemented. The measurement CLI,
+product adapters, lifecycle, and reports are not implemented yet. Storage tests
+do not establish measurement capability; see the
+[adapter feasibility limits](docs/decisions/001-adapter-capabilities.md).
 
 ## Development
 
@@ -39,8 +41,15 @@ your terminal or Git client before committing. See the
 | `npm run check` | Run privacy guard, lint, type checking, tests, and build |
 | `npm pack --dry-run` | Inspect the package contents |
 
-SQL migrations will live under `src/migrations` and be copied to `dist/migrations`.
-`src/index.ts` is currently an empty entry point; there is no `hm` executable yet.
+SQL migrations live under `src/migrations` and are copied to `dist/migrations`.
+`src/index.ts` exports `Store` and strict event, reading, shared task/outcome, and
+monetary schemas. There is no `hm` executable yet.
+
+`Store.putEvent` inserts once per source key, returns false for identical replay,
+and throws `event_conflict` for a reused ID or source with different data. A
+registered project, task, and linked session must exist before event insertion.
+`Store.transaction` is synchronous; always close the store when finished.
+Run `npm test -- tests/contracts.test.ts tests/store.test.ts` for these boundaries.
 
 ## Requirements and contribution
 

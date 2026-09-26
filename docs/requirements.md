@@ -1,7 +1,8 @@
 # Product Requirements
 
 Status: Intended behavior, not an implementation or support claim. The current
-repository contains a development scaffold and harness. Adapter feasibility,
+repository contains metadata contracts, a local event store, and a development
+harness. Adapter feasibility,
 product behavior, and statistical methods still need validation.
 
 This document is the public source of product acceptance requirements. Changes to
