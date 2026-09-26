@@ -149,6 +149,25 @@ A subsequent bounded Claude initial/resume probe reproduced a collection failure
 classified as `same_size_modified`: size was unchanged while modification time
 changed between snapshots. It did not establish whether source contents changed
 or why the product modified the file. The resumed interval remained excluded;
-reliable live resumed collection is unresolved. The diagnostic categories in the
+its original raw-content change and cause remain unknown. A follow-up scoped
+probe established equal normalized usage metadata at this condition. The
+collector now accepts a stable same-size Claude rewrite only after validated
+measurement metadata equality, including prompt origins before usage arrives;
+true revisions and uncertain intervals still invalidate the checkpoint. Synthetic
+tests cover touch, ignored auxiliary changes, real revisions, baseline boundaries
+and rollback. These checks alone do not establish live availability. The diagnostic categories in the
 [observation contract](003-local-observation-contract.md) distinguish conditions
 without relaxing source stability or completeness rules.
+
+
+A later bounded confirmation on the same pinned versions produced eligible
+post-baseline partial reports for both products. Claude preserved its baseline
+across a stable same-size metadata-equal modification; Codex's controlled driver
+observed zero exact filename matches followed by one match 26 ms later. The driver
+waited only for the newly obtained exact session ID and completed durable linkage
+before decoding content-bearing stream bytes. Baseline usage stayed excluded and
+repeated polls/restart did not duplicate usage. This resolves those bounded
+availability probes, not complete collection, billing truth or exceptional-boundary
+support. A subsequent synthetic review correction rejects conflicting replay input
+components even when their normalized sum is unchanged; that adversarial case has
+not been exercised with a live product.

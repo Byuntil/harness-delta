@@ -6,7 +6,7 @@ import { addTokens, IdSchema, ModelSchema, TimestampSchema, TokenSchema, type Ev
 
 export interface SourceScope { sessionId: string; projectRoot: string; product: 'codex' | 'claude_code'; version: string }
 export interface SourceRecord { key: string; at: string; turnStartedAt: string | null; toolCallIds?: string[]; payload: Event['payload'] }
-export interface Snapshot { records: SourceRecord[]; counters: number[] | null; counterAt: string | null; model: string | null; reasons: string[]; blocked: boolean }
+export interface Snapshot { continuityKey: string | null; records: SourceRecord[]; counters: number[] | null; counterAt: string | null; model: string | null; reasons: string[]; blocked: boolean }
 const canonicalPath = (path:string):string => { try { return realpathSync(path); } catch { return resolve(path); } };
 type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as ObjectValue : {};
@@ -31,7 +31,9 @@ export function usagePayload(scope: SourceScope, counters: number[], model: stri
 export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
   if ((scope.product === 'codex' && scope.version !== '0.156.1') ||
       (scope.product === 'claude_code' && scope.version !== '2.1.283')) throw new Error('unsupported');
-  const result: Snapshot = {records:[],counters:null,counterAt:null,model:null,reasons:['incomplete'],blocked:false};
+  const result: Snapshot = {continuityKey:null,records:[],counters:null,counterAt:null,model:null,reasons:['incomplete'],blocked:false};
+  const origins: string[] = [];
+  const usageComponents = new Map<string, number[]>();
   const records = new Map<string, SourceRecord>(); let identified = false; let turnStartedAt: string | null = null; const bashIds = new Map<string,string|null>(); let currentTurnId: string | null = null; let turnOpen=false;
   const add = (record: SourceRecord) => {
     const old = records.get(record.key);
@@ -102,7 +104,7 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
         identified=true;
       }
       if (row.isSidechain === true || row.type === 'system' && row.subtype === 'compact_boundary') result.blocked=true;
-      if (row.type === 'user' && row.toolUseResult === undefined && row.sessionId === scope.sessionId && typeof row.promptId === 'string' && !array(object(row.message).content).some(value=>object(value).type==='tool_result')) turnStartedAt=timestamp(row.timestamp);
+      if (row.type === 'user' && row.toolUseResult === undefined && row.sessionId === scope.sessionId && typeof row.promptId === 'string' && !array(object(row.message).content).some(value=>object(value).type==='tool_result')) { turnStartedAt=timestamp(row.timestamp); origins.push(turnStartedAt); }
       if (row.type === 'assistant') {
         if (row.sessionId !== scope.sessionId) throw new Error('scope_mismatch');
         const message=object(row.message); const usage=object(message.usage);
@@ -116,7 +118,11 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
         const toolCallIds=[...new Set(array(message.content).flatMap(value=>{
           const block=object(value);return block.type==='tool_use' && block.name==='Bash'?[id(block.id)]:[];
         }))].sort();
-        const input=addTokens([count(usage.input_tokens),count(usage.cache_creation_input_tokens),count(usage.cache_read_input_tokens)]);
+        const components=[count(usage.input_tokens),count(usage.cache_creation_input_tokens),count(usage.cache_read_input_tokens)];
+        const priorComponents=usageComponents.get(key);
+        if(priorComponents && components.some((value,index)=>value!==priorComponents[index]))throw new SourceFailure('record_conflict');
+        if(!priorComponents)usageComponents.set(key,components);
+        const input=addTokens(components);
         const model=ModelSchema.safeParse(message.model); if (!model.success) throw new Error('unsupported');
         const counters=[input,count(usage.cache_read_input_tokens),count(usage.output_tokens),0];
         add({key,at:timestamp(row.timestamp),turnStartedAt:origin,toolCallIds,payload:usagePayload(scope,counters,model.data,'sequential')});
@@ -138,5 +144,12 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
   if (!identified) throw new Error('scope_mismatch');
   result.records=[...records.values()];
   if (result.blocked) result.reasons.push('unsupported');
+  // Only validated measurement metadata enters this fingerprint. Origins matter
+  // even before usage arrives; a metadata-only snapshot of usage is insufficient.
+  // Raw lines, contents and hashes of contents are never checkpointed.
+  if (scope.product === 'claude_code') result.continuityKey=metadataKey(JSON.stringify({
+    records:result.records,blocked:result.blocked,origins,usageComponents:[...usageComponents],
+    incompleteLine:text.length>text.lastIndexOf('\n')+1,
+  }));
   return result;
 }

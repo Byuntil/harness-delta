@@ -69,15 +69,22 @@ fields or automatic telemetry.
 | `parse_failed` | Other unclassified parser failure |
 | `identity_changed` | File identity changed since the prior checkpoint |
 | `source_truncated` | File size decreased since the prior checkpoint |
-| `same_size_modified` | Unchanged file size with a changed modification time |
+| `same_size_modified` | Stable equal-size rewrite without verified identical Claude measurement metadata (Codex equal-size rewrites remain unsupported) |
 | `clock_regressed` | Tick cutoff precedes the prior cutoff |
 | `model_mismatch` | Source product/model disagrees with fixed task metadata |
 | `record_changed` | Previously fingerprinted metadata changed or disappeared |
 
 Categories identify the detected condition, not necessarily its underlying cause.
-File continuity checks precede parsing; only the first detected condition is
-reported. A same-size modification does not prove benign touching or malicious
-replacement. Unstable reads are rejected. Errors invalidate the in-memory and
+Identity and truncation checks precede parsing; only the first detected failure is
+reported. After a stable read, an equal-size Claude modification retains its
+checkpoint only when validated measurement metadata is identical: normalized
+records, input components, prompt-origin timestamps (including origins without
+usage), topology blocking state and incomplete-line presence. This fingerprint
+contains no raw content or raw-content hash. Changes to ignored content or
+auxiliary fields do not establish a measurement revision; equality does not prove
+byte equality or explain why the file changed. New or revised metadata in an
+equal-size rewrite remains uncertain and is rejected. Codex retains conservative
+equal-size rejection. Unstable reads are rejected. Errors invalidate the in-memory and
 durable cursor; subsequent reads establish a new baseline and never backfill the
 uncertain interval. Diagnostics contain no paths, content, hashes, raw errors,
 arbitrary source types, arguments, or payload dumps.

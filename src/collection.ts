@@ -23,7 +23,7 @@ export const readSource: SourceReader = path => {
   } finally {closeSync(fd);}
 };
 interface LinkedSource {id:string;project_id:string;task_id:string;source_path:string;product:'codex'|'claude_code';product_version:string;local_root:string;generation:number;metadata:string}
-interface MemoryCheckpoint {generation:number;since:string;lastAt:string;identity:string;size:number;modified:number;fingerprints:Record<string,string>;settledKeys:string[]}
+interface MemoryCheckpoint {generation:number;since:string;lastAt:string;identity:string;size:number;modified:number;continuityKey:string|null;fingerprints:Record<string,string>;settledKeys:string[]}
 
 export interface CollectionDiagnostic { session_id: string; at: string; category: SourceDiagnosticCategory }
 
@@ -54,9 +54,13 @@ export class Collector {
             bytes=this.read(link.source_path);
             if(previous && bytes.identity!==previous.identity)throw new SourceFailure('identity_changed');
             if(previous && bytes.size<previous.size)throw new SourceFailure('source_truncated');
-            if(previous && bytes.size===previous.size && bytes.modified!==previous.modified)throw new SourceFailure('same_size_modified');
             if(previous && now<previous.lastAt)throw new SourceFailure('clock_regressed');
             stage='parse_failed';snapshot=parseSnapshot(bytes.text,scope);
+            // A stable same-size Claude rewrite may leave every measurement
+            // field unchanged. Preserve the interval only with positive semantic
+            // equality; new/revised metadata and other products still fail closed.
+            if(previous && bytes.size===previous.size && bytes.modified!==previous.modified &&
+              (!snapshot.continuityKey || snapshot.continuityKey!==previous.continuityKey))throw new SourceFailure('same_size_modified');
             const metadata=JSON.parse(link.metadata) as {model:string;product:string};
             if(metadata.product!==link.product || snapshot.model && snapshot.model!==metadata.model ||
               snapshot.records.some(r=>r.payload.kind==='usage' && r.payload.model!==metadata.model))throw new SourceFailure('model_mismatch','unsupported');
@@ -88,7 +92,7 @@ export class Collector {
               settledKeys.add(record.key);
             }
           }
-          const checkpoint:MemoryCheckpoint={generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,size:bytes.size,modified:bytes.modified,fingerprints,settledKeys:[...settledKeys]};
+          const checkpoint:MemoryCheckpoint={generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,size:bytes.size,modified:bytes.modified,continuityKey:snapshot.continuityKey,fingerprints,settledKeys:[...settledKeys]};
           pending.set(link.id,checkpoint);
           // Persist metadata-only position for diagnostics. A new Collector never
           // resumes it: every process/run establishes its own current-tail baseline.

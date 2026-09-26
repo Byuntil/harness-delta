@@ -90,6 +90,9 @@ the generated report if you need a historical snapshot after deletion or new dat
 
 Errors use fixed codes. Source identity changes, truncation, invalid scope/version,
 conflicting metadata, resets or unsupported topology exclude the uncertain batch.
+Stable same-size Claude modifications retain the baseline only when validated
+measurement metadata is identical; changed usage, origin, model, timestamp or
+recognized tool IDs still fail closed. This does not establish raw-content equality.
 Earlier observations remain partial. Correct the explicit mapping and restart;
 recovery establishes a new baseline and does not import earlier work. Sources over
 16 MiB are unsupported in this initial bounded reader. It scans a bounded authorized
