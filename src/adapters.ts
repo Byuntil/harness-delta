@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { addTokens, IdSchema, ModelSchema, TimestampSchema, TokenSchema, type Event, type Reading } from './contracts.js';
 
 export interface SourceScope { sessionId: string; projectRoot: string; product: 'codex' | 'claude_code'; version: string }
-export interface SourceRecord { key: string; at: string; turnStartedAt: string | null; toolCallIds?: string[]; payload: Event['payload'] }
+export interface SourceRecord { key: string; at: string; turnStartedAt: string | null; toolCallIds?: string[]; inputComponents?: readonly [number, number, number]; payload: Event['payload'] }
 export interface Snapshot { continuityKey: string | null; records: SourceRecord[]; counters: number[] | null; counterAt: string | null; model: string | null; reasons: string[]; blocked: boolean }
 const canonicalPath = (path:string):string => { try { return realpathSync(path); } catch { return resolve(path); } };
 type ObjectValue = Record<string, unknown>;
@@ -33,7 +33,6 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
       (scope.product === 'claude_code' && scope.version !== '2.1.283')) throw new Error('unsupported');
   const result: Snapshot = {continuityKey:null,records:[],counters:null,counterAt:null,model:null,reasons:['incomplete'],blocked:false};
   const origins: string[] = [];
-  const usageComponents = new Map<string, number[]>();
   const records = new Map<string, SourceRecord>(); let identified = false; let turnStartedAt: string | null = null; const bashIds = new Map<string,string|null>(); let currentTurnId: string | null = null; let turnOpen=false;
   const add = (record: SourceRecord) => {
     const old = records.get(record.key);
@@ -118,14 +117,15 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
         const toolCallIds=[...new Set(array(message.content).flatMap(value=>{
           const block=object(value);return block.type==='tool_use' && block.name==='Bash'?[id(block.id)]:[];
         }))].sort();
-        const components=[count(usage.input_tokens),count(usage.cache_creation_input_tokens),count(usage.cache_read_input_tokens)];
-        const priorComponents=usageComponents.get(key);
-        if(priorComponents && components.some((value,index)=>value!==priorComponents[index]))throw new SourceFailure('record_conflict');
-        if(!priorComponents)usageComponents.set(key,components);
+        // Preserve validated ordinary/cache-create/cache-read counts before
+        // normalization. Record equality checks both replays and every later poll,
+        // even when size grows or mtime stays unchanged. Only metadata is hashed;
+        // these internal components never enter the stored event payload.
+        const components: [number, number, number]=[count(usage.input_tokens),count(usage.cache_creation_input_tokens),count(usage.cache_read_input_tokens)];
         const input=addTokens(components);
         const model=ModelSchema.safeParse(message.model); if (!model.success) throw new Error('unsupported');
         const counters=[input,count(usage.cache_read_input_tokens),count(usage.output_tokens),0];
-        add({key,at:timestamp(row.timestamp),turnStartedAt:origin,toolCallIds,payload:usagePayload(scope,counters,model.data,'sequential')});
+        add({key,at:timestamp(row.timestamp),turnStartedAt:origin,toolCallIds,inputComponents:components,payload:usagePayload(scope,counters,model.data,'sequential')});
         for(const toolId of toolCallIds)if(!bashIds.has(toolId))bashIds.set(toolId,origin);
       }
       if (row.type === 'user' && row.toolUseResult !== undefined) {
@@ -148,7 +148,7 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
   // even before usage arrives; a metadata-only snapshot of usage is insufficient.
   // Raw lines, contents and hashes of contents are never checkpointed.
   if (scope.product === 'claude_code') result.continuityKey=metadataKey(JSON.stringify({
-    records:result.records,blocked:result.blocked,origins,usageComponents:[...usageComponents],
+    records:result.records,blocked:result.blocked,origins,
     incompleteLine:text.length>text.lastIndexOf('\n')+1,
   }));
   return result;

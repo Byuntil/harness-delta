@@ -76,7 +76,18 @@ fields or automatic telemetry.
 
 Categories identify the detected condition, not necessarily its underlying cause.
 Identity and truncation checks precede parsing; only the first detected failure is
-reported. After a stable read, an equal-size Claude modification retains its
+reported. Claude message identity includes validated ordinary, cache-created and
+cache-read input counts before normalization. The adapter retains these counts
+only as internal record metadata: both same-snapshot replay validation and the
+collector's per-record fingerprints compare them. Previously seen records must
+agree on every poll, including growing sources and unchanged modification times;
+equal normalized totals do not excuse changed components. Exact replays and new
+append-only messages remain eligible under the existing baseline/cutoff rules.
+Stored events and reports retain their existing normalized fields; cursor hashes
+cover allowlisted metadata only. No storage migration or durable cursor resumption
+is introduced.
+
+After a stable read, an equal-size Claude modification retains its
 checkpoint only when validated measurement metadata is identical: normalized
 records, input components, prompt-origin timestamps (including origins without
 usage), topology blocking state and incomplete-line presence. This fingerprint
