@@ -2,7 +2,11 @@
 
 Harness Delta has metadata contracts and a local storage foundation. Read the
 [product requirements](docs/requirements.md) before proposing or implementing behavior.
-The repository does not yet provide a measurement CLI or supported product adapters.
+The repository provides a local measurement CLI and partial sequential adapters for
+Codex CLI 0.156.1 and Claude Code 2.1.283. These observations are incomplete and do
+not establish full task usage, app support, or descendant aggregation. See the
+[capability evidence and limits](docs/decisions/001-adapter-capabilities.md) and
+[local measurement runbook](docs/runbooks/local-measurement.md).
 
 ## Development environment
 

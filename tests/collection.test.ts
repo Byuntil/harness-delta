@@ -5,6 +5,8 @@ import { expect, test } from 'vitest';
 import { Store } from '../src/store.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import { Collector } from '../src/collection.js';
+import { Deletion } from '../src/deletion.js';
+import { collectionFixture, jsonLines, products } from './helpers/collection-fixture.js';
 const at=(second:number)=>`2026-01-01T00:00:${String(second).padStart(2,'0')}.000Z`;
 function fixture() {
  const root=mkdtempSync(join(tmpdir(),'collector-'));const source=join(root,'session.jsonl');
@@ -56,4 +58,241 @@ test('a generation change during a source read discards its batch',()=>{
  });
  try{f.life.start('t1');collector.tick('t1');f.turn(2,100);f.set(4);changed=true;collector.tick('t1');expect(f.store.eventCount()).toBe(0);expect(f.life.state('t1')).toBe('paused');
  }finally{f.cleanup();}
+});
+
+// Both source formats can expose a completed record a few milliseconds ahead of
+// the tick's fixed cutoff. Seeing that metadata must not consume its eligibility.
+test.each(products)('%s retains future usage until the fixed millisecond cutoff includes it', product => {
+ const f = collectionFixture(product);
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  f.rows(...f.turn(1, 3)); f.set(2); f.collector.tick('t1');
+  expect(f.store.eventCount()).toBe(0);
+  f.set(4); f.collector.tick('t1');
+  expect(f.store.eventCount()).toBe(1);
+  expect(f.events()).toMatchObject([{ input_total: { value: 100 }, cached_input: { value: 40 }, output_total: { value: 30 } }]);
+  f.collector.tick('t1'); f.set(5); f.collector.tick('t1');
+  expect(f.store.eventCount()).toBe(1);
+ } finally { f.cleanup(); }
+});
+
+test.each(products)('%s counts mixed eligible/future usage at equality and late arrivals exactly once', product => {
+ const f = collectionFixture(product);
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  const first = f.turn(1, 2, 1, 'first'); const future = f.turn(3, 6, 2, 'future');
+  f.rows(...first, ...future); f.set(4); f.collector.tick('t1');
+  expect(f.events()).toHaveLength(1);
+  f.set(6); f.collector.tick('t1'); expect(f.events()).toHaveLength(2);
+  // An appended record can predate lastAt while belonging to this same interval.
+  f.rows(...first, ...future, ...f.turn(4, 5, 3, 'late')); f.set(7); f.collector.tick('t1');
+  f.collector.tick('t1');
+  expect(f.events()).toHaveLength(3);
+  expect(f.events()).toMatchObject(Array.from({ length: 3 }, () => ({ input_total: { value: 100 }, cached_input: { value: 40 }, output_total: { value: 30 } })));
+  expect(f.store.all<{ status: string }>('SELECT status FROM observations').every(row => row.status === 'excluded' || row.status === 'unmeasurable')).toBe(true);
+ } finally { f.cleanup(); }
+});
+
+test.each(products)('%s defers recognized command completions and counts each logical call once', product => {
+ const f = collectionFixture(product);
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  const rows = [f.origin(1), ...f.invocation(1), ...f.invocation(1, 'call-now'), f.completion(1, 2, 'call-now'), f.completion(1, 3)];
+  f.rows(...rows); f.set(2); f.collector.tick('t1');
+  expect(f.events('tool')).toMatchObject([{ call_id: 'call-now', execution: 'confirmed', outcome: 'completed' }]);
+  f.set(3); f.collector.tick('t1'); f.collector.tick('t1');
+  f.rows(...rows, f.completion(1, 3)); f.set(4); f.collector.tick('t1');
+  expect(f.events('tool')).toHaveLength(2);
+  expect(f.events('tool')).toMatchObject([{ call_id: 'call-now' }, { call_id: 'call1', boundary: product === 'codex' ? 'codex_command' : 'claude_bash' }]);
+ } finally { f.cleanup(); }
+});
+
+for (const product of products) {
+ test.each([0, -1, null])(`${product} excludes origin %s at or before the baseline even after deferred time passes`, origin => {
+  const f = collectionFixture(product);
+  try {
+   f.life.start('t1'); f.collector.tick('t1');
+   f.rows(...f.turn(origin, 3)); f.set(2); f.collector.tick('t1');
+   f.set(4); f.collector.tick('t1'); expect(f.store.eventCount()).toBe(0);
+   f.rows(...f.turn(origin, 3), ...f.turn(5, 6, 2, 'new')); f.set(6); f.collector.tick('t1');
+   expect(f.events()).toHaveLength(1);
+  } finally { f.cleanup(); }
+ });
+
+ test(`${product} excludes future records already present in the initial baseline`, () => {
+  const f = collectionFixture(product);
+  try {
+   f.life.start('t1'); f.rows(...f.turn(1, 3)); f.collector.tick('t1');
+   f.set(4); f.collector.tick('t1'); expect(f.store.eventCount()).toBe(0);
+   f.rows(...f.turn(1, 3), ...f.turn(5, 6, 2, 'new')); f.set(6); f.collector.tick('t1');
+   expect(f.events()).toHaveLength(1);
+  } finally { f.cleanup(); }
+ });
+
+ test.each(['restart', 'pause', 'paused-tick'] as const)(`${product} discards deferred records across %s`, boundary => {
+  const f = collectionFixture(product);
+  try {
+   f.life.start('t1'); f.collector.tick('t1'); f.rows(...f.turn(1, 8)); f.set(2); f.collector.tick('t1');
+   let collector = f.collector;
+   f.set(3);
+   if (boundary === 'restart') collector = new Collector(f.store, f.clock, f.read);
+   else { f.life.pause('t1'); if (boundary === 'paused-tick') collector.tick('t1'); f.life.resume('t1'); }
+   collector.tick('t1'); f.set(9); collector.tick('t1'); expect(f.store.eventCount()).toBe(0);
+   f.rows(...f.turn(1, 8), ...f.turn(10, 11, 2, 'new')); f.set(11); collector.tick('t1');
+   expect(f.events()).toHaveLength(1);
+  } finally { f.cleanup(); }
+ });
+
+ test(`${product} excludes late tool completion from a pre-baseline invocation`, () => {
+  const f = collectionFixture(product);
+  try {
+   f.life.start('t1'); f.rows(f.origin(-1), ...f.invocation(-1)); f.collector.tick('t1');
+   f.rows(f.origin(-1), ...f.invocation(-1), f.completion(-1, 3)); f.set(2); f.collector.tick('t1');
+   f.set(4); f.collector.tick('t1'); expect(f.events('tool')).toHaveLength(0);
+   f.rows(f.origin(-1), ...f.invocation(-1), f.completion(-1, 3), ...f.close(4), f.origin(5, 'new'), ...f.invocation(5, 'new'), f.completion(5, 6, 'new', 'new'));
+   f.set(6); f.collector.tick('t1'); expect(f.events('tool')).toMatchObject([{ call_id: 'new' }]);
+  } finally { f.cleanup(); }
+ });
+}
+
+for (const product of products) {
+ test.each(['finalize', 'delete'] as const)(`${product} performs no reads or resurrection after %s with pending usage`, boundary => {
+  const f = collectionFixture(product);
+  try {
+   f.life.start('t1'); f.collector.tick('t1'); f.rows(...f.turn(1, 3)); f.set(2); f.collector.tick('t1');
+   const reads = f.reads();
+   if (boundary === 'finalize') f.life.finalize('t1', 'success', ['c1']);
+   else new Deletion(f.store, f.clock).deleteTask('t1');
+   f.set(4); f.collector.tick('t1'); new Collector(f.store, f.clock, f.read).tick('t1');
+   expect(f.reads()).toBe(reads); expect(f.store.eventCount()).toBe(0);
+   if (boundary === 'delete') {
+    expect(new Deletion(f.store).isDeleted('task', 't1')).toBe(true);
+    expect(f.state()).toEqual({ events: [], cursors: [], observations: [] });
+   }
+  } finally { f.cleanup(); }
+ });
+}
+
+for (const product of products) {
+ test.each(['changed-record', 'removed-record', 'identity', 'truncation', 'replacement', 'clock', 'scope', 'model'] as const)(`${product} invalidates %s with deferred metadata and preserves earlier partial usage`, fault => {
+  const f = collectionFixture(product);
+  try {
+   f.life.start('t1'); f.collector.tick('t1');
+   const first = f.turn(1, 2, 1, 'first'); const future = f.turn(3, 10, 2, 'future');
+   f.rows(...first); f.set(2); f.collector.tick('t1');
+   const valid = jsonLines([f.header(), ...first, ...future]);
+   f.replace(valid); f.set(4); f.collector.tick('t1'); expect(f.events()).toHaveLength(1);
+   const growth = '\n'.repeat(valid.length);
+   if (fault === 'changed-record') f.replace(jsonLines([f.header(), ...first, ...f.turn(3, 11, 2, 'future')]) + growth);
+   if (fault === 'removed-record') f.replace(jsonLines([f.header(), ...first]) + growth);
+   if (fault === 'identity') f.replace(valid, { identity: 'rotated' });
+   if (fault === 'truncation') f.rows(...first);
+   if (fault === 'replacement') f.replace(valid.replaceAll('synthetic', 'alternate'), { modified: Buffer.byteLength(valid) + 1 });
+   if (fault === 'scope') f.replace(valid.replaceAll(f.root, `${f.root}/other`) + growth);
+   if (fault === 'model') f.replace(valid.replaceAll('synthetic', 'othermodel') + growth);
+   f.set(fault === 'clock' ? 3 : 11); f.collector.tick('t1');
+   expect(f.events()).toHaveLength(1);
+   const reasons = f.store.all<{ status: string; reason: string }>('SELECT status, reason FROM observations');
+   expect(reasons.at(-1)).toEqual({ status: 'error', reason: fault === 'scope' ? 'scope_mismatch' : fault === 'model' ? 'unsupported' : 'source_error' });
+   // The recovery baseline consumes records from the uncertain interval.
+   f.replace(valid + growth + '\n'); f.set(12); f.collector.tick('t1');
+   f.set(13); f.collector.tick('t1'); expect(f.events()).toHaveLength(1);
+   f.replace(jsonLines([f.header(), ...first, ...future, ...f.turn(14, 15, 3, 'new')]) + growth + '\n');
+   f.set(15); f.collector.tick('t1'); expect(f.events()).toHaveLength(2);
+   expect(JSON.stringify(f.state())).not.toContain(f.root);
+  } finally { f.cleanup(); }
+ });
+}
+
+const blockedCases: { product: typeof products[number]; boundary: string; row: unknown }[] = [
+ { product: 'codex', boundary: 'reset', row: { type: 'event_msg', timestamp: '2026-01-01T00:00:00.005Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 30, reasoning_output_tokens: 0 } } } } },
+ { product: 'codex', boundary: 'compaction', row: { type: 'compacted' } },
+ { product: 'codex', boundary: 'topology', row: { type: 'event_msg', payload: { type: 'collab_begin' } } },
+ { product: 'codex', boundary: 'unknown format', row: { type: 'future_format' } },
+ { product: 'claude_code', boundary: 'compaction', row: { type: 'system', subtype: 'compact_boundary' } },
+ { product: 'claude_code', boundary: 'topology', row: { type: 'system', isSidechain: true } },
+];
+test.each(blockedCases)('$product settles deferred records excluded by $boundary without later backfill', ({ product, row }) => {
+ const f = collectionFixture(product);
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  const first = f.turn(1, 2, 1, 'first'); const future = f.turn(3, 8, 2, 'future');
+  f.rows(...first, ...future); f.set(4); f.collector.tick('t1'); expect(f.events()).toHaveLength(1);
+  f.rows(...first, ...future, row); f.set(5); f.collector.tick('t1');
+  expect(f.store.all<{ status: string; reason: string }>('SELECT status, reason FROM observations').at(-1)).toEqual({ status: 'unmeasurable', reason: 'unsupported' });
+  // Retain identical normalized records while the synthetic unsupported marker
+  // disappears in a growing source. Exclusion must remain final in this interval.
+  const padding = '\n'.repeat(1000);
+  f.replace(jsonLines([f.header(), ...first, ...future]) + padding); f.set(9); f.collector.tick('t1');
+  expect(f.events()).toHaveLength(1);
+  f.replace(jsonLines([f.header(), ...first, ...future, ...f.turn(10, 11, 3, 'new')]) + padding);
+  f.set(11); f.collector.tick('t1'); expect(f.events()).toHaveLength(2);
+ } finally { f.cleanup(); }
+});
+
+test.each(products)('%s waits for a partial last line while retaining deferred complete records', product => {
+ const f = collectionFixture(product);
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  const complete = [f.header(), ...f.turn(1, 8, 1, 'future'), f.origin(3, 'partial'), ...f.usage(4, 2, 'partial')];
+  const text = jsonLines(complete); const tailStart = text.lastIndexOf('\n', text.length - 2) + 1;
+  f.replace(text.slice(0, tailStart + 15)); f.set(5); f.collector.tick('t1'); expect(f.events()).toHaveLength(0);
+  f.replace(text); f.set(6); f.collector.tick('t1'); expect(f.events()).toHaveLength(1);
+  f.set(8); f.collector.tick('t1'); f.collector.tick('t1'); expect(f.events()).toHaveLength(2);
+ } finally { f.cleanup(); }
+});
+
+for (const product of products) {
+ for (const count of [1, 2]) {
+  test.each(['event', 'cursor', 'observation'] as const)(`${product} rolls back %s failure with ${count} source(s) and retries pending eligibility`, failure => {
+   const f = collectionFixture(product);
+   try {
+    if (count === 2) f.link('s2');
+    f.life.start('t1'); f.collector.tick('t1');
+    for (const sessionId of count === 2 ? ['s1', 's2'] : ['s1']) f.replace(jsonLines([f.header(sessionId), ...f.turn(1, 3, 1, 'turn1', sessionId)]), {}, sessionId);
+    f.set(2); f.collector.tick('t1'); const before = f.state();
+    const target = count === 2 ? 's2' : 's1';
+    const earlierInserted = count === 2 ? " AND EXISTS (SELECT 1 FROM events WHERE session_id='s1')" : '';
+    const trigger = failure === 'event' ? `BEFORE INSERT ON events WHEN NEW.session_id='${target}'${earlierInserted}`
+     : failure === 'cursor' ? `BEFORE UPDATE ON cursors WHEN NEW.session_id='${target}'${earlierInserted}`
+     : `BEFORE INSERT ON observations WHEN EXISTS (SELECT 1 FROM events WHERE session_id='${target}')${earlierInserted}`;
+    f.store.execute(`CREATE TRIGGER injected_failure ${trigger} BEGIN SELECT RAISE(ABORT,'synthetic_private_error'); END`, []);
+    f.set(4); expect(() => f.collector.tick('t1')).toThrow(/^collection_error$/);
+    expect(f.state()).toEqual(before);
+    f.store.execute('DROP TRIGGER injected_failure', []); f.collector.tick('t1');
+    expect(f.store.eventCount()).toBe(count);
+    f.collector.tick('t1'); expect(f.store.eventCount()).toBe(count);
+    expect(JSON.stringify(f.state())).not.toContain('synthetic_private_error');
+   } finally { f.cleanup(); }
+  });
+ }
+}
+
+test.each(products)('%s rebaselines after a generation change during a read with pending records', product => {
+ const f = collectionFixture(product); let changeGeneration = false;
+ const collector = new Collector(f.store, f.clock, path => {
+  const bytes = f.read(path);
+  if (changeGeneration) { changeGeneration = false; f.life.pause('t1'); f.life.resume('t1'); }
+  return bytes;
+ });
+ try {
+  f.life.start('t1'); collector.tick('t1'); f.rows(...f.turn(1, 8)); f.set(2); collector.tick('t1');
+  f.set(3); changeGeneration = true; collector.tick('t1'); expect(f.store.eventCount()).toBe(0);
+  f.set(4); collector.tick('t1'); f.set(9); collector.tick('t1'); expect(f.store.eventCount()).toBe(0);
+  f.rows(...f.turn(1, 8), ...f.turn(10, 11, 2, 'new')); f.set(11); collector.tick('t1'); expect(f.events()).toHaveLength(1);
+ } finally { f.cleanup(); }
+});
+
+test.each(products)('%s keeps the tick cutoff fixed when the clock advances during a read', product => {
+ const f = collectionFixture(product); let advanceDuringRead = false;
+ const collector = new Collector(f.store, f.clock, path => {
+  if (advanceDuringRead) f.set(4);
+  return f.read(path);
+ });
+ try {
+  f.life.start('t1'); collector.tick('t1');
+  f.rows(...f.turn(1, 3)); f.set(2); advanceDuringRead = true; collector.tick('t1');
+  expect(f.store.eventCount()).toBe(0);
+  advanceDuringRead = false; collector.tick('t1'); expect(f.store.eventCount()).toBe(1);
+ } finally { f.cleanup(); }
 });
