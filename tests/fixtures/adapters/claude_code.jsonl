@@ -1,0 +1,5 @@
+{"type":"assistant","uuid":"synthetic-message-1","sessionId":"synthetic-session","timestamp":"2026-01-01T00:00:00Z","version":"2.1.283","message":{"id":"synthetic-api-1","model":"synthetic-model","usage":{"input_tokens":10,"cache_creation_input_tokens":20,"cache_read_input_tokens":30,"output_tokens":5}}}
+{"type":"assistant","uuid":"synthetic-message-2","sessionId":"synthetic-session","timestamp":"2026-01-01T00:00:01Z","version":"2.1.283","message":{"id":"synthetic-api-2","model":"synthetic-model","usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":60,"output_tokens":3}}}
+{"type":"assistant","uuid":"synthetic-message-2","sessionId":"synthetic-session","timestamp":"2026-01-01T00:00:01Z","version":"2.1.283","message":{"id":"synthetic-api-2","model":"synthetic-model","usage":{"input_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":60,"output_tokens":3}}}
+{"type":"unverified_child","session_id":"synthetic-child"}
+{"type":"unknown_format","version":999}
