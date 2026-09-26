@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "period1",
+  "project_id": "project1",
+  "classification_version": 1,
+  "before": { "start": "2030-01-01T00:00:00Z", "end": "2030-02-01T00:00:00Z" },
+  "after": { "start": "2030-02-01T00:00:00Z", "end": "2030-03-01T00:00:00Z" },
+  "followup_hours": 168,
+  "types": ["feature"],
+  "sizes": ["small"],
+  "assignees": ["user1"],
+  "products": ["codex"],
+  "models": ["MODEL_ID"]
+}

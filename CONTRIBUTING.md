@@ -1,6 +1,6 @@
 # Contributing
 
-Harness Delta is at the development-scaffold stage. Read the
+Harness Delta has metadata contracts and a local storage foundation. Read the
 [product requirements](docs/requirements.md) before proposing or implementing behavior.
 The repository does not yet provide a measurement CLI or supported product adapters.
 

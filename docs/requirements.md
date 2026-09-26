@@ -1,8 +1,9 @@
 # Product Requirements
 
 Status: Intended behavior, not an implementation or support claim. The current
-repository contains a development scaffold and harness. Adapter feasibility,
-product behavior, and statistical methods still need validation.
+repository implements local lifecycle/storage, scoped partial CLI collection,
+and descriptive task/period reports. Complete product coverage and statistical
+methods still need validation. See the local runbook and capability matrix.
 
 This document is the public source of product acceptance requirements. Changes to
 requirements, collection scope, or public contracts require an explicit decision.
@@ -149,6 +150,23 @@ No opportunistic early stopping without a registered sequential method.
 
 Acceptance: quality uncertainty and small samples cannot become confident savings
 claims; reported conclusions disclose their population and observation limits.
+
+## R11 - Operational diagnostics
+
+Add versioned, task-scoped diagnostic metrics alongside usage and human outcomes.
+Initially prioritize deduplicated confirmed tool executions, execution failures,
+and elapsed/active task time. Preserve denied, cancelled, validation-failed and
+unknown outcomes separately. Define the counting boundary so wrappers, nested
+operations, event replay, and start/completion pairs are not silently added twice.
+Search/read and first-edit/test/oracle milestones require validated structured
+classification and attribution. Exact duplicate reads and context expansion are
+deferred until file/revision/range/context identity or explicit router events exist.
+
+Acceptance: known counts and elapsed intervals match synthetic arithmetic; denied
+calls do not count as execution failures; missing data never becomes zero. Reports
+show metric-specific coverage and retain all eligible tasks, including failures
+and partial observations. These diagnostics do not replace quality criteria or
+prove an adoption decision. See [the observation contract](decisions/003-local-observation-contract.md).
 
 ## Delivery gates and open decisions
 
