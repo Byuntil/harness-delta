@@ -6,7 +6,9 @@ import { Store } from '../src/store.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import { Collector } from '../src/collection.js';
 import { Deletion } from '../src/deletion.js';
-import { collectionFixture, jsonLines, products } from './helpers/collection-fixture.js';
+import { parseSnapshot } from '../src/adapters.js';
+import { aggregateTask } from '../src/metrics.js';
+import { collectionFixture, jsonLines, millis, products } from './helpers/collection-fixture.js';
 const at=(second:number)=>`2026-01-01T00:00:${String(second).padStart(2,'0')}.000Z`;
 function fixture() {
  const root=mkdtempSync(join(tmpdir(),'collector-'));const source=join(root,'session.jsonl');
@@ -294,5 +296,94 @@ test.each(products)('%s keeps the tick cutoff fixed when the clock advances duri
   f.rows(...f.turn(1, 3)); f.set(2); advanceDuringRead = true; collector.tick('t1');
   expect(f.store.eventCount()).toBe(0);
   advanceDuringRead = false; collector.tick('t1'); expect(f.store.eventCount()).toBe(1);
+ } finally { f.cleanup(); }
+});
+
+test('Codex explicit all-zero observation survives adapter/collector/report without inventing notification events', () => {
+ const f = collectionFixture('codex');
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  expect(aggregateTask(f.store, 't1', f.clock()).usage).toMatchObject({ status: 'missing', partial_tokens: null });
+  const zero = f.turn(1, 2, 0, 'zero');
+  f.rows(...zero); f.set(3); f.collector.tick('t1');
+  expect(aggregateTask(f.store, 't1', f.clock()).usage).toMatchObject({ status: 'partial', partial_tokens: 0, complete_tokens: null, input_total: { observed_events: 1, observed_sum: 0 } });
+  // Changed timestamps and a later turn do not make unchanged cumulative totals
+  // evidence of a new measurement. Only the first explicit zero is represented.
+  f.rows(...zero, ...f.usage(4, 0), ...f.turn(5, 6, 0, 'redundant')); f.set(7); f.collector.tick('t1'); f.collector.tick('t1');
+  expect(f.events()).toHaveLength(1);
+  f.rows(...zero, ...f.turn(5, 6, 0, 'redundant'), ...f.turn(8, 9, 1, 'nonzero')); f.set(10); f.collector.tick('t1');
+  expect(aggregateTask(f.store, 't1', f.clock()).usage).toMatchObject({ partial_tokens: 130, input_total: { observed_events: 2 } });
+ } finally { f.cleanup(); }
+});
+
+test('Codex zero present at baseline stays excluded across redundant later notifications and restart', () => {
+ const f = collectionFixture('codex');
+ try {
+  f.life.start('t1'); const zero = f.turn(-2, -1, 0); f.rows(...zero); f.collector.tick('t1');
+  f.rows(...zero, ...f.turn(1, 2, 0, 'later')); f.set(3); f.collector.tick('t1');
+  new Collector(f.store, f.clock, f.read).tick('t1');
+  expect(aggregateTask(f.store, 't1', f.clock()).usage).toMatchObject({ status: 'missing', partial_tokens: null });
+ } finally { f.cleanup(); }
+});
+
+test.each(['adjacent', 'separated'] as const)('Claude %s exact replay retains original source attribution and partial report', replay => {
+ const f = collectionFixture('claude_code');
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  const first = f.turn(1, 2, 1, 'first');
+  f.rows(...first); f.set(2); f.collector.tick('t1');
+  const rows = [...first, ...(replay === 'separated' ? [f.origin(3, 'next')] : []), ...f.usage(2, 1, 'first')];
+  f.rows(...rows); f.set(4); f.collector.tick('t1');
+  expect(f.store.all("SELECT reason FROM observations WHERE status='error'")).toEqual([]);
+  expect(aggregateTask(f.store, 't1', f.clock()).usage).toMatchObject({ partial_tokens: 130, input_total: { observed_events: 1 } });
+  expect(parseSnapshot(jsonLines([f.header(), ...rows]), { sessionId: 's1', projectRoot: f.root, product: 'claude_code', version: '2.1.283' }).records[0]?.turnStartedAt).toBe(millis(1));
+ } finally { f.cleanup(); }
+});
+
+test('Claude separated replay cannot rebind a pre-baseline usage or Bash invocation to an eligible prompt', () => {
+ const f = collectionFixture('claude_code');
+ try {
+  f.life.start('t1'); const before = [f.origin(-2), ...f.invocation(-1)]; f.rows(...before); f.collector.tick('t1');
+  f.rows(...before, f.origin(1, 'new'), ...f.invocation(-1), f.completion(-1, 2)); f.set(3); f.collector.tick('t1');
+  expect(f.store.all("SELECT reason FROM observations WHERE status='error'")).toEqual([]);
+  expect(f.store.eventCount()).toBe(0);
+ } finally { f.cleanup(); }
+});
+
+test.each(['identity', 'truncated', 'rewritten', 'clock', 'fingerprint', 'json', 'conflict', 'read'] as const)('collector returns bounded %s diagnostics while keeping conservative errors', fault => {
+ const f = collectionFixture('claude_code'); let failRead = false;
+ const collector = new Collector(f.store, f.clock, path => { if(failRead)throw new Error('PRIVATE/path/prompt'); return f.read(path); });
+ const categories={identity:'identity_changed',truncated:'source_truncated',rewritten:'same_size_modified',clock:'clock_regressed',fingerprint:'record_changed',json:'invalid_json',conflict:'record_conflict',read:'read_failed'};
+ try {
+  f.life.start('t1'); collector.tick('t1');
+  const first=f.turn(1,2,1,'first'); f.rows(...first); f.set(3); collector.tick('t1');
+  const valid=jsonLines([f.header(),...first]);
+  if(fault==='identity')f.replace(valid,{identity:'other'});
+  if(fault==='truncated')f.rows();
+  if(fault==='rewritten')f.replace(valid,{modified:Buffer.byteLength(valid)+1});
+  if(fault==='fingerprint')f.replace(jsonLines([f.header(),...f.turn(1,4,1,'first')])+'\n');
+  if(fault==='json')f.replace(valid+'{PRIVATE\n');
+  if(fault==='conflict')f.rows(...first,...f.usage(4,1,'first'));
+  if(fault==='read')failRead=true;
+  f.set(fault==='clock'?2:5);
+  expect(collector.tick('t1')).toEqual([{session_id:'s1',at:f.clock(),category:categories[fault]}]);
+  expect(f.events()).toHaveLength(1);
+  expect(f.store.all('SELECT checkpoint FROM cursors')).toEqual([]);
+  expect(aggregateTask(f.store,'t1',f.clock()).usage.reasons).toContain('source_error');
+  expect(JSON.stringify(f.state())).not.toContain('PRIVATE');
+ } finally { f.cleanup(); }
+});
+
+test.each(['adjacent', 'separated', 'next-snapshot'] as const)('Claude rejects recognized tool identity revisions in %s replay', layout => {
+ const f=collectionFixture('claude_code');
+ try {
+  f.life.start('t1'); f.collector.tick('t1');
+  const call=f.invocation(2,'call1')[0] as {message:{id:string;content:{id:string;name:string}[]}};
+  const changed=structuredClone(call);changed.message.content[0]!.id='call2';
+  const prefix=[f.origin(1),call];f.rows(...prefix);f.set(2);f.collector.tick('t1');
+  const rows=layout==='next-snapshot'?[f.origin(1),changed]:[...prefix,...(layout==='separated'?[f.origin(3,'next')]:[]),changed];
+  f.rows(...rows,f.completion(2,4,'call1'),f.completion(2,5,'call2'));f.set(6);
+  expect(f.collector.tick('t1')).toEqual([{session_id:'s1',at:f.clock(),category:layout==='next-snapshot'?'record_changed':'record_conflict'}]);
+  expect(f.events('tool')).toHaveLength(0);
  } finally { f.cleanup(); }
 });

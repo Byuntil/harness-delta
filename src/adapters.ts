@@ -1,10 +1,11 @@
+import { SourceFailure } from './source-errors.js';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { addTokens, IdSchema, ModelSchema, TimestampSchema, TokenSchema, type Event, type Reading } from './contracts.js';
 
 export interface SourceScope { sessionId: string; projectRoot: string; product: 'codex' | 'claude_code'; version: string }
-export interface SourceRecord { key: string; at: string; turnStartedAt: string | null; payload: Event['payload'] }
+export interface SourceRecord { key: string; at: string; turnStartedAt: string | null; toolCallIds?: string[]; payload: Event['payload'] }
 export interface Snapshot { records: SourceRecord[]; counters: number[] | null; counterAt: string | null; model: string | null; reasons: string[]; blocked: boolean }
 const canonicalPath = (path:string):string => { try { return realpathSync(path); } catch { return resolve(path); } };
 type ObjectValue = Record<string, unknown>;
@@ -34,13 +35,13 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
   const records = new Map<string, SourceRecord>(); let identified = false; let turnStartedAt: string | null = null; const bashIds = new Map<string,string|null>(); let currentTurnId: string | null = null; let turnOpen=false;
   const add = (record: SourceRecord) => {
     const old = records.get(record.key);
-    if (old && JSON.stringify(old) !== JSON.stringify(record)) throw new Error('source_error');
+    if (old && JSON.stringify(old) !== JSON.stringify(record)) throw new SourceFailure('record_conflict');
     records.set(record.key,record);
   };
   const lines = text.slice(0,text.lastIndexOf('\n')+1).split('\n').filter(Boolean);
   for (const line of lines) {
     let row: ObjectValue;
-    try { row=object(JSON.parse(line)); } catch { throw new Error('source_error'); }
+    try { row=object(JSON.parse(line)); } catch { throw new SourceFailure('invalid_json'); }
     const payload=object(row.payload);
     if (scope.product === 'codex') {
       if(!['session_meta','event_msg','response_item','world_state','turn_context','token_usage_record','compacted'].includes(String(row.type)))result.blocked=true;
@@ -71,7 +72,9 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
         const counters=['input_tokens','cached_input_tokens','output_tokens','reasoning_output_tokens'].map(k=>count(usage[k]));
         if (result.counters && counters.some((v,i)=>v < result.counters![i]!)) result.blocked=true;
         const previous=result.counters ?? [0,0,0,0];
-        if (!result.blocked && result.model && counters.some((v,i)=>v !== previous[i])) {
+        // A first explicit vector is evidence even at zero. Subsequent equal
+        // cumulative notifications have no new observation identity.
+        if (!result.blocked && result.model && (!result.counters || counters.some((v,i)=>v !== previous[i]))) {
           const deltas=counters.map((v,i)=>v-previous[i]!);
           add({key:metadataKey(scope.sessionId,'usage',...counters.map(String)),at:timestamp(row.timestamp),turnStartedAt,
             payload:usagePayload(scope,deltas,result.model,'sequential')});
@@ -103,12 +106,21 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
       if (row.type === 'assistant') {
         if (row.sessionId !== scope.sessionId) throw new Error('scope_mismatch');
         const message=object(row.message); const usage=object(message.usage);
-        for (const value of array(message.content)) { const block=object(value); if (block.type==='tool_use' && block.name==='Bash') bashIds.set(id(block.id),turnStartedAt); }
+        const callId=id(message.id);
+        const key=metadataKey(scope.sessionId,'message',callId);
+        // Replayed messages keep their original origin, including an unknown one.
+        // Payload and timestamp still pass through add()'s conflict check.
+        const origin=records.has(key)?records.get(key)!.turnStartedAt:turnStartedAt;
+        // Retain only recognized invocation IDs so revisions cannot invent tools.
+        // Including this metadata in the record also protects cross-poll fingerprints.
+        const toolCallIds=[...new Set(array(message.content).flatMap(value=>{
+          const block=object(value);return block.type==='tool_use' && block.name==='Bash'?[id(block.id)]:[];
+        }))].sort();
         const input=addTokens([count(usage.input_tokens),count(usage.cache_creation_input_tokens),count(usage.cache_read_input_tokens)]);
         const model=ModelSchema.safeParse(message.model); if (!model.success) throw new Error('unsupported');
         const counters=[input,count(usage.cache_read_input_tokens),count(usage.output_tokens),0];
-        const callId=id(message.id);
-        add({key:metadataKey(scope.sessionId,'message',callId),at:timestamp(row.timestamp),turnStartedAt,payload:usagePayload(scope,counters,model.data,'sequential')});
+        add({key,at:timestamp(row.timestamp),turnStartedAt:origin,toolCallIds,payload:usagePayload(scope,counters,model.data,'sequential')});
+        for(const toolId of toolCallIds)if(!bashIds.has(toolId))bashIds.set(toolId,origin);
       }
       if (row.type === 'user' && row.toolUseResult !== undefined) {
         const toolResult=object(row.toolUseResult);

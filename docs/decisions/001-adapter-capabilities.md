@@ -127,3 +127,28 @@ See `tests/adapters.test.ts`, `tests/collection.test.ts`, and
 `tests/cli-integration.test.ts` for independently authored synthetic fixtures and
 failure/boundary behavior. Runtime tests and live probes complement each other;
 neither establishes untested app or descendant parity.
+
+## Fidelity and availability follow-up
+
+Synthetic regressions preserve the first explicit Codex cumulative vector even
+when all counters are zero. Its identity is the session and cumulative vector;
+repeated equal vectors, including later timestamps or turns, do not establish new
+observations. No row means missing, not zero. Startup and pause/restart baselines
+still exclude pre-existing and in-flight observations. This does not establish
+per-turn zero usage from unchanged counters.
+
+Claude exact normalized message replay retains the first message's originating
+prompt, including an unknown origin, across intervening prompts. Its timestamp,
+model, usage and recognized Bash invocation IDs must still agree; conflicting
+revisions remain errors, including metadata changes between collector polls. Replayed
+Bash invocation metadata must not move an earlier invocation to a later prompt.
+These are synthetic fidelity guarantees, not evidence that every replay layout
+occurs in the pinned product.
+
+A subsequent bounded Claude initial/resume probe reproduced a collection failure
+classified as `same_size_modified`: size was unchanged while modification time
+changed between snapshots. It did not establish whether source contents changed
+or why the product modified the file. The resumed interval remained excluded;
+reliable live resumed collection is unresolved. The diagnostic categories in the
+[observation contract](003-local-observation-contract.md) distinguish conditions
+without relaxing source stability or completeness rules.

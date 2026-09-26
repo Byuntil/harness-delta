@@ -52,3 +52,14 @@ test('counter decreases and unknown top-level records make the source unsupporte
  expect(parseSnapshot(text(header,usage(100),usage(90)),scope).blocked).toBe(true);
  expect(parseSnapshot(text(header,{type:'future_private_record',payload:{secret:'PRIVATE'}}),scope).blocked).toBe(true);
 });
+
+test.each(['usage', 'timestamp', 'model'] as const)('Claude rejects a genuine %s revision after an intervening prompt', revision => {
+ const common={sessionId:'s1',cwd:'/synthetic',version:'2.1.283'};
+ const prompt={...common,type:'user',promptId:'p1',timestamp:'2026-01-01T00:00:01Z',message:{content:[]}};
+ const row={...common,type:'assistant',timestamp:'2026-01-01T00:00:02Z',message:{id:'m1',model:'synthetic',content:[],usage:{input_tokens:1,cache_creation_input_tokens:0,cache_read_input_tokens:0,output_tokens:1}}};
+ const changed=structuredClone(row);
+ if(revision==='usage')changed.message.usage.output_tokens=2;
+ if(revision==='timestamp')changed.timestamp='2026-01-01T00:00:04Z';
+ if(revision==='model')changed.message.model='other';
+ expect(()=>parseSnapshot(text(prompt,row,{...prompt,promptId:'p2',timestamp:'2026-01-01T00:00:03Z'},changed),{...scope,product:'claude_code',version:'2.1.283'})).toThrow(/^source_error$/);
+});

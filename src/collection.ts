@@ -1,3 +1,4 @@
+import { SourceFailure, sourceCategory, type SourceDiagnosticCategory } from './source-errors.js';
 import { constants, closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { parseSnapshot, metadataKey, type SourceScope, type Snapshot } from './adapters.js';
@@ -13,21 +14,24 @@ export const readSource: SourceReader = path => {
   const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
   try {
     const before=fstatSync(fd);
-    if (!before.isFile() || before.size > MAX_SOURCE_BYTES) throw new Error('unsupported');
+    if (!before.isFile() || before.size > MAX_SOURCE_BYTES) throw new SourceFailure('unsupported_source','unsupported');
     const buffer=Buffer.alloc(before.size);let offset=0;
-    while(offset<buffer.length){const length=readSync(fd,buffer,offset,buffer.length-offset,offset);if(!length)throw new Error('source_error');offset+=length;}
+    while(offset<buffer.length){const length=readSync(fd,buffer,offset,buffer.length-offset,offset);if(!length)throw new SourceFailure('short_read');offset+=length;}
     const after=fstatSync(fd);
-    if(before.size!==after.size || before.mtimeMs!==after.mtimeMs)throw new Error('source_error');
+    if(before.size!==after.size || before.mtimeMs!==after.mtimeMs)throw new SourceFailure('unstable_read');
     return {text:buffer.toString('utf8'),identity:`${after.dev}:${after.ino}`,size:after.size,modified:after.mtimeMs};
   } finally {closeSync(fd);}
 };
 interface LinkedSource {id:string;project_id:string;task_id:string;source_path:string;product:'codex'|'claude_code';product_version:string;local_root:string;generation:number;metadata:string}
 interface MemoryCheckpoint {generation:number;since:string;lastAt:string;identity:string;size:number;modified:number;fingerprints:Record<string,string>;settledKeys:string[]}
 
+export interface CollectionDiagnostic { session_id: string; at: string; category: SourceDiagnosticCategory }
+
 export class Collector {
   private checkpoints=new Map<string,MemoryCheckpoint>();
   constructor(private readonly store:Store,private readonly clock:Clock=utcNow,private readonly read:SourceReader=readSource){}
-  tick(taskId:string):void {
+  tick(taskId:string):CollectionDiagnostic[] {
+    const diagnostics:CollectionDiagnostic[]=[];
     const pending=new Map(this.checkpoints);
     try {
       this.store.transaction(()=>{
@@ -45,16 +49,20 @@ export class Collector {
           const scope:SourceScope={sessionId:link.id,projectRoot:link.local_root,product:link.product,version:link.product_version};
           let previous=pending.get(link.id);
           if(previous && previous.generation!==link.generation)previous=undefined;
+          let stage:SourceDiagnosticCategory='read_failed';
           try {
-            bytes=this.read(link.source_path);snapshot=parseSnapshot(bytes.text,scope);
-            if(previous && (bytes.identity!==previous.identity || bytes.size<previous.size ||
-                bytes.size===previous.size && bytes.modified!==previous.modified))throw new Error('source_error');
-            if(previous && now<previous.lastAt)throw new Error('source_error');
+            bytes=this.read(link.source_path);
+            if(previous && bytes.identity!==previous.identity)throw new SourceFailure('identity_changed');
+            if(previous && bytes.size<previous.size)throw new SourceFailure('source_truncated');
+            if(previous && bytes.size===previous.size && bytes.modified!==previous.modified)throw new SourceFailure('same_size_modified');
+            if(previous && now<previous.lastAt)throw new SourceFailure('clock_regressed');
+            stage='parse_failed';snapshot=parseSnapshot(bytes.text,scope);
             const metadata=JSON.parse(link.metadata) as {model:string;product:string};
             if(metadata.product!==link.product || snapshot.model && snapshot.model!==metadata.model ||
-              snapshot.records.some(r=>r.payload.kind==='usage' && r.payload.model!==metadata.model))throw new Error('unsupported');
+              snapshot.records.some(r=>r.payload.kind==='usage' && r.payload.model!==metadata.model))throw new SourceFailure('model_mismatch','unsupported');
           }catch(error){
             const reason=error instanceof Error && ['unsupported','scope_mismatch'].includes(error.message)?error.message:'source_error';
+            diagnostics.push({session_id:link.id,at:now,category:sourceCategory(error,reason==='scope_mismatch'?'scope_mismatch':reason==='unsupported'?'unsupported_source':stage)});
             this.observe(taskId,now,now,'error',reason);pending.delete(link.id);
             this.store.execute('DELETE FROM cursors WHERE session_id=?',[link.id]);continue;
           }
@@ -62,7 +70,9 @@ export class Collector {
           if(!current || current.state!=='active' || current.generation!==link.generation){pending.delete(link.id);continue;}
           const fingerprints=Object.fromEntries(snapshot.records.map(row=>[row.key,metadataKey(JSON.stringify(row))]));
           if(previous && Object.entries(previous.fingerprints).some(([key,value])=>fingerprints[key]!==value)){
-            this.observe(taskId,now,now,'error','source_error');pending.delete(link.id);continue;
+            diagnostics.push({session_id:link.id,at:now,category:'record_changed'});
+            this.observe(taskId,now,now,'error','source_error');pending.delete(link.id);
+            this.store.execute('DELETE FROM cursors WHERE session_id=?',[link.id]);continue;
           }
           // Baseline and blocked records are permanently excluded from this
           // interval. Otherwise fingerprint future records without settling them.
@@ -88,6 +98,7 @@ export class Collector {
         }
       });
       this.checkpoints=pending;
+      return diagnostics;
     }catch{throw new Error('collection_error');}
   }
   private observe(taskId:string,start:string,end:string,status:string,reason:string):void{
