@@ -97,3 +97,40 @@ test('typed usage survives reopen and replays without duplication', () => {
     finally { reopened.close(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('an existing version-one store upgrades without changing its events', async () => {
+  const { readFileSync } = await import('node:fs');
+  const root = mkdtempSync(join(tmpdir(), 'migration-test-')); const file = join(root, 'local.db');
+  try {
+    const previous = new Database(file);
+    previous.exec(readFileSync(new URL('../src/migrations/001_initial.sql', import.meta.url), 'utf8'));
+    previous.pragma('user_version = 1');
+    previous.prepare('INSERT INTO projects(id) VALUES (?)').run('p1');
+    previous.prepare('INSERT INTO tasks(id,project_id) VALUES (?,?)').run('t1','p1');
+    previous.prepare('INSERT INTO sessions(id,project_id,task_id) VALUES (?,?,?)').run('s1','p1','t1');
+    previous.prepare('INSERT INTO events(id,project_id,task_id,session_id,source_key,occurred_at,payload) VALUES (?,?,?,?,?,?,?)')
+      .run(event.id,event.project_id,event.task_id,event.session_id,event.source_key,event.occurred_at,JSON.stringify(event.payload));
+    previous.close();
+    const store = new Store(file);
+    try { expect(store.putEvent(event)).toBe(false); expect(store.eventCount()).toBe(1);
+      expect(store.get<{generation:number}>('SELECT generation FROM tasks WHERE id = ?',['t1'])?.generation).toBe(0);
+    } finally {store.close();}
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
+
+ test('failed upgrade rolls back version and every partial schema change', async () => {
+  const { readFileSync } = await import('node:fs');
+  const root = mkdtempSync(join(tmpdir(), 'migration-failure-')); const file = join(root, 'local.db');
+  try {
+    const previous = new Database(file);
+    previous.exec(readFileSync(new URL('../src/migrations/001_initial.sql', import.meta.url), 'utf8'));
+    previous.pragma('user_version = 1');
+    previous.exec('CREATE TABLE active_intervals(id TEXT)'); previous.close();
+    expect(() => new Store(file)).toThrow();
+    const reopened = new Database(file);
+    try {
+      expect(reopened.pragma('user_version', { simple: true })).toBe(1);
+      expect(reopened.pragma('table_info(tasks)')).not.toEqual(expect.arrayContaining([expect.objectContaining({name:'generation'})]));
+    } finally { reopened.close(); }
+  } finally { rmSync(root, {recursive:true, force:true}); }
+});

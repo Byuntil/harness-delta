@@ -12,14 +12,18 @@ export class Store {
     this.db = new Database(path);
     try {
       const version = this.db.pragma('user_version', { simple: true });
-      if (version !== 0 && version !== 1) throw new Error('unsupported_schema_version');
-      this.db.pragma('foreign_keys = ON');
-      if (version === 0) {
-        this.db.transaction(() => {
-          this.db.exec(readFileSync(new URL('./migrations/001_initial.sql', import.meta.url), 'utf8'));
-          this.db.pragma('user_version = 1');
-        })();
+      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql'];
+      if (typeof version !== 'number' || !Number.isInteger(version) || version < 0 || version > migrations.length) {
+        throw new Error('unsupported_schema_version');
       }
+      this.db.pragma('foreign_keys = ON');
+      this.db.pragma('busy_timeout = 5000');
+      this.db.transaction(() => {
+        for (let index = version; index < migrations.length; index++) {
+          this.db.exec(readFileSync(new URL(`./migrations/${migrations[index]}`, import.meta.url), 'utf8'));
+          this.db.pragma(`user_version = ${index + 1}`);
+        }
+      })();
     } catch (error) {
       this.db.close();
       throw error;
@@ -29,6 +33,14 @@ export class Store {
   close(): void { this.db.close(); }
 
   execute(sql: string, params: unknown[]): void { this.db.prepare(sql).run(...params); }
+
+  all<T>(sql: string, params: unknown[] = []): T[] {
+    return this.db.prepare(sql).all(...params) as T[];
+  }
+
+  get<T>(sql: string, params: unknown[] = []): T | undefined {
+    return this.db.prepare(sql).get(...params) as T | undefined;
+  }
 
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
 

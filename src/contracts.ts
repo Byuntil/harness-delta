@@ -22,11 +22,18 @@ export const UsageSchema = z.strictObject({
   product: z.enum(['codex', 'claude_code', 'synthetic']),
   product_version: ProductVersionSchema, model: ModelSchema, epoch: IdSchema,
 });
+export const ToolSchema = z.strictObject({
+  kind: z.literal('tool'), call_id: IdSchema,
+  boundary: z.enum(['codex_command', 'claude_bash']),
+  execution: z.enum(['confirmed', 'unknown']),
+  outcome: z.enum(['completed', 'failed', 'denied', 'cancelled', 'validation_failed', 'unknown']),
+  category: z.literal('unclassified'),
+});
 export const EventSchema = z.strictObject({
   id: IdSchema, project_id: IdSchema, task_id: IdSchema, session_id: IdSchema,
   source_key: IdSchema, occurred_at: TimestampSchema,
   payload: z.discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('session_linked') }), UsageSchema,
+    z.strictObject({ kind: z.literal('session_linked') }), UsageSchema, ToolSchema,
   ]),
 });
 export type Event = z.infer<typeof EventSchema>;

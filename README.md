@@ -2,11 +2,12 @@
 
 Local metadata measurement and harness comparison for real development tasks.
 
-**Status: contracts and local storage foundation.** Strict metadata schemas and a
-transactional, versioned SQLite event store are implemented. The measurement CLI,
-product adapters, lifecycle, and reports are not implemented yet. Storage tests
-do not establish measurement capability; see the
-[adapter feasibility limits](docs/decisions/001-adapter-capabilities.md).
+**Status: local measurement preview with partial CLI observations.** Task lifecycle,
+explicit session linking, foreground collection, deletion/retention, and JSON/Markdown
+reports are implemented. Validated sequential CLI counters and limited command
+executions remain partial; complete task totals and unverified metrics stay null.
+See the [local runbook](docs/runbooks/local-measurement.md) and
+[capability limits](docs/decisions/001-adapter-capabilities.md).
 
 ## Development
 
@@ -43,7 +44,7 @@ your terminal or Git client before committing. See the
 
 SQL migrations live under `src/migrations` and are copied to `dist/migrations`.
 `src/index.ts` exports `Store` and strict event, reading, shared task/outcome, and
-monetary schemas. There is no `hm` executable yet.
+monetary schemas. The local `hm` executable is also available as `node dist/cli.js`.
 
 `Store.putEvent` inserts once per source key, returns false for identical replay,
 and throws `event_conflict` for a reused ID or source with different data. A

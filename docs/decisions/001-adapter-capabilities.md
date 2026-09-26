@@ -1,6 +1,6 @@
 # Adapter feasibility and collection boundaries
 
-Status: partial feasibility evidence, not a supported measurement adapter.
+Status: implemented partial sequential CLI adapters; no complete measurement claim.
 Checked on macOS arm64 on 2026-09-26. Requirements: R01, R02, R04, R05.
 
 ## Evidence and limits
@@ -9,14 +9,15 @@ Two newly created, explicitly scoped synthetic sessions were run, then resumed
 once by exact ID. Both initial and resumed invocations exited successfully.
 Only metadata was retained; fixtures below are independently authored synthetic
 examples, not copies of sessions. No existing personal session was opened.
-The probes performed no tool calls. This is not compaction, child-agent, rotation,
+The initial probes performed no tool calls. Additional dedicated synthetic sessions
+ran one `printf READY` Bash/command operation per product. This is not live compaction, child-agent, rotation,
 concurrent-turn, interrupted-turn, or complete observation validation.
 
 | Source | Version observed | Status and blocker |
 | --- | --- | --- |
-| Codex CLI exec JSON and rollout JSONL | 0.156.1 | Candidate for explicitly linked, sequential sessions; complete measurement blocked by unverified exceptional boundaries and child accounting |
+| Codex CLI exec JSON and rollout JSONL | 0.156.1 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by unverified exceptional boundaries and child accounting |
 | Codex desktop | Not probed | Unsupported until a dedicated app session establishes identity, version, and counter behavior; CLI evidence does not establish app parity |
-| Claude Code print JSON and transcript JSONL | 2.1.283 | Candidate for explicitly linked, sequential sessions; complete measurement blocked by message revisions, exceptional boundaries, and child accounting |
+| Claude Code print JSON and transcript JSONL | 2.1.283 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by message revisions, exceptional boundaries, and child accounting |
 
 ## Fields
 
@@ -74,8 +75,9 @@ measurement fields. Permission failures must yield a fixed error code.
 Product streams and transcripts contain raw content. Reading an authorized source
 may encounter that content in memory; extract only allowlisted metadata, never
 persist raw lines, diagnostics, hashes of content, or arbitrary error messages.
-The existing probe does not establish a production pre-read authorization mechanism.
-That boundary remains a prerequisite for the collection implementation.
+The collector now resolves registered/active/linked mappings before bounded source
+reads under a SQLite writer lock. Synthetic tests cover that boundary separately
+from these feasibility probes. No raw source hashes or raw exception messages persist.
 
 ## Boundary decisions and remaining validation
 
@@ -84,15 +86,44 @@ That boundary remains a prerequisite for the collection implementation.
   a negative delta, observed zero, or automatically complete total.
 - Rotation/truncation: unverified; identity changes or size decreases must invalidate a cursor. Ordinary append
   growth must not invalidate it; same-size replacement also needs validation.
-- Pause/restart: not exercised against a measurement CLI, which does not yet exist.
-  A new baseline is required; no automatic backfill of the excluded interval.
+- Pause/restart: synthetic collector and CLI tests verify new baselines and excluded
+  in-flight turns; live pause/reset/rotation semantics remain unverified.
 - Parent/child: unverified. Do not auto-link descendants or add parent/child totals.
 - Unknown versions/formats, partial writes, conflicting revisions: unsupported until
   covered by parser and boundary tests; preserve a reason, never manufacture zero.
-- Source cursor candidate: file identity, byte offset at a complete record, epoch,
-  and baseline. This is a design candidate, not an implemented public contract.
+- Current bounded snapshot reader: local file identity, size, modification time,
+  generation, baseline and allowlisted metadata fingerprints. Incomplete final lines
+  wait for completion. Every new collector ignores durable checkpoints for resumption.
 
 The fixtures encode cumulative/individual counters, replay, reset candidates,
 unverified child identity, and unknown format. Their expected handling is described
 in [the fixture notes](../../tests/fixtures/adapters/README.md). They prove no live
 support. The collection implementation must not advertise complete measurement based on these probes.
+
+
+## Implemented diagnostic boundary
+
+Additional authorized synthetic tool sessions passed the implemented parsers:
+each yielded two usage records and one confirmed execution with a known originating
+turn. Codex normalized input/output sums were 30122/47; Claude sums were 7233/79.
+These are probe observations, not product benchmarks or complete task totals.
+
+- Codex: `event_msg.item_completed` / `CommandExecution`, matching `turn_id`,
+  `started_at_ms`, numeric exit code. Count the leaf command once; do not also count
+  `response_item.custom_tool_call` wrappers. Exit zero confirms completion; nonzero
+  exit does not by itself prove a broken tool, and remains an unknown outcome.
+- Claude: a scoped assistant `Bash` tool-use ID matched to a scoped user tool-result
+  with the observed Bash result shape, `is_error: false`, and `interrupted: false`.
+  Completion keeps the invoking prompt's origin across later prompts. Error,
+  interruption, permission denial and validation rejection remain ambiguous.
+- Only these command/Bash subsets are measured. General external tool counts and
+  execution-failure totals are unavailable. Search/read classification and actual
+  first edit/test/oracle milestones are deferred; command text is never classified.
+- Unknown topology/compaction/reset or overlapping Codex turns block the batch.
+  Changing project identity is rejected. Missing topology evidence always prevents
+  complete totals even when no explicit boundary was seen.
+
+See `tests/adapters.test.ts`, `tests/collection.test.ts`, and
+`tests/cli-integration.test.ts` for independently authored synthetic fixtures and
+failure/boundary behavior. Runtime tests and live probes complement each other;
+neither establishes untested app or descendant parity.
