@@ -22,7 +22,7 @@ export const readSource: SourceReader = path => {
   } finally {closeSync(fd);}
 };
 interface LinkedSource {id:string;project_id:string;task_id:string;source_path:string;product:'codex'|'claude_code';product_version:string;local_root:string;generation:number;metadata:string}
-interface MemoryCheckpoint {generation:number;since:string;lastAt:string;identity:string;size:number;modified:number;seen:Record<string,string>}
+interface MemoryCheckpoint {generation:number;since:string;lastAt:string;identity:string;size:number;modified:number;fingerprints:Record<string,string>;settledKeys:string[]}
 
 export class Collector {
   private checkpoints=new Map<string,MemoryCheckpoint>();
@@ -60,19 +60,25 @@ export class Collector {
           }
           const current=this.store.get<{state:string;generation:number}>('SELECT state,generation FROM tasks WHERE id=?',[taskId]);
           if(!current || current.state!=='active' || current.generation!==link.generation){pending.delete(link.id);continue;}
-          const keys=Object.fromEntries(snapshot.records.map(row=>[row.key,metadataKey(JSON.stringify(row))]));
-          if(previous && Object.entries(previous.seen).some(([key,value])=>keys[key]!==value)){
+          const fingerprints=Object.fromEntries(snapshot.records.map(row=>[row.key,metadataKey(JSON.stringify(row))]));
+          if(previous && Object.entries(previous.fingerprints).some(([key,value])=>fingerprints[key]!==value)){
             this.observe(taskId,now,now,'error','source_error');pending.delete(link.id);continue;
           }
+          // Baseline and blocked records are permanently excluded from this
+          // interval. Otherwise fingerprint future records without settling them.
+          // Copy nested state so a failed transaction cannot consume eligibility.
+          const settledKeys=new Set(previous && !snapshot.blocked?previous.settledKeys:Object.keys(fingerprints));
           if(previous && !snapshot.blocked){
-            const seen=new Set(Object.keys(previous.seen));
             for(const record of snapshot.records){
-              if(seen.has(record.key) || !record.turnStartedAt || record.turnStartedAt<=previous.since || record.at>now)continue;
+              if(settledKeys.has(record.key))continue;
+              if(!record.turnStartedAt || record.turnStartedAt<=previous.since){settledKeys.add(record.key);continue;}
+              if(record.at>now)continue;
               const key=metadataKey(link.id,record.key);
               this.store.putEvent({id:key,source_key:key,project_id:link.project_id,task_id:link.task_id,session_id:link.id,occurred_at:record.at,payload:record.payload});
+              settledKeys.add(record.key);
             }
           }
-          const checkpoint:MemoryCheckpoint={generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,size:bytes.size,modified:bytes.modified,seen:keys};
+          const checkpoint:MemoryCheckpoint={generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,size:bytes.size,modified:bytes.modified,fingerprints,settledKeys:[...settledKeys]};
           pending.set(link.id,checkpoint);
           // Persist metadata-only position for diagnostics. A new Collector never
           // resumes it: every process/run establishes its own current-tail baseline.
