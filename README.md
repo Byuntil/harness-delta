@@ -6,7 +6,8 @@ Local metadata measurement and harness comparison for real development tasks.
 explicit session linking, foreground collection, deletion/retention, and JSON/Markdown
 reports are implemented. Validated sequential CLI counters and limited command
 executions remain partial; complete task totals and unverified metrics stay null.
-See the [local runbook](docs/runbooks/local-measurement.md) and
+See the [local runbook](docs/runbooks/local-measurement.md)
+([한국어 사용 안내](docs/runbooks/local-measurement.ko.md)) and
 [capability limits](docs/decisions/001-adapter-capabilities.md).
 
 ## Development

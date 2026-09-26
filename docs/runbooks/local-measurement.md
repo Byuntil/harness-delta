@@ -1,5 +1,7 @@
 # Local measurement
 
+[한국어](local-measurement.ko.md)
+
 Requires Node.js 24. Build with `npm ci && npm run build`; use `node dist/cli.js`
 from this checkout, or `hm` from an installed local package. Installation does
 not collect anything. This preview produces **partial observations**, not complete
