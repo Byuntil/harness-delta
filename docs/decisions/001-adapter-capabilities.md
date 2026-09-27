@@ -1,6 +1,8 @@
 # Adapter feasibility and collection boundaries
 
 Status: implemented partial sequential CLI adapters; no complete measurement claim.
+The [offline coverage evidence policy](004-complete-measurement-readiness.md)
+is synthetic-only and does not enable complete totals or expand adapter support.
 Checked on macOS arm64 on 2026-09-26. Requirements: R01, R02, R04, R05.
 
 ## Evidence and limits
