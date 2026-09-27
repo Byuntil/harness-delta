@@ -76,3 +76,7 @@ supplying a different profile ID. See the existing
 [observation contract](003-local-observation-contract.md).
 Randomized comparisons still require the independent R09/R10 gates; synthetic
 eligibility does not justify token savings, API cost or subscription-limit claims.
+
+The [internal managed lifecycle](005-managed-observation.md) now supplies synthetic
+run evidence with scoped submission, drain, revocation and durable storage tests.
+It leaves real producer accounting facts unknown and does not enable complete totals.
