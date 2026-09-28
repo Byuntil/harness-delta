@@ -7,8 +7,10 @@ synthetic-only receiver and its storage (migration 005) now exist; see
 [Offline receiver](#offline-receiver-follow-up-2). It launches no product
 process. There is no CLI, report-schema change or supported product version yet.
 The offline part of Follow-up 3 (launch-settings builders and a documented
-precedence analysis) exists; its live check has not been run. See
-[Launch settings](#launch-settings-follow-up-3).
+precedence analysis) exists. See [Launch settings](#launch-settings-follow-up-3).
+The approved live checks of Follow-ups 3 and 4 have run; see
+[Live checks](#live-checks-follow-ups-3-and-4). They are bounded observations,
+not a support claim; user-settings precedence remains open.
 Requirements: [R01, R02, R04, R05, R07, R08, R09 and R10](../requirements.md).
 R11 tool diagnostics are out of scope here. Documentation checked 2026-09-28.
 Existing [adapter evidence](001-adapter-capabilities.md), the
@@ -105,7 +107,8 @@ Sources: [advanced configuration](https://learn.chatgpt.com/docs/config-file/con
 
 Adopt Claude Code's native OTel export, sent to a local harness-delta receiver,
 as the primary usage source for sessions that the measurement CLI launches.
-Codex OTel is a candidate under the same design, pending Follow-up 3 and 4.
+Codex OTel is a candidate under the same design, pending the open questions in
+[Live checks](#live-checks-follow-ups-3-and-4).
 
 **Status of the other sources:**
 - The existing adapters remain a separate cross-check source.
@@ -290,7 +293,7 @@ never across products, because token semantics differ.
 **Easier:**
 - Interactive sessions launched by the measurement CLI become measurable.
 - Claude subagent and compaction requests are attributable through a mapped
-  query-source category.
+  query-source category, once a version's table maps their observed values.
 - Failed requests expose their attempt count.
 - Collection no longer depends on parsing product output streams.
 
@@ -331,7 +334,8 @@ An internal, synthetic-only implementation exists in `src/otel-receiver.ts`,
 has no CLI, launches no product process and enables no telemetry. No real
 product version is supported: every accepted version needs an injected profile
 that supplies the session-start sequence value and the query-source table.
-Follow-up 4 must validate that profile first.
+The values decided for Claude Code 2.1.283 are recorded under
+[Live checks](#live-checks-follow-ups-3-and-4); no profile ships in code yet.
 
 **Transport:**
 - One receiver per process, on `127.0.0.1` with an ephemeral port.
@@ -408,7 +412,8 @@ Tests: `tests/otel-projection.test.ts` and `tests/otel-receiver.test.ts`.
 An internal builder in `src/otel-launch-settings.ts` produces the per-invocation
 settings for one launched Claude Code process. Like the receiver, it is not
 exported from the package entry point, has no CLI and launches no process.
-Documentation checked 2026-09-28; no product process has been run.
+Documentation checked 2026-09-28; live results are in
+[Live checks](#live-checks-follow-ups-3-and-4).
 
 **Claude settings.** The builder writes `{"env": {...}}` to a 0600 file in a
 private 0700 directory and returns `--settings <path>` as the only arguments,
@@ -475,21 +480,26 @@ that does not echo the input.
   variables come from the OpenTelemetry exporter specification; the Claude Code
   documentation does not list them.
 
-**Needs a live check** before any support claim:
-- that `--settings` values win over the same variables in user settings and the
-  shell for this product version;
-- that `0` disables `OTEL_LOG_RAW_API_BODIES`, `OTEL_LOG_MANAGED_SETTINGS` and
-  the beta tracing flags (only enabling values are documented);
-- that the exporter posts to `/v1/logs` and the first batch starts with
-  `managed_settings_resolved` at the profile's sequence value, carrying
-  `app.version`, `session.id` and `harness_delta.process_id`;
-- that the generic and per-signal copies of the token header arrive as one
-  value; a duplicated header would fail authentication and the run would fail
-  closed;
-- an `otelHeadersHelper` in user settings, which `--settings` cannot remove,
-  adds its headers to exports and blocks every export when it fails;
-- whether nested processes see `CLAUDE_CODE_ENABLE_TELEMETRY`;
-- whether the `--settings` values appear in debug logs or session records.
+**Live-check items** (results in [Live checks](#live-checks-follow-ups-3-and-4)):
+- `--settings` values win over the same variables in the shell: observed for
+  2.1.283. Against user settings: not established (the check was inconclusive).
+- `0` for `OTEL_LOG_RAW_API_BODIES` and the beta tracing flags: no body event or
+  beta tracing export was observed with model requests. The defaults produce the
+  same result, so this does not show that `0` disables them.
+  `OTEL_LOG_MANAGED_SETTINGS`: not observable without managed settings.
+- The exporter posts to `/v1/logs`, and the first batch starts with
+  `managed_settings_resolved` at sequence 0, carrying `app.version`,
+  `session.id` and `harness_delta.process_id`: observed.
+- The generic and per-signal copies of the token header arrive as one value:
+  observed (no authentication failure).
+- An `otelHeadersHelper` in user settings, which `--settings` cannot remove,
+  adds its headers to exports and blocks every export when it fails: not tested.
+- Nested processes see `CLAUDE_CODE_ENABLE_TELEMETRY`: observed. They did not see
+  the checked exporter variables (`OTEL_EXPORTER_OTLP_HEADERS`,
+  `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_LOGS_HEADERS`).
+- The token did not appear in the debug log. Session records were not opened:
+  the interactive runs wrote them, and the model-request runs disabled session
+  persistence.
 
 **Codex overrides** ([configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
 [basics](https://learn.chatgpt.com/docs/config-file/config-basic),
@@ -507,7 +517,113 @@ that does not echo the input.
   receiver therefore cannot authenticate a Codex process, and Codex support
   stays blocked until an argv-free credential source is verified.
 - Whether an inline table replaces or merges configured exporter tables, which
-  could add configured headers or another exporter, and what Codex exports
-  without a turn need a live check.
+  could add configured headers or another exporter, is not established: the
+  observed user configuration configured no exporter. Codex exports logs even
+  without a turn.
 
 Tests: `tests/otel-launch-settings.test.ts`.
+
+## Live checks (Follow-ups 3 and 4)
+
+**Conditions:**
+- User-approved runs on 2026-09-28 and 2026-09-29, on macOS arm64, with Claude
+  Code 2.1.283 and codex-cli 0.156.1.
+- No global, user or project configuration was edited, and no workspace trust
+  prompt was answered.
+- Follow-up 3 submitted no prompt. Its runs started in an empty ignored
+  directory inside an already trusted checkout.
+- Follow-up 4 used a synthetic prompt and an empty directory outside any
+  repository. The Claude runs also used a throwaway store.
+- Only allowlisted data was recorded: counts, statuses, timings, byte counts,
+  attribute key names, token counts, redaction markers, value-type names, models
+  and raw `query_source` values.
+- Product output, headers and telemetry bodies were not retained. A Follow-up 3
+  debug log was deleted after its lines were counted.
+
+**Follow-up 3 (no model request):**
+- **Claude, interactive, shell layer.** The shell environment pointed every
+  exporter at a decoy listener. The decoy received nothing. The receiver
+  received two authenticated `/v1/logs` posts, and the process became ready.
+  Records 0 to 11 were contiguous. The first was `managed_settings_resolved`
+  (trigger `startup`, no sources) at sequence 0, with matching `app.version`,
+  session and process attribute. The token appeared in no debug log line.
+- **Claude, nested process.** A hook subprocess saw `CLAUDE_CODE_ENABLE_TELEMETRY`
+  and `BETA_TRACING_ENDPOINT`. It did not see the three checked
+  `OTEL_EXPORTER_OTLP_*` variables.
+- **Claude, user-settings layer.** Tested with a temporary configuration
+  directory. Inconclusive: the product did not reach telemetry start, and the
+  receiver failed closed.
+- **Codex, interactive.** With the token-free overrides pointing at a decoy, Codex
+  sent three `/v1/logs` JSON posts without any turn.
+
+**Follow-up 4, Claude (two runs):**
+- **Command:** `claude -p` with `--output-format json`, the per-invocation
+  `--settings` file, `--session-id`, `--no-session-persistence`,
+  `--model haiku`, `--max-turns 1` and no tools. Context was reduced: no MCP
+  servers, slash commands, CLAUDE.md, auto memory or Git instructions.
+- **Usage:** in both runs the single `api_request` event matched the result's
+  `usage` and `modelUsage` exactly (input, cache creation, cache read and
+  output). No auxiliary request occurred.
+  - Cache counts were zero in both runs, so cache-component semantics are
+    untested.
+- **Flush and loss:** each run exported one batch about 1.7 s after launch,
+  before the 5 s interval. The process exited about 2.6 s after launch. The
+  timing is consistent with a flush at shutdown. Nothing arrived after exit.
+  Sequences 0 to 6 were contiguous, and the process stayed ready.
+- **Content:** `user_prompt` carried `prompt` and `assistant_response` carried
+  `response`. The second run recorded both values as `<REDACTED>`; the first
+  recorded only the keys. No body event appeared. A separate change
+  ([#9](https://github.com/Byuntil/harness-delta/pull/9)) makes the receiver
+  fail closed on any other value.
+- **Query source:** the raw `query_source` of print-mode requests was `sdk`.
+- **Other attributes:** events also carry `user.email`, `user.id`,
+  `organization.id` and `terminal.type`. `api_request` also carries `cost_usd`,
+  `cost_usd_micros` and `ttft_ms`. Projection drops all of them.
+- **Other events:** `plugin_loaded` and `hook_registered` appeared although
+  user settings were excluded with `--setting-sources`.
+
+**Follow-up 4, Codex (two runs):**
+- **Command:** `codex exec --json --ephemeral --skip-git-repo-check
+  --sandbox read-only` with low reasoning effort and the token-free overrides.
+- **Listener:** exports went to a one-off, unauthenticated probe listener. It
+  kept only request metadata (path, content type, bytes and timing), event
+  names, attribute key names, redaction markers, token-count integers and their
+  value-type names. This is feasibility evidence, not R01
+  receiver behavior.
+- **Export:** log batches arrived at whole-second offsets from launch (1 to 6 s),
+  all before exit.
+- **Content:** `codex.user_prompt` carried `prompt` with the value `[REDACTED]`.
+- **Token counts:** they are on `codex.sse_event` with `event.kind`
+  `response.completed`. They were observed over the websocket transport.
+  - Input, output and `tool_token_count` arrive as strings; cached, cache-write
+    and reasoning counts arrive as integers.
+  - `tool_token_count` equalled input plus output.
+- **Two completions per turn:** each turn produced two `response.completed`
+  events.
+  - In the second run, one event had zero output, and the exec
+    `turn.completed` usage equalled the other event exactly.
+  - Summing the events would therefore exceed the exec usage by the zero-output
+    request's input.
+  - The first run recorded only cached, cache-write and reasoning values. Its
+    cached counts show the same shape.
+  - Which figure reflects usage is not documented.
+- **No sequence:** Codex records carry no `event.sequence`, so the sequence-gap
+  rule cannot detect loss for Codex.
+- **Version:** Codex updated itself to 0.158.0 after these runs, when an
+  interactive session started. The evidence applies to 0.156.1 only.
+
+**Decisions (user, 2026-09-29):**
+- The Claude Code 2.1.283 version profile uses session-start sequence 0.
+- Its query-source table maps only observed values, `sdk` to `main`.
+  Documented but unobserved values, such as `repl_main_thread` and `compact`,
+  map to `other` until observed.
+  - `sdk` was observed only without tools or subagents. If print-mode
+    compaction or subagent requests also report `sdk`, this table would count
+    them as `main`.
+- This profile is not a support claim, and no profile ships in code yet. Still
+  unobserved: interactive-mode usage, subagents, compaction, retries and
+  nested-process usage.
+- Codex stays unsupported. Open questions:
+  - how to account for the zero-output request;
+  - how to detect loss without a sequence;
+  - which credential source keeps the token out of argv.

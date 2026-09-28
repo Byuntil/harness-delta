@@ -20,8 +20,8 @@ concurrent-turn, interrupted-turn, or complete observation validation.
 | Codex CLI exec JSON and rollout JSONL | 0.156.1 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by unverified exceptional boundaries and child accounting |
 | Codex desktop | Not probed | Unsupported until a dedicated app session establishes identity, version, and counter behavior; CLI evidence does not establish app parity |
 | Claude Code print JSON and transcript JSONL | 2.1.283 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by message revisions, exceptional boundaries, and child accounting |
-| Claude Code native OpenTelemetry export | Not observed | Unverified primary candidate ([ADR 006](006-otel-usage-source.md)); settings precedence, export, flush and loss behavior are unverified |
-| Codex OpenTelemetry export | Not observed | Unverified candidate ([ADR 006](006-otel-usage-source.md)); per-invocation overrides, event-level token counts and sandbox network behavior are unverified |
+| Claude Code native OpenTelemetry export | 2.1.283 | Unsupported primary candidate ([ADR 006](006-otel-usage-source.md)). Bounded live checks: shell-layer precedence held, session start at sequence 0, prompt and response redacted (second run), and in two single-request print-mode runs the event usage matched the result usage, with timing consistent with a shutdown flush. Cache semantics, user-settings precedence, interactive usage, subagents, compaction, retries and nested-process usage are unverified |
+| Codex OpenTelemetry export | 0.156.1 | Unsupported candidate ([ADR 006](006-otel-usage-source.md)). Token-free per-invocation overrides routed logs, and event-level token counts exist, but a zero-output completion per turn is absent from exec usage. There is no event sequence and no verified argv-free credential source. Sandbox network behavior is unverified |
 
 ## Fields
 
@@ -71,8 +71,9 @@ metadata inside agreed with the known working directory and session IDs.
 
 OpenTelemetry sources have no file to open. Their scope comes from run-level
 linkage under R01: a per-process credential issued at launch, checked before any
-payload is decoded. No OpenTelemetry source was enabled or observed for this
-record, and neither row in the source table is a support claim.
+payload is decoded. The OpenTelemetry rows summarize the bounded live checks in
+[ADR 006](006-otel-usage-source.md#live-checks-follow-ups-3-and-4); neither row is
+a support claim.
 
 A production adapter must receive an explicit project/task/session/source mapping
 before opening a source. Do not discover membership by opening all transcripts.
