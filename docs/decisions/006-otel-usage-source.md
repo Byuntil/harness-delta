@@ -335,8 +335,9 @@ Follow-up 4 must validate that profile first.
 - The `x-harness-delta-token` header is compared by digest before anything else.
 - The scope is then checked without reading the body, and again before the
   body is decoded, because a pause can happen during an upload.
-- Rejected bodies are drained undecoded, up to the body limit; after that, the
-  connection is closed.
+- Rejected, oversized and undecoded bodies are drained unbuffered before the
+  reply, so exporters receive a status rather than a reset connection. Above a
+  128 MiB ceiling, the connection is destroyed.
 - Only `POST /v1/logs` with `application/json` and no content encoding is decoded.
 - Authenticated metrics and trace posts are acknowledged undecoded and never
   stored.
@@ -387,8 +388,8 @@ Follow-up 4 must validate that profile first.
   reports cannot sum them.
 - Pause, finalization and deletion revoke the process permanently. A resumed
   task needs a new process and token.
-- A resumed session keeps its session row only when the product version is the
-  same.
+- A resume under a different product version is rejected at launch. A later
+  session ID whose row has another product version is a scope mismatch.
 - Writes take the SQLite writer lock at the start of the transaction.
 
 **Launch requirement for Follow-up 3:** by default, Claude Code includes

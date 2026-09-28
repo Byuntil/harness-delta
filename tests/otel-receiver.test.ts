@@ -378,14 +378,28 @@ test('a pause during an upload rejects the body before it is decoded', async () 
   expect(status).toBe(403);
 });
 
-test('rejected oversized uploads do not stop the receiver', async () => {
+test('oversized uploads receive a status instead of a connection error', async () => {
   const { store, clock } = setup();
   const receiver = await OtelReceiver.start(store, launch, profile, { clock, maxBodyBytes: 4096 });
   resources.push(() => receiver.close());
   tick?.(2000);
-  await post(receiver, 'x'.repeat(200000), { auth: false }).catch(() => undefined);
-  await post(receiver, 'x'.repeat(200000), { path: '/v1/metrics' }).catch(() => undefined);
+  const large = 'x'.repeat(2 * 1024 * 1024);
+  expect((await post(receiver, large)).status).toBe(413);
+  expect((await post(receiver, large, { headers: { 'transfer-encoding': 'chunked' } })).status).toBe(413);
+  expect((await post(receiver, large, { auth: false })).status).toBe(401);
+  // Undecoded metrics are acknowledged even above the log body limit.
+  expect((await post(receiver, large, { path: '/v1/metrics' })).status).toBe(200);
   expect((await post(receiver, logsRequest([sessionStart(0, options)]))).status).toBe(200);
+});
+
+test('a later session with another product version is a scope mismatch', async () => {
+  const { store, clock } = setup();
+  store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES ('00000000-0000-4000-8000-000000000006','p1','t1','claude_code','0.9.0')", []);
+  const receiver = await open(store, clock);
+  expect((await post(receiver, logsRequest([sessionStart(0, options),
+    apiRequest(1, { ...options, sessionId: '00000000-0000-4000-8000-000000000006' })]))).status).toBe(200);
+  expect(processRow(store)).toMatchObject({ uncertain_reason: 'scope_mismatch' });
+  expect(count(store, 'events')).toBe(0);
 });
 
 test('a resumed session with a different product version is rejected at launch', async () => {

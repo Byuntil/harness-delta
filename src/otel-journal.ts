@@ -117,10 +117,11 @@ function encode(record: ProjectedRecord): string {
 }
 function linkSession(store: Store, row: ProcessRow, sessionId: string): void {
   if (deleted(store, 'session', sessionId)) throw new Uncertain('scope_mismatch');
-  const existing = store.get<{ task_id: string; project_id: string; product: string | null; source_path: string | null }>(
-    'SELECT task_id,project_id,product,source_path FROM sessions WHERE id=?', [sessionId]);
+  const existing = store.get<{ task_id: string; project_id: string; product: string | null; source_path: string | null; product_version: string | null }>(
+    'SELECT task_id,project_id,product,source_path,product_version FROM sessions WHERE id=?', [sessionId]);
   if (existing) {
-    if (existing.task_id !== row.task_id || existing.project_id !== row.project_id || existing.product !== 'claude_code' || existing.source_path !== null) throw new Uncertain('scope_mismatch');
+    if (existing.task_id !== row.task_id || existing.project_id !== row.project_id || existing.product !== 'claude_code' ||
+        existing.source_path !== null || existing.product_version !== row.product_version) throw new Uncertain('scope_mismatch');
     return;
   }
   store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES (?,?,?,'claude_code',?)",
@@ -211,9 +212,9 @@ export function ingestOtelLogs(store: Store, processId: string, records: readonl
 /** Ends one process. A process that never proved readiness recorded nothing measurable, so its
  * whole lifetime becomes an unmeasurable window instead of silently disappearing.
  */
-function endProcess(store: Store, row: ProcessRow, reason: RevokeReason, now: string): void {
+function endProcess(store: Store, row: ProcessRow, reason: RevokeReason, now: string, launched = true): void {
   revoke(store, row, reason, now);
-  if (row.ordering === 'pending') markUncertain(store, processRow(store, row.id)!, 'ordering_missing', now);
+  if (launched && row.ordering === 'pending') markUncertain(store, processRow(store, row.id)!, 'ordering_missing', now);
   const current = processRow(store, row.id)!;
   if (current.uncertain_observation_id) store.execute('UPDATE observations SET ended_at=? WHERE id=? AND ended_at IS NULL', [now, current.uncertain_observation_id]);
 }
@@ -223,11 +224,11 @@ export function revokeOtelProcesses(store: Store, taskId: string, reason: 'pause
     endProcess(store, row, reason, now < row.updated_at ? row.updated_at : now);
   }
 }
-export function closeOtelProcess(store: Store, processId: string, clock: () => string): void {
+export function closeOtelProcess(store: Store, processId: string, clock: () => string, options: { launched: boolean } = { launched: true }): void {
   store.immediateTransaction(() => {
     const row = processRow(store, processId);
     if (!row) return;
     lockTask(store, row.task_id);
-    endProcess(store, row, 'closed', otelNow(clock, row));
+    endProcess(store, row, 'closed', otelNow(clock, row), options.launched);
   });
 }

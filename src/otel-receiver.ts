@@ -8,6 +8,9 @@ import type { Store } from './store.js';
 
 const tokenHeader = 'x-harness-delta-token';
 const defaultMaxBodyBytes = 4 * 1024 * 1024;
+// Rejected or undecoded bodies are discarded unbuffered up to this ceiling, so exporters receive a
+// status instead of a reset connection; beyond it the socket is destroyed.
+const drainCeilingBytes = 128 * 1024 * 1024;
 
 /** Internal per-process OTLP http/json receiver. It is not exported from the package entry point,
  * starts no product process and enables no telemetry. It listens only on 127.0.0.1 with an
@@ -40,7 +43,8 @@ export class OtelReceiver {
         server.listen({ port: 0, host: '127.0.0.1', exclusive: true }, () => { server.off('error', reject); resolve(); });
       });
     } catch {
-      closeOtelProcess(store, launch.processId, clock);
+      // Never launched: revoke without claiming an unmeasured product lifetime.
+      closeOtelProcess(store, launch.processId, clock, { launched: false });
       throw new Error('otel_listen_failed');
     }
     return receiver;
@@ -64,8 +68,8 @@ export class OtelReceiver {
   }
 
   private handle(request: IncomingMessage, response: ServerResponse): void {
-    // Rejections drain a bounded number of bytes without buffering or parsing them.
-    const reject = (status: number) => { reply(response, status); drain(request, this.maxBodyBytes); };
+    // Rejections drain bytes without buffering or parsing them, then reply.
+    const reject = (status: number) => drain(request, () => reply(response, status));
     if (this.closed || !this.authenticated(request)) return reject(401);
     if (request.method !== 'POST') return reject(405);
     const path = request.url?.split('?')[0];
@@ -75,7 +79,7 @@ export class OtelReceiver {
     if (!admitted) return reject(403);
     if (path !== '/v1/logs') {
       // Metrics are never added to event totals and traces are configured off: acknowledge undecoded.
-      drain(request, this.maxBodyBytes, () => reply(response, 200, '{}'));
+      drain(request, () => reply(response, 200, '{}'));
       return;
     }
     const type = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase();
@@ -88,12 +92,13 @@ export class OtelReceiver {
     let oversized = false;
     request.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > this.maxBodyBytes && !oversized) { oversized = true; chunks.length = 0; reply(response, 413); request.destroy(); }
+      if (size > this.maxBodyBytes) { oversized = true; chunks.length = 0; }
+      if (size > drainCeilingBytes) request.destroy();
       if (!oversized) chunks.push(chunk);
     });
     request.on('error', () => { chunks.length = 0; });
     request.on('end', () => {
-      if (oversized) return;
+      if (oversized) return reply(response, 413);
       // Scope can be revoked while the body uploads; re-check before decoding a single byte.
       let admitted: boolean;
       try { admitted = admitOtelRequest(this.store, this.processId, this.clock); } catch { return reply(response, 503); }
@@ -115,10 +120,10 @@ export class OtelReceiver {
   }
 }
 
-function drain(request: IncomingMessage, limit: number, done?: () => void): void {
+function drain(request: IncomingMessage, done: () => void): void {
   let size = 0;
-  request.on('data', (chunk: Buffer) => { size += chunk.length; if (size > limit) request.destroy(); });
-  if (done) request.on('end', done);
+  request.on('data', (chunk: Buffer) => { size += chunk.length; if (size > drainCeilingBytes) request.destroy(); });
+  request.on('end', done);
   request.resume();
 }
 function digest(value: string): Buffer { return createHash('sha256').update(value, 'utf8').digest(); }
