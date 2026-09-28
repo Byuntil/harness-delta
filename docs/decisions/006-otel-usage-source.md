@@ -10,7 +10,9 @@ The offline part of Follow-up 3 (launch-settings builders and a documented
 precedence analysis) exists. See [Launch settings](#launch-settings-follow-up-3).
 The approved live checks of Follow-ups 3 and 4 have run; see
 [Live checks](#live-checks-follow-ups-3-and-4). They are bounded observations,
-not a support claim; user-settings precedence remains open.
+not a support claim; user-settings precedence remains open. On 2026-09-29 Codex
+OTel was not adopted as a usage source; the rollout-file adapter is the primary
+Codex usage candidate (see [Decision](#decision)).
 Requirements: [R01, R02, R04, R05, R07, R08, R09 and R10](../requirements.md).
 R11 tool diagnostics are out of scope here. Documentation checked 2026-09-28.
 Existing [adapter evidence](001-adapter-capabilities.md), the
@@ -107,11 +109,17 @@ Sources: [advanced configuration](https://learn.chatgpt.com/docs/config-file/con
 
 Adopt Claude Code's native OTel export, sent to a local harness-delta receiver,
 as the primary usage source for sessions that the measurement CLI launches.
-Codex OTel is a candidate under the same design, pending the open questions in
-[Live checks](#live-checks-follow-ups-3-and-4).
+Codex OTel is not adopted as a usage source (user decision, 2026-09-29; see
+[Live checks](#live-checks-follow-ups-3-and-4)). The rollout-file adapter is the
+primary Codex usage candidate instead; see the
+[Codex 0.158.0 rollout check](001-adapter-capabilities.md#codex-01580-rollout-check).
+- This candidate currently covers explicitly linked, sequential `exec` sessions.
+- Establishing an interactive Codex session's identity before any file access
+  (R01) is unresolved.
 
 **Status of the other sources:**
-- The existing adapters remain a separate cross-check source.
+- For Claude Code, the existing adapters remain a separate cross-check source.
+- For Codex, the rollout-file adapter is the primary usage candidate.
 - OTel and adapter observations are never summed.
 - Development of the headless stream interface as a usage source is paused.
 
@@ -139,7 +147,7 @@ Codex OTel is a candidate under the same design, pending the open questions in
    - traces to `none`.
 4. **Codex uses an equivalent `-c otel.*` override set** covering the log,
    metrics and trace exporters. This mechanism must be verified before any Codex
-   support claim.
+   support claim. (Codex OTel was later not adopted; see [Decision](#decision).)
 5. **Global configuration is never edited.**
 6. **Fail closed on unverifiable configuration.**
    - Content-off and destination settings cannot be guaranteed against managed
@@ -210,7 +218,8 @@ from cost computed from a recorded rate source. Neither is a subscription bill.
 - Claude per-request `api_request` events are the unit of usage.
 - For Codex, the documented token split exists only in turn metrics. Codex
   usage therefore remains unverified until event-level counts or metric
-  semantics are validated.
+  semantics are validated. (Codex OTel was later not adopted; see
+  [Decision](#decision).)
 - Metrics are only a cross-check and are never added to event totals.
 - Temporality is recorded and validated before any metric aggregation.
 
@@ -276,8 +285,8 @@ never across products, because token semantics differ.
 | Option | Interactive tasks | Stability | Privacy | Completeness path | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | A. Headless stream decoder | No | Low: vocabulary not fully documented, version-coupled | Must filter content itself | Blocked by the unresolved protocol and startup | Pause |
-| B. Transcript/rollout file adapters (current) | Yes | Medium: file formats undocumented | Files contain content; scope must precede reads | Blocked by revisions and child accounting | Keep as a separate cross-check |
-| C. Native OTel to a per-process loopback receiver | Launched sessions only | Higher: documented, opt-in | Prompts off by default, but identity, error text and Codex tool snippets need dropping; user or managed settings can redirect export | Claude per-request events; Codex unverified | **Adopt, fail closed** |
+| B. Transcript/rollout file adapters (current) | Yes (Codex: identity before access unresolved) | Medium: file formats undocumented | Files contain content; scope must precede reads | Blocked by revisions and child accounting | Claude: keep as a separate cross-check. Codex: primary usage candidate (2026-09-29) |
+| C. Native OTel to a per-process loopback receiver | Launched sessions only | Higher: documented, opt-in | Prompts off by default, but identity, error text and Codex tool snippets need dropping; user or managed settings can redirect export | Claude per-request events; Codex unverified | **Adopt for Claude, fail closed**; Codex not adopted (2026-09-29) |
 | D. HTTP proxy between product and API | Yes | Medium | Sees full prompts and responses | Complete request view | Reject: violates R02 |
 
 **The main trade-off:**
@@ -291,7 +300,8 @@ never across products, because token semantics differ.
 ## Consequences
 
 **Easier:**
-- Interactive sessions launched by the measurement CLI become measurable.
+- Interactive Claude Code sessions launched by the measurement CLI become
+  measurable.
 - Claude subagent and compaction requests are attributable through a mapped
   query-source category, once a version's table maps their observed values.
 - Failed requests expose their attempt count.
@@ -301,11 +311,11 @@ never across products, because token semantics differ.
 - The tool runs a per-process authenticated receiver and must detect configuration
   overrides.
 - Vendor attribute changes need version-pinned synthetic tests.
-- Codex support depends on verifying per-invocation overrides and event-level
-  token counts.
+- Codex OTel support depended on verifying per-invocation overrides and
+  event-level token counts; it was not adopted (see [Decision](#decision)).
 
 **Revisit:**
-- Codex sandbox network behavior.
+- Codex sandbox network behavior, if Codex OTel is reconsidered.
 - Agreement between metrics and events.
 - Flush behavior for short print-mode runs.
 
@@ -514,8 +524,8 @@ that does not echo the input.
   `otel.log_user_prompt` to `false`.
 - Codex documents only static exporter headers. Passed with `-c`, a token would
   appear in the process list, so the builder accepts no credentials. The
-  receiver therefore cannot authenticate a Codex process, and Codex support
-  stays blocked until an argv-free credential source is verified.
+  receiver therefore cannot authenticate a Codex process, and Codex OTel
+  support stays blocked until an argv-free credential source is verified.
 - Whether an inline table replaces or merges configured exporter tables, which
   could add configured headers or another exporter, is not established: the
   observed user configuration configured no exporter. Codex exports logs even
@@ -623,7 +633,13 @@ Tests: `tests/otel-launch-settings.test.ts`.
 - This profile is not a support claim, and no profile ships in code yet. Still
   unobserved: interactive-mode usage, subagents, compaction, retries and
   nested-process usage.
-- Codex stays unsupported. Open questions:
+- Codex OTel is not adopted as a usage source. Three questions remain
+  unresolved:
   - how to account for the zero-output request;
   - how to detect loss without a sequence;
   - which credential source keeps the token out of argv.
+- Codex usage moves to the rollout-file adapter as the primary candidate.
+  - In one exec run and one resume on 0.158.0, the rollout's cumulative counters
+    matched exec usage and excluded the zero-output request.
+  - Interactive session identity before file access is unresolved.
+  - See the [Codex 0.158.0 rollout check](001-adapter-capabilities.md#codex-01580-rollout-check).

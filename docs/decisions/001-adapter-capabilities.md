@@ -17,11 +17,62 @@ concurrent-turn, interrupted-turn, or complete observation validation.
 
 | Source | Version observed | Status and blocker |
 | --- | --- | --- |
-| Codex CLI exec JSON and rollout JSONL | 0.156.1 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by unverified exceptional boundaries and child accounting |
+| Codex CLI exec JSON and rollout JSONL | 0.156.1 (adapter); 0.158.0 (bounded check) | Primary Codex usage candidate. Partial adapter for explicitly linked, sequential sessions; the adapter accepts 0.156.1 only. Complete measurement is blocked by unverified exceptional boundaries and child accounting. See the [0.158.0 rollout check](#codex-01580-rollout-check) |
 | Codex desktop | Not probed | Unsupported until a dedicated app session establishes identity, version, and counter behavior; CLI evidence does not establish app parity |
 | Claude Code print JSON and transcript JSONL | 2.1.283 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by message revisions, exceptional boundaries, and child accounting |
 | Claude Code native OpenTelemetry export | 2.1.283 | Unsupported primary candidate ([ADR 006](006-otel-usage-source.md)). Bounded live checks: shell-layer precedence held, session start at sequence 0, prompt and response redacted (second run), and in two single-request print-mode runs the event usage matched the result usage, with timing consistent with a shutdown flush. Cache semantics, user-settings precedence, interactive usage, subagents, compaction, retries and nested-process usage are unverified |
-| Codex OpenTelemetry export | 0.156.1 | Unsupported candidate ([ADR 006](006-otel-usage-source.md)). Token-free per-invocation overrides routed logs, and event-level token counts exist, but a zero-output completion per turn is absent from exec usage. There is no event sequence and no verified argv-free credential source. Sandbox network behavior is unverified |
+| Codex OpenTelemetry export | 0.156.1 | Not adopted as a usage source ([ADR 006](006-otel-usage-source.md)). Token-free per-invocation overrides routed logs, and event-level token counts exist, but a zero-output completion per turn is absent from exec usage. There is no event sequence and no verified argv-free credential source. Sandbox network behavior is unverified |
+
+## Codex 0.158.0 rollout check
+
+This was a user-approved bounded check on 2026-09-29, on macOS arm64 with codex-cli
+0.158.0.
+
+**Conditions:**
+- **Runs:** one `codex exec --json` run, then one `codex exec resume` of the same thread.
+  Both used synthetic prompts requesting a one-word reply, low reasoning effort and a read-only sandbox,
+  from an empty directory outside any repository.
+- **Locating the rollout:** by the exact thread id from the exec stream, matching file
+  names only. No other session file was opened.
+- **Reading:** the file was read in memory once after each run. Only allowlisted metadata was retained:
+  record and event type counts, key names, version, source, model, identity-match
+  booleans and token integers.
+- **Other data:**
+  - A one-off OTel probe recorded the same runs.
+  - Configuration was not edited.
+  - The rollout file was left in place.
+
+**Results:**
+- **Counters:** the single `token_count` after the first run had equal cumulative and
+  last-turn usage.
+  - Values (input, cached, cache-write, output, reasoning): 15775, 8960, 0, 5, 0. This
+    equalled the exec `turn.completed` usage.
+  - After the resume, the cumulative total was 31568, 24576, 0, 10, 0. For every field,
+    it equalled the previous total plus the new last-turn usage.
+  - The resumed exec usage reported the same cumulative total. The cumulative
+    semantics observed on 0.156.1 held in this one exec-plus-resume check on
+    0.158.0.
+- **Zero-output requests:** each run's OTel export also had a zero-output
+  `response.completed` of 13346 input tokens. It appears in neither the rollout nor the
+  exec usage.
+- **Format:**
+  - Top-level record types: `session_meta`, `event_msg`, `response_item`,
+    `world_state`, `turn_context` and `token_usage_record`.
+  - `session_meta.id` matched the exec thread id, and `cwd` matched the launch
+    directory. `cli_version` was 0.158.0, `source` was `exec`, and the same file
+    was appended on resume, which added `thread_settings_applied` events.
+  - The usage objects add `cache_write_input_tokens`.
+  - `session_meta` carries account and user identifiers, which must never be retained.
+  - No compaction, fork or collaboration record appeared.
+- **Not verified:**
+  - the keys of the turn start and completion events;
+  - the contents of `token_usage_record`, which may be a second usage surface and must
+    not be summed;
+  - how `session_id` relates to `id`;
+  - nonzero reasoning;
+  - handling of `cache_write_input_tokens` (the adapter reads four usage fields).
+
+The adapter still accepts only 0.156.1. Supporting 0.158.0 needs its own tested change.
 
 ## Fields
 
