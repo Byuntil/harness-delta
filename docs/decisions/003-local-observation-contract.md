@@ -46,3 +46,56 @@ comparisons are observational and must not claim causal savings.
 Only allowlisted IDs, categories, states, timestamps, counts and durations enter
 measurement records. No raw arguments, commands, patterns, outputs, patches,
 source hashes or exception text. Reports and shared records exclude local paths.
+
+## Collector failure diagnostics
+
+`Collector.tick(taskId)` returns an array of committed failure diagnostics for
+that tick. Each object contains only `session_id`, UTC `at`, and a fixed `category`.
+An empty array means no diagnosed failure in that tick, not complete coverage or
+proof that any source was read. A failed transaction throws `collection_error`
+and returns no diagnostics. The CLI and task report keep the existing observation
+reasons; this return value is an opt-in local diagnostic interface, not new report
+fields or automatic telemetry.
+
+| Category | Established condition |
+| --- | --- |
+| `read_failed` | Source reader failed without a more specific recognized category |
+| `short_read` | Reader reached EOF before the initial file size |
+| `unstable_read` | Size or modification time changed during a bounded read |
+| `unsupported_source` | Unsupported file kind, size, version, or parsed value |
+| `scope_mismatch` | Parsed source identity disagrees with the linked scope |
+| `invalid_json` | A complete source line is invalid JSON |
+| `record_conflict` | One snapshot contains conflicting normalized records for one key |
+| `parse_failed` | Other unclassified parser failure |
+| `identity_changed` | File identity changed since the prior checkpoint |
+| `source_truncated` | File size decreased since the prior checkpoint |
+| `same_size_modified` | Stable equal-size rewrite without verified identical Claude measurement metadata (Codex equal-size rewrites remain unsupported) |
+| `clock_regressed` | Tick cutoff precedes the prior cutoff |
+| `model_mismatch` | Source product/model disagrees with fixed task metadata |
+| `record_changed` | Previously fingerprinted metadata changed or disappeared |
+
+Categories identify the detected condition, not necessarily its underlying cause.
+Identity and truncation checks precede parsing; only the first detected failure is
+reported. Claude message identity includes validated ordinary, cache-created and
+cache-read input counts before normalization. The adapter retains these counts
+only as internal record metadata: both same-snapshot replay validation and the
+collector's per-record fingerprints compare them. Previously seen records must
+agree on every poll, including growing sources and unchanged modification times;
+equal normalized totals do not excuse changed components. Exact replays and new
+append-only messages remain eligible under the existing baseline/cutoff rules.
+Stored events and reports retain their existing normalized fields; cursor hashes
+cover allowlisted metadata only. No storage migration or durable cursor resumption
+is introduced.
+
+After a stable read, an equal-size Claude modification retains its
+checkpoint only when validated measurement metadata is identical: normalized
+records, input components, prompt-origin timestamps (including origins without
+usage), topology blocking state and incomplete-line presence. This fingerprint
+contains no raw content or raw-content hash. Changes to ignored content or
+auxiliary fields do not establish a measurement revision; equality does not prove
+byte equality or explain why the file changed. New or revised metadata in an
+equal-size rewrite remains uncertain and is rejected. Codex retains conservative
+equal-size rejection. Unstable reads are rejected. Errors invalidate the in-memory and
+durable cursor; subsequent reads establish a new baseline and never backfill the
+uncertain interval. Diagnostics contain no paths, content, hashes, raw errors,
+arbitrary source types, arguments, or payload dumps.

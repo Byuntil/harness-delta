@@ -53,7 +53,12 @@ and active time, plus known command/Bash executions. Cached inputs are subsets o
 normalized total input; do not add them again. Complete totals, general tool-failure
 counts, model runtime, cost, search/read classification, duplicate reads, context
 expansion, and first edit/test/oracle times remain null where unsupported. Missing
-is not zero. An observed zero is retained when a source explicitly reports it.
+is not zero. A first explicit Codex cumulative zero is retained when eligible;
+repeated unchanged cumulative notifications are not new observations. Baseline
+and uncertain-interval exclusions still apply. Claude message replay keeps its
+original attribution; conflicting metadata remains an error. See the
+[diagnostic categories](../decisions/003-local-observation-contract.md#collector-failure-diagnostics)
+for the local collector interface and its limits.
 
 Retention is opt-in: `retention set project1 --days 30`, then `retention apply
 project1`. It deletes finalized tasks by finalization age and retains active tasks.
@@ -85,6 +90,9 @@ the generated report if you need a historical snapshot after deletion or new dat
 
 Errors use fixed codes. Source identity changes, truncation, invalid scope/version,
 conflicting metadata, resets or unsupported topology exclude the uncertain batch.
+Stable same-size Claude modifications retain the baseline only when validated
+measurement metadata is identical; changed usage, origin, model, timestamp or
+recognized tool IDs still fail closed. This does not establish raw-content equality.
 Earlier observations remain partial. Correct the explicit mapping and restart;
 recovery establishes a new baseline and does not import earlier work. Sources over
 16 MiB are unsupported in this initial bounded reader. It scans a bounded authorized

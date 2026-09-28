@@ -49,3 +49,23 @@ test('cohorts exclude outcomes after follow-up and report quality/stratum denomi
  const report=periodReport(store,'period1','2026-01-07T00:00:00Z');expect(report.provisional).toBe(false);expect(report.before.outcomes.pending).toBe(1);expect(report.before.first_attempt.failed).toBe(1);expect(report.before.criteria.pending_tasks).toBe(1);expect(report.before.rework).toMatchObject({tasks_with_rework:1,eligible_tasks:1,rate:1});expect(report.before.strata.find(s=>s.dimension==='assignee'&&s.value==='u1')?.eligible_count).toBe(1);
  }finally{store.close();}
 });
+
+test('productionReportsRemainPartial: finalized success with observed usage cannot certify completeness',()=>{
+ const store=new Store(':memory:');let now='2026-01-01T00:00:00Z';const life=new Lifecycle(store,()=>now);
+ try{
+  store.execute('INSERT INTO projects(id) VALUES (?)',['p1']);freezePeriod(store,config,now);
+  life.createTask('p1','t1',meta);now='2026-01-02T00:00:00Z';life.start('t1');
+  store.execute('INSERT INTO sessions(id,project_id,task_id) VALUES (?,?,?)',['s1','p1','t1']);
+  store.putEvent({id:'e1',source_key:'k1',project_id:'p1',task_id:'t1',session_id:'s1',occurred_at:'2026-01-02T00:00:01Z',
+   payload:{kind:'usage',product:'synthetic',product_version:'1.0.0',model:'synthetic',epoch:'epoch1',
+    input_total:{status:'observed',value:60,reason:null},cached_input:{status:'observed',value:30,reason:null},
+    output_total:{status:'observed',value:7,reason:null},reasoning_output:{status:'observed',value:0,reason:null}}});
+  now='2026-01-02T00:00:02Z';life.finalize('t1','success',['c1']);
+  const task=aggregateTask(store,'t1',now);
+  expect(task.outcome).toBe('success');expect(task.usage).toMatchObject({status:'partial',partial_tokens:67,complete_tokens:null});
+  expect(task.usage.reasons).toContain('incomplete');
+  const period=periodReport(store,'period1','2026-01-07T00:00:00Z');
+  expect(period.before).toMatchObject({complete_usage_count:0,partial_usage_count:1,mean_complete_tokens:null,tokens_per_success:null});
+  expect(period.change_rate).toBeNull();
+ }finally{store.close();}
+});

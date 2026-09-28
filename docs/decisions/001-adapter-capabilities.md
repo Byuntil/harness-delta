@@ -1,6 +1,8 @@
 # Adapter feasibility and collection boundaries
 
 Status: implemented partial sequential CLI adapters; no complete measurement claim.
+The [offline coverage evidence policy](004-complete-measurement-readiness.md)
+is synthetic-only and does not enable complete totals or expand adapter support.
 Checked on macOS arm64 on 2026-09-26. Requirements: R01, R02, R04, R05.
 
 ## Evidence and limits
@@ -127,3 +129,47 @@ See `tests/adapters.test.ts`, `tests/collection.test.ts`, and
 `tests/cli-integration.test.ts` for independently authored synthetic fixtures and
 failure/boundary behavior. Runtime tests and live probes complement each other;
 neither establishes untested app or descendant parity.
+
+## Fidelity and availability follow-up
+
+Synthetic regressions preserve the first explicit Codex cumulative vector even
+when all counters are zero. Its identity is the session and cumulative vector;
+repeated equal vectors, including later timestamps or turns, do not establish new
+observations. No row means missing, not zero. Startup and pause/restart baselines
+still exclude pre-existing and in-flight observations. This does not establish
+per-turn zero usage from unchanged counters.
+
+Claude exact normalized message replay retains the first message's originating
+prompt, including an unknown origin, across intervening prompts. Its timestamp,
+model, usage and recognized Bash invocation IDs must still agree; conflicting
+revisions remain errors, including metadata changes between collector polls. Replayed
+Bash invocation metadata must not move an earlier invocation to a later prompt.
+These are synthetic fidelity guarantees, not evidence that every replay layout
+occurs in the pinned product.
+
+A subsequent bounded Claude initial/resume probe reproduced a collection failure
+classified as `same_size_modified`: size was unchanged while modification time
+changed between snapshots. It did not establish whether source contents changed
+or why the product modified the file. The resumed interval remained excluded;
+its original raw-content change and cause remain unknown. A follow-up scoped
+probe established equal normalized usage metadata at this condition. The
+collector now accepts a stable same-size Claude rewrite only after validated
+measurement metadata equality, including prompt origins before usage arrives;
+true revisions and uncertain intervals still invalidate the checkpoint. Synthetic
+tests cover touch, ignored auxiliary changes, real revisions, baseline boundaries
+and rollback. These checks alone do not establish live availability. The diagnostic categories in the
+[observation contract](003-local-observation-contract.md) distinguish conditions
+without relaxing source stability or completeness rules.
+
+
+A later bounded confirmation on the same pinned versions produced eligible
+post-baseline partial reports for both products. Claude preserved its baseline
+across a stable same-size metadata-equal modification; Codex's controlled driver
+observed zero exact filename matches followed by one match 26 ms later. The driver
+waited only for the newly obtained exact session ID and completed durable linkage
+before decoding content-bearing stream bytes. Baseline usage stayed excluded and
+repeated polls/restart did not duplicate usage. This resolves those bounded
+availability probes, not complete collection, billing truth or exceptional-boundary
+support. A subsequent synthetic review correction rejects conflicting replay input
+components even when their normalized sum is unchanged; that adversarial case has
+not been exercised with a live product.

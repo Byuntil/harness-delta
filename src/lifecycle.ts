@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { IdSchema, ProductVersionSchema, TaskMetadataSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
+import { interruptManagedRuns } from './managed-journal.js';
 
 export type TaskState = 'registered' | 'active' | 'paused' | 'finalized';
 export type Outcome = 'success' | 'failed' | 'aborted';
@@ -68,6 +69,7 @@ export class Lifecycle {
           this.store.execute('INSERT INTO attempts(id,task_id,kind,started_at) VALUES (?,?,?,?)', [randomUUID(), taskId, 'first', now]);
         }
       } else {
+        interruptManagedRuns(this.store, taskId, 'pause', now);
         this.store.execute('UPDATE active_intervals SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL', [now, taskId]);
       }
     });
@@ -114,6 +116,7 @@ export class Lifecycle {
       if (criteriaMet.some(id => !metadata.criterion_ids.includes(id)) ||
           (outcome === 'success' && criteriaMet.length !== metadata.criterion_ids.length)) throw new Error('invalid_criteria');
       const now = this.now(task);
+      interruptManagedRuns(this.store, taskId, 'finalize', now);
       this.store.execute('INSERT INTO outcomes(task_id,status,criteria_met,first_success,assessed_at) VALUES (?,?,?,?,?)',
         [taskId, outcome, JSON.stringify([...criteriaMet].sort()), task.first_success, now]);
       this.store.execute("UPDATE tasks SET state = 'finalized', finalized_at = ?, last_transition_at = ?, generation = generation + 1 WHERE id = ?", [now, now, taskId]);
