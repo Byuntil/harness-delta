@@ -30,7 +30,8 @@ const headerValue = /^[A-Za-z0-9_-]{1,512}$/;
 function invalid(): never { throw new Error('otel_invalid_launch_settings'); }
 function checkEndpoint(endpoint: string): void {
   const port = endpointPattern.exec(endpoint)?.[1];
-  if (port === undefined || Number(port) < 1 || Number(port) > 65535 || port.startsWith('0')) invalid();
+  // A leading zero also rejects port 0.
+  if (port === undefined || port.startsWith('0') || Number(port) > 65535) invalid();
 }
 function validate(input: TelemetryDestination): { endpoint: string; headerList: string; processId: string } {
   checkEndpoint(input.endpoint);
@@ -98,8 +99,8 @@ export function codexOtelOverrides(input: { readonly endpoint: string }): string
   if (Object.keys(input).some(key => key !== 'endpoint')) invalid();
   checkEndpoint(input.endpoint);
   return [
-    // An explicit empty map keeps configured exporter headers from reaching the receiver if tables merge.
-    '-c', `otel.exporter={otlp-http={endpoint="${input.endpoint}/v1/logs",protocol="json",headers={}}}`,
+    // Whether this inline table replaces or merges a configured exporter table needs a live check.
+    '-c', `otel.exporter={otlp-http={endpoint="${input.endpoint}/v1/logs",protocol="json"}}`,
     '-c', 'otel.trace_exporter="none"',
     '-c', 'otel.metrics_exporter="none"',
     '-c', 'otel.log_user_prompt=false',

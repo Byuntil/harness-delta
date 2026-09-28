@@ -447,26 +447,48 @@ that does not echo the input.
   block follows the same levels, per variable.
 - A settings `env` value replaces the inherited shell value. Settings can set a
   variable but not remove one, so the builder sets every variable it depends on.
-- Project and local settings cannot set OTel exporter variables. They can turn a
-  selector off only when managed settings, a `--settings` file or the launch
-  environment leave it unset; the builder sets all three selectors.
-- Managed OTLP destination or credential variables remove developer-set
-  endpoints, protocols and credentials, and desktop or self-hosted launchers pin
-  destinations the same way. The receiver detects managed sources through
-  `managed_settings_resolved` and fails closed; launcher-owned sessions are out
-  of scope.
+- Project and local settings cannot set the OTel exporter, content and beta
+  tracing variables (v2.1.282 or later). They can still turn a selector off with
+  `none` or a content option off with `0`, but not when managed settings, a
+  `--settings` file or the launch environment sets that variable; the builder
+  sets all of them. No variable the builder sets is ignored in `--settings`.
+- Managed settings lock the destination per variable (v2.1.217 or later): a
+  managed generic endpoint removes developer-set per-signal endpoints, a managed
+  protocol removes per-signal protocols, and managed credentials remove
+  developer-set per-signal credentials and every developer-set endpoint. A
+  managed endpoint alone leaves the builder's headers in place, so the token can
+  reach a managed collector. It authorizes only posts to this loopback receiver,
+  which then receives nothing and fails closed. Desktop and self-hosted launchers
+  pin destinations the same way (v2.1.251 or later); launcher-owned sessions are
+  out of scope.
 - Claude Code does not pass `OTEL_*` variables to its subprocesses, so nested
-  processes do not receive the token.
+  processes do not receive the token or the endpoints. Other `env` values reach
+  every subprocess. Nested product processes therefore inherit
+  `CLAUDE_CODE_ENABLE_TELEMETRY=1`, the beta tracing off values and
+  `BETA_TRACING_ENDPOINT`. A nested Claude Code process whose own settings
+  configure an exporter would then export there, outside the launched process.
+  Setting the variable in the launch environment instead would propagate the
+  same way. This is a known limitation of per-invocation settings.
+- `0` turns off `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_CONTENT`,
+  `OTEL_LOG_TOOL_DETAILS` and `OTEL_LOG_ASSISTANT_RESPONSES`. The compression
+  variables come from the OpenTelemetry exporter specification; the Claude Code
+  documentation does not list them.
 
 **Needs a live check** before any support claim:
 - that `--settings` values win over the same variables in user settings and the
   shell for this product version;
-- that `0` disables each content and beta option (only `1` is documented as
-  enabling, except `OTEL_LOG_ASSISTANT_RESPONSES=0`);
+- that `0` disables `OTEL_LOG_RAW_API_BODIES`, `OTEL_LOG_MANAGED_SETTINGS` and
+  the beta tracing flags (only enabling values are documented);
 - that the exporter posts to `/v1/logs` and the first batch starts with
   `managed_settings_resolved` at the profile's sequence value, carrying
   `app.version`, `session.id` and `harness_delta.process_id`;
-- which variables the settings reference special-cases in `env`.
+- that the generic and per-signal copies of the token header arrive as one
+  value; a duplicated header would fail authentication and the run would fail
+  closed;
+- an `otelHeadersHelper` in user settings, which `--settings` cannot remove,
+  adds its headers to exports and blocks every export when it fails;
+- whether nested processes see `CLAUDE_CODE_ENABLE_TELEMETRY`;
+- whether the `--settings` values appear in debug logs or session records.
 
 **Codex overrides** ([configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
 [basics](https://learn.chatgpt.com/docs/config-file/config-basic),
@@ -475,15 +497,16 @@ that does not echo the input.
   and system configuration. Values are parsed as TOML, and project configuration
   ignores `otel`. `requirements.toml` lists no `otel` keys.
 - The builder returns `-c` pairs that set `otel.exporter` to `otlp-http` with the
-  receiver's `/v1/logs` endpoint, protocol `json` and an empty header map, and set
+  receiver's `/v1/logs` endpoint (the documented example includes the path) and
+  protocol `json`, and set
   `otel.trace_exporter` and `otel.metrics_exporter` to `none` and
   `otel.log_user_prompt` to `false`.
 - Codex documents only static exporter headers. Passed with `-c`, a token would
   appear in the process list, so the builder accepts no credentials. The
   receiver therefore cannot authenticate a Codex process, and Codex support
   stays blocked until an argv-free credential source is verified.
-- Whether the endpoint needs the `/v1/logs` path, whether an inline table
-  replaces or merges configured exporter tables, and what Codex exports without
-  a turn need a live check.
+- Whether an inline table replaces or merges configured exporter tables, which
+  could add configured headers or another exporter, and what Codex exports
+  without a turn need a live check.
 
 Tests: `tests/otel-launch-settings.test.ts`.

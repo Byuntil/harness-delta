@@ -88,6 +88,9 @@ test.each([
   ['https', { endpoint: 'https://127.0.0.1:45678' }],
   ['a path', { endpoint: 'http://127.0.0.1:45678/v1/logs' }],
   ['a missing port', { endpoint: 'http://127.0.0.1' }],
+  ['port zero', { endpoint: 'http://127.0.0.1:0' }],
+  ['a port above the range', { endpoint: 'http://127.0.0.1:65536' }],
+  ['a port with a leading zero', { endpoint: 'http://127.0.0.1:04567' }],
   ['credentials in the URL', { endpoint: 'http://user:pass@127.0.0.1:45678' }],
   ['a header value that breaks the header list', { headers: { 'x-harness-delta-token': `${token},other=x` } }],
   ['a header value with whitespace', { headers: { 'x-harness-delta-token': `${token} x` } }],
@@ -143,7 +146,7 @@ test('accepts the destination of a real receiver and round-trips its headers', a
 
 test('builds token-free Codex overrides that route logs to the receiver and turn the rest off', () => {
   expect(codexOtelOverrides({ endpoint: 'http://127.0.0.1:45678' })).toEqual([
-    '-c', 'otel.exporter={otlp-http={endpoint="http://127.0.0.1:45678/v1/logs",protocol="json",headers={}}}',
+    '-c', 'otel.exporter={otlp-http={endpoint="http://127.0.0.1:45678/v1/logs",protocol="json"}}',
     '-c', 'otel.trace_exporter="none"',
     '-c', 'otel.metrics_exporter="none"',
     '-c', 'otel.log_user_prompt=false',
