@@ -171,8 +171,8 @@ Codex OTel is a candidate under the same design, pending Follow-up 3 and 4.
    - A process can report several session IDs, for example after `/clear`.
      A new `session.id` arriving under the same token, in sequence order, stays
      linked to the run.
-   - Nested product processes do not inherit the OTLP exporter destinations or
-     the credential. Their usage is recorded as missing, never as zero. They can
+   - Nested product processes do not inherit the `OTEL_EXPORTER_OTLP_*`
+     destinations or the credential. Their usage is recorded as missing, never as zero. They can
      inherit the enable setting and the beta tracing endpoint, together with
      the beta tracing off values; an export to that endpoint would lack the
      credential and be rejected before decoding. See
@@ -483,7 +483,7 @@ that does not echo the input.
 
 **Live check (2026-09-28, Claude Code 2.1.283).** An interactive process was
 started with these settings and ended without a prompt; the run was repeated
-once with the same outcome. No usage event arrived. The launch environment set
+once with the same outcome. The launch environment set
 conflicting variables: exporter endpoints and headers pointing at a second
 loopback listener (a decoy), `OTEL_LOGS_EXPORTER=console`,
 `OTEL_METRICS_INCLUDE_VERSION=false` and `OTEL_LOG_USER_PROMPTS=1` (the last
