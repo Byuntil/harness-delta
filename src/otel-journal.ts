@@ -42,7 +42,7 @@ export function registerOtelProcess(store: Store, input: OtelLaunch, profile: Ot
   if (!launch.success || !profileSchema.safeParse(profile).success) throw new OtelFailure('invalid_launch');
   if (profile.version !== launch.data.productVersion) throw new OtelFailure('unsupported_version');
   const { runId, processId, taskId, sessionId, productVersion } = launch.data;
-  store.transaction(() => {
+  store.immediateTransaction(() => {
     lockTask(store, taskId);
     const task = store.get<{ project_id: string; state: string; generation: number; metadata: string; local_root: string | null }>(
       'SELECT t.project_id,t.state,t.generation,t.metadata,p.local_root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?', [taskId]);
@@ -52,9 +52,11 @@ export function registerOtelProcess(store: Store, input: OtelLaunch, profile: Ot
     if (deleted(store, 'task', taskId) || deleted(store, 'project', task.project_id) || deleted(store, 'session', sessionId)) throw new OtelFailure('scope_revoked');
     // Reports sum a task's usage events; OTel and file adapter observations must never meet there.
     if (store.get('SELECT id FROM sessions WHERE task_id=? AND source_path IS NOT NULL', [taskId])) throw new OtelFailure('source_conflict');
-    const existing = store.get<{ task_id: string; product: string | null; source_path: string | null }>('SELECT task_id,product,source_path FROM sessions WHERE id=?', [sessionId]);
+    const existing = store.get<{ task_id: string; product: string | null; source_path: string | null; product_version: string | null }>(
+      'SELECT task_id,product,source_path,product_version FROM sessions WHERE id=?', [sessionId]);
     // A resumed session may reuse its session only inside the same task and source family.
-    if (existing && (existing.task_id !== taskId || existing.product !== 'claude_code' || existing.source_path !== null)) throw new OtelFailure('scope_revoked');
+    if (existing && (existing.task_id !== taskId || existing.product !== 'claude_code' || existing.source_path !== null ||
+        existing.product_version !== productVersion)) throw new OtelFailure('scope_revoked');
     if (!existing) {
       store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES (?,?,?,'claude_code',?)", [sessionId, task.project_id, taskId, productVersion]);
     }
@@ -77,16 +79,18 @@ function revoke(store: Store, row: ProcessRow, reason: RevokeReason, now: string
   store.execute("UPDATE otel_processes SET state='revoked',revoke_reason=?,updated_at=? WHERE id=? AND state='listening'", [reason, now, row.id]);
 }
 
-/** Checks scope without reading any request body. A process out of scope is revoked. */
+/** Checks scope without reading any request body. Admission is read-only; a process found
+ * out of scope is revoked under the writer lock.
+ */
 export function admitOtelRequest(store: Store, processId: string, clock: () => string): boolean {
-  return store.transaction(() => {
-    const row = processRow(store, processId);
-    if (!row || row.state !== 'listening') return false;
-    lockTask(store, row.task_id);
-    if (inScope(store, row)) return true;
-    revoke(store, row, 'scope_revoked', otelNow(clock, row));
-    return false;
+  const row = processRow(store, processId);
+  if (!row || row.state !== 'listening') return false;
+  if (inScope(store, row)) return true;
+  store.immediateTransaction(() => {
+    const current = processRow(store, processId);
+    if (current && current.state === 'listening' && !inScope(store, current)) revoke(store, current, 'scope_revoked', otelNow(clock, current));
   });
+  return false;
 }
 
 function markUncertain(store: Store, row: ProcessRow, reason: UncertainReason, now: string): void {
@@ -147,7 +151,7 @@ export type IngestOutcome = 'committed' | 'revoked' | 'conflict';
 /** Stores one decoded logs request atomically. The caller acknowledges only after this returns. */
 export function ingestOtelLogs(store: Store, processId: string, records: readonly DecodedRecord[], profile: OtelVersionProfile, clock: () => string): IngestOutcome {
   try {
-    return store.transaction(() => {
+    return store.immediateTransaction(() => {
       const row = processRow(store, processId);
       if (!row || row.state !== 'listening') return 'revoked';
       lockTask(store, row.task_id);
@@ -170,6 +174,9 @@ export function ingestOtelLogs(store: Store, processId: string, records: readonl
                 prior.occurred_at !== record.occurredAt || prior.payload !== encode(record)) throw new Conflict();
             continue;
           }
+          // Registration precedes launch, so an earlier or future time cannot belong to this
+          // process; it could otherwise land in an excluded, paused interval.
+          if (record.occurredAt < row.started_at || record.occurredAt > now) throw new Uncertain('invalid_record');
           if (ordering === 'pending') {
             const start = record.eventType === 'managed_settings_resolved' && record.fields !== null && 'trigger' in record.fields &&
               record.fields.trigger === 'startup' && record.sequence === profile.sessionStartSequence;
@@ -193,7 +200,7 @@ export function ingestOtelLogs(store: Store, processId: string, records: readonl
     });
   } catch (error) {
     if (!(error instanceof Conflict)) throw error;
-    store.transaction(() => {
+    store.immediateTransaction(() => {
       const row = processRow(store, processId);
       if (row && row.ordering !== 'uncertain') { lockTask(store, row.task_id); markUncertain(store, row, 'identity_conflict', otelNow(clock, row)); }
     });
@@ -201,24 +208,26 @@ export function ingestOtelLogs(store: Store, processId: string, records: readonl
   }
 }
 
-function closeWindow(store: Store, row: ProcessRow, now: string): void {
-  if (row.uncertain_observation_id) store.execute('UPDATE observations SET ended_at=? WHERE id=? AND ended_at IS NULL', [now, row.uncertain_observation_id]);
+/** Ends one process. A process that never proved readiness recorded nothing measurable, so its
+ * whole lifetime becomes an unmeasurable window instead of silently disappearing.
+ */
+function endProcess(store: Store, row: ProcessRow, reason: RevokeReason, now: string): void {
+  revoke(store, row, reason, now);
+  if (row.ordering === 'pending') markUncertain(store, processRow(store, row.id)!, 'ordering_missing', now);
+  const current = processRow(store, row.id)!;
+  if (current.uncertain_observation_id) store.execute('UPDATE observations SET ended_at=? WHERE id=? AND ended_at IS NULL', [now, current.uncertain_observation_id]);
 }
 /** Caller holds the task writer lock. Revocation is permanent; a resumed task needs a new process. */
 export function revokeOtelProcesses(store: Store, taskId: string, reason: 'pause' | 'finalize', now: string): void {
   for (const row of store.all<ProcessRow>('SELECT * FROM otel_processes WHERE task_id=?', [taskId])) {
-    const at = now < row.updated_at ? row.updated_at : now;
-    revoke(store, row, reason, at);
-    closeWindow(store, row, at);
+    endProcess(store, row, reason, now < row.updated_at ? row.updated_at : now);
   }
 }
 export function closeOtelProcess(store: Store, processId: string, clock: () => string): void {
-  store.transaction(() => {
+  store.immediateTransaction(() => {
     const row = processRow(store, processId);
     if (!row) return;
     lockTask(store, row.task_id);
-    const now = otelNow(clock, row);
-    revoke(store, row, 'closed', now);
-    closeWindow(store, row, now);
+    endProcess(store, row, 'closed', otelNow(clock, row));
   });
 }

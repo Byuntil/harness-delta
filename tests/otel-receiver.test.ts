@@ -16,6 +16,7 @@ const metadata = { type: 'feature', expected_size: 'small', assignee: 'u1', prod
 const launch = { runId: 'run-1', processId: 'process-1', taskId: 't1', sessionId: launchSessionId, productVersion: syntheticVersion };
 const options = { processId: 'process-1' };
 const secretHeader = 'Bearer synthetic-user-credential';
+let tick: ((ms: number) => void) | undefined;
 
 function setup(taskMetadata: object = metadata) {
   const root = mkdtempSync(join(tmpdir(), 'otel-test-'));
@@ -25,11 +26,14 @@ function setup(taskMetadata: object = metadata) {
   const clock = () => new Date(time).toISOString();
   const life = new Lifecycle(store, clock);
   life.registerProject('p1', root); life.createTask('p1', 't1', taskMetadata); life.start('t1');
-  return { store, life, clock, advance: (ms: number) => { time += ms; } };
+  const advance = (ms: number) => { time += ms; };
+  tick = advance;
+  return { store, life, clock, advance };
 }
 async function open(store: Store, clock: () => string, input = launch) {
   const receiver = await OtelReceiver.start(store, input, profile, { clock });
   resources.push(() => receiver.close());
+  tick?.(2000);
   return receiver;
 }
 interface Reply { status: number; body: string }
@@ -274,9 +278,10 @@ test('a later session id owned by another task or deleted is a scope mismatch', 
   life.createTask('p1', 't2', metadata);
   store.execute('INSERT INTO sessions(id,project_id,task_id,product) VALUES (?,?,?,?)', ['00000000-0000-4000-8000-000000000004', 'p1', 't2', 'claude_code']);
   store.execute("INSERT INTO tombstones(kind,id,deleted_at) VALUES ('session','00000000-0000-4000-8000-000000000005','2026-01-01T00:00:00.000Z')", []);
-  for (const sessionId of ['00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000005']) {
+  for (const [index, sessionId] of ['00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000005'].entries()) {
     const receiver = await open(store, clock, { ...launch, runId: `run-${sessionId.slice(-1)}`, processId: `process-${sessionId.slice(-1)}`, sessionId: `00000000-0000-4000-8000-00000000010${sessionId.slice(-1)}` });
-    const own = { processId: `process-${sessionId.slice(-1)}`, sessionId: `00000000-0000-4000-8000-00000000010${sessionId.slice(-1)}` };
+    const own = { processId: `process-${sessionId.slice(-1)}`, sessionId: `00000000-0000-4000-8000-00000000010${sessionId.slice(-1)}`,
+      at: `2026-01-01T00:00:0${1 + index * 2}.000Z` };
     expect((await post(receiver, logsRequest([sessionStart(0, own), apiRequest(1, { ...own, sessionId })]))).status).toBe(200);
     expect(processRow(store, own.processId)).toMatchObject({ uncertain_reason: 'scope_mismatch' });
   }
@@ -316,11 +321,86 @@ test('closing the receiver revokes the process and closes its uncertain window',
   advance(1000);
   await receiver.close();
   expect(processRow(store)).toMatchObject({ state: 'revoked', revoke_reason: 'uncertain' });
-  expect(store.get('SELECT started_at,ended_at FROM observations')).toEqual({ started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:01.000Z' });
-  const closed = setup();
-  const second = await open(closed.store, closed.clock);
+  expect(store.get('SELECT started_at,ended_at FROM observations')).toEqual({ started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:03.000Z' });
+  const ready = setup();
+  const second = await open(ready.store, ready.clock);
+  expect((await post(second, logsRequest([sessionStart(0, options)]))).status).toBe(200);
   await second.close();
-  expect(processRow(closed.store)).toMatchObject({ state: 'revoked', revoke_reason: 'closed' });
+  expect(processRow(ready.store)).toMatchObject({ state: 'revoked', revoke_reason: 'closed', ordering: 'ready' });
+  expect(count(ready.store, 'observations')).toBe(0);
+});
+
+test('a process that never proved readiness leaves an unmeasurable window when it ends', async () => {
+  for (const action of ['close', 'pause', 'finalize'] as const) {
+    const { store, clock, life } = setup();
+    const receiver = await open(store, clock);
+    if (action === 'close') await receiver.close();
+    else if (action === 'pause') life.pause('t1');
+    else life.finalize('t1', 'failed', []);
+    expect(processRow(store)).toMatchObject({ state: 'revoked', revoke_reason: action === 'close' ? 'closed' : action, ordering: 'uncertain', uncertain_reason: 'ordering_missing' });
+    expect(store.get('SELECT started_at,ended_at,status,reason FROM observations')).toEqual(
+      { started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:02.000Z', status: 'unmeasurable', reason: 'incomplete' });
+  }
+});
+
+test('records timed outside the process lifetime are invalid', async () => {
+  const { store, clock, life, advance } = setup();
+  advance(60000);
+  life.pause('t1'); advance(60000); life.resume('t1'); advance(60000);
+  const receiver = await open(store, clock);
+  // 00:01:30 lies inside the paused interval, before this process was registered.
+  expect((await post(receiver, logsRequest([sessionStart(0, { ...options, at: '2026-01-01T00:03:01.000Z' }),
+    apiRequest(1, { ...options, at: '2026-01-01T00:01:30.000Z' })]))).status).toBe(200);
+  expect(processRow(store)).toMatchObject({ uncertain_reason: 'invalid_record' });
+  const future = setup();
+  const later = await open(future.store, future.clock);
+  expect((await post(later, logsRequest([sessionStart(0, { ...options, at: '2026-01-01T01:00:00.000Z' })]))).status).toBe(200);
+  expect(processRow(future.store)).toMatchObject({ uncertain_reason: 'invalid_record' });
+  expect(count(store, 'events') + count(future.store, 'events')).toBe(0);
+});
+
+test('the listener is bound to the IPv4 loopback address', async () => {
+  const { store, clock } = setup();
+  const receiver = await open(store, clock);
+  expect(receiver.boundAddress()).toBe('127.0.0.1');
+  expect(new URL(receiver.endpoint).hostname).toBe(receiver.boundAddress());
+});
+
+test('a pause during an upload rejects the body before it is decoded', async () => {
+  const { store, clock, life } = setup();
+  const receiver = await open(store, clock);
+  const status = await new Promise<number>((resolve, reject) => {
+    const outgoing = request(new URL('/v1/logs', receiver.endpoint), { method: 'POST',
+      headers: { 'content-type': 'application/json', ...receiver.exporterHeaders() } }, response => { response.resume(); resolve(response.statusCode ?? 0); });
+    outgoing.on('error', reject);
+    outgoing.write('{not json', () => { setTimeout(() => { life.pause('t1'); outgoing.end(); }, 20); });
+  });
+  expect(status).toBe(403);
+});
+
+test('rejected oversized uploads do not stop the receiver', async () => {
+  const { store, clock } = setup();
+  const receiver = await OtelReceiver.start(store, launch, profile, { clock, maxBodyBytes: 4096 });
+  resources.push(() => receiver.close());
+  tick?.(2000);
+  await post(receiver, 'x'.repeat(200000), { auth: false }).catch(() => undefined);
+  await post(receiver, 'x'.repeat(200000), { path: '/v1/metrics' }).catch(() => undefined);
+  expect((await post(receiver, logsRequest([sessionStart(0, options)]))).status).toBe(200);
+});
+
+test('a resumed session with a different product version is rejected at launch', async () => {
+  const { store, clock } = setup();
+  const first = await open(store, clock);
+  await first.close();
+  await expect(OtelReceiver.start(store, { ...launch, processId: 'process-2', productVersion: '2.0.0-synthetic' },
+    { ...profile, version: '2.0.0-synthetic' }, { clock })).rejects.toThrow('otel_scope_revoked');
+});
+
+test('conflicting process attributes on the record and resource are a scope mismatch', async () => {
+  const { store, clock } = setup();
+  const receiver = await open(store, clock);
+  expect((await post(receiver, logsRequest([sessionStart(0, options)], { 'harness_delta.process_id': 'process-9' }))).status).toBe(200);
+  expect(processRow(store)).toMatchObject({ uncertain_reason: 'scope_mismatch' });
 });
 
 test('storage failure is retryable and acknowledges nothing', async () => {
@@ -348,7 +428,7 @@ test('a resumed session gets a new process and token under the same task', async
   await first.close();
   const resumed = await open(store, clock, { ...launch, processId: 'process-2' });
   expect(resumed.exporterHeaders()).not.toEqual(first.exporterHeaders());
-  const own = { processId: 'process-2' };
+  const own = { processId: 'process-2', at: '2026-01-01T00:00:03.000Z' };
   expect((await post(resumed, logsRequest([sessionStart(0, own), apiRequest(1, own)]))).status).toBe(200);
   expect(processRow(store, 'process-2')).toMatchObject({ ordering: 'ready', next_sequence: 2 });
   expect(count(store, 'events')).toBe(1);

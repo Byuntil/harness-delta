@@ -333,8 +333,10 @@ Follow-up 4 must validate that profile first.
 **Transport:**
 - One receiver per process, on `127.0.0.1` with an ephemeral port.
 - The `x-harness-delta-token` header is compared by digest before anything else.
-- The scope is then checked without reading the body.
-- Rejected bodies are drained undecoded.
+- The scope is then checked without reading the body, and again before the
+  body is decoded, because a pause can happen during an upload.
+- Rejected bodies are drained undecoded, up to the body limit; after that, the
+  connection is closed.
 - Only `POST /v1/logs` with `application/json` and no content encoding is decoded.
 - Authenticated metrics and trace posts are acknowledged undecoded and never
   stored.
@@ -343,7 +345,7 @@ Follow-up 4 must validate that profile first.
   - `401` for a missing or foreign token;
   - `403` for a revoked or out-of-scope process;
   - `400` for an undecodable request or a conflict;
-  - `413` or `415` for rejected transport;
+  - `404`, `405`, `413` or `415` for rejected transport;
   - `503` for a storage failure.
 
 **Ordering and fail-closed rules:**
@@ -356,15 +358,21 @@ Follow-up 4 must validate that profile first.
   - a non-empty or unreadable `managed_settings.sources`;
   - a raw body event;
   - an invalid record;
+  - a record timed before the process was registered or after the receipt time;
   - a mismatched `app.version`, `harness_delta.process_id` attribute or
-    session owner;
+    session owner. Record and resource process attributes that disagree also
+    count as a mismatch;
   - a conflicting payload.
 - An uncertain process is revoked. An unmeasurable observation window opens at
   its last contiguous record and closes when the receiver closes or the task is
   paused or finalized.
+- A process that ends while still `pending` becomes uncertain
+  (`ordering_missing`). Its whole lifetime is recorded as an unmeasurable
+  window.
 - Contiguous records committed before that point remain partial usage.
 - A conflict rolls back its whole request.
-- An invalid record rejects its whole request, because its position is unknown.
+- An invalid record drops its whole request, because its position is unknown.
+  The request is still acknowledged.
 
 **Storage:**
 - `otel_records` keeps allowlisted fields and a closed query-source category.
@@ -373,11 +381,20 @@ Follow-up 4 must validate that profile first.
   - input includes cache creation and cache read;
   - cached input is cache read;
   - reasoning is unmeasurable.
-- Keys combine the product, run, process, event type and request identifier,
-  falling back to the sequence value.
+- Keys combine the product, run, process and event type with `request_id`,
+  else `client_request_id`, else the sequence value.
 - A task accepts either OTel processes or file-adapter sessions, never both, so
   reports cannot sum them.
 - Pause, finalization and deletion revoke the process permanently. A resumed
   task needs a new process and token.
+- A resumed session keeps its session row only when the product version is the
+  same.
+- Writes take the SQLite writer lock at the start of the transaction.
+
+**Launch requirement for Follow-up 3:** by default, Claude Code includes
+`app.version` only when `OTEL_METRICS_INCLUDE_VERSION` is `true`. The
+per-invocation settings must set that variable. Otherwise every record fails the
+version check and the process becomes uncertain. A managed installation that
+reports any managed source is always uncertain under this rule.
 
 Tests: `tests/otel-projection.test.ts` and `tests/otel-receiver.test.ts`.

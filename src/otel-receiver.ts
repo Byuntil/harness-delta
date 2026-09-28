@@ -46,7 +46,12 @@ export class OtelReceiver {
     return receiver;
   }
 
-  get endpoint(): string { return `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`; }
+  get endpoint(): string {
+    const address = this.server.address() as AddressInfo;
+    return `http://${address.address}:${address.port}`;
+  }
+
+  boundAddress(): string { return (this.server.address() as AddressInfo).address; }
 
   /** Exporter headers for the launched process's per-invocation settings. Never log them. */
   exporterHeaders(): Readonly<Record<string, string>> { return { [tokenHeader]: this.token }; }
@@ -59,8 +64,8 @@ export class OtelReceiver {
   }
 
   private handle(request: IncomingMessage, response: ServerResponse): void {
-    // Rejections drain bytes without buffering or parsing them.
-    const reject = (status: number) => { request.resume(); reply(response, status); };
+    // Rejections drain a bounded number of bytes without buffering or parsing them.
+    const reject = (status: number) => { reply(response, status); drain(request, this.maxBodyBytes); };
     if (this.closed || !this.authenticated(request)) return reject(401);
     if (request.method !== 'POST') return reject(405);
     const path = request.url?.split('?')[0];
@@ -70,8 +75,7 @@ export class OtelReceiver {
     if (!admitted) return reject(403);
     if (path !== '/v1/logs') {
       // Metrics are never added to event totals and traces are configured off: acknowledge undecoded.
-      request.resume();
-      request.on('end', () => reply(response, 200, '{}'));
+      drain(request, this.maxBodyBytes, () => reply(response, 200, '{}'));
       return;
     }
     const type = request.headers['content-type']?.split(';')[0]?.trim().toLowerCase();
@@ -84,12 +88,16 @@ export class OtelReceiver {
     let oversized = false;
     request.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > this.maxBodyBytes) { oversized = true; chunks.length = 0; }
+      if (size > this.maxBodyBytes && !oversized) { oversized = true; chunks.length = 0; reply(response, 413); request.destroy(); }
       if (!oversized) chunks.push(chunk);
     });
     request.on('error', () => { chunks.length = 0; });
     request.on('end', () => {
-      if (oversized) return reply(response, 413);
+      if (oversized) return;
+      // Scope can be revoked while the body uploads; re-check before decoding a single byte.
+      let admitted: boolean;
+      try { admitted = admitOtelRequest(this.store, this.processId, this.clock); } catch { return reply(response, 503); }
+      if (!admitted) { chunks.length = 0; return reply(response, 403); }
       let decoded;
       try { decoded = decodeLogsRequest(JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown); } catch { decoded = null; }
       chunks.length = 0;
@@ -107,6 +115,12 @@ export class OtelReceiver {
   }
 }
 
+function drain(request: IncomingMessage, limit: number, done?: () => void): void {
+  let size = 0;
+  request.on('data', (chunk: Buffer) => { size += chunk.length; if (size > limit) request.destroy(); });
+  if (done) request.on('end', done);
+  request.resume();
+}
 function digest(value: string): Buffer { return createHash('sha256').update(value, 'utf8').digest(); }
 function reply(response: ServerResponse, status: number, body = ''): void {
   if (response.headersSent) return;

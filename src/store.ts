@@ -44,6 +44,9 @@ export class Store {
 
   transaction<T>(action: () => T): T { return this.db.transaction(action)(); }
 
+  /** Takes the writer lock at BEGIN, so a busy upgrade cannot fail after reads. */
+  immediateTransaction<T>(action: () => T): T { return this.db.transaction(action).immediate(); }
+
   putEvent(input: Event): boolean {
     const parsed = EventSchema.safeParse(input);
     if (!parsed.success) throw new Error('invalid_event');

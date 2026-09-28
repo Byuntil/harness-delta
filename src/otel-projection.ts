@@ -112,7 +112,11 @@ export function projectRecord(record: DecodedRecord, profile: OtelVersionProfile
   const sessionId = IdSchema.safeParse(text(record.attributes.get('session.id')));
   if (sequence === undefined || sequence < 0 || !occurredAt || !sessionId.success) return { ok: false, reason: 'invalid_record' };
   const version = ProductVersionSchema.safeParse(text(record.attributes.get('app.version')));
-  const processAttribute = text(record.attributes.get('harness_delta.process_id')) ?? text(record.resource.get('harness_delta.process_id'));
+  const recordProcess = text(record.attributes.get('harness_delta.process_id'));
+  const resourceProcess = text(record.resource.get('harness_delta.process_id'));
+  // Disagreeing record and resource attributes are unusable, not resolved by precedence.
+  const processAttribute = recordProcess !== undefined && resourceProcess !== undefined && recordProcess !== resourceProcess
+    ? undefined : recordProcess ?? resourceProcess;
   const base = { sequence, occurredAt, sessionId: sessionId.data, productVersion: version.success ? version.data : null,
     processAttribute: processAttribute !== undefined && IdSchema.safeParse(processAttribute).success ? processAttribute : null };
 
