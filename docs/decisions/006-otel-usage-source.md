@@ -1,9 +1,9 @@
 # Native OpenTelemetry export as the primary Claude Code usage source
 
 Status: accepted 2026-09-28; not implemented. No receiver, CLI, storage,
-report-schema or collection-scope change exists yet, and this record does not
-change any requirement; the requirement wording in Follow-up 1 needs its own
-explicit decision.
+report-schema or collection-scope change exists yet. The Follow-up 1 wording for
+run-level linkage (R01) and the loopback receiver boundary (R08) was decided
+separately and is recorded in the requirements.
 Requirements: [R01, R02, R04, R05, R07, R08, R09 and R10](../requirements.md).
 R11 tool diagnostics are out of scope here. Documentation checked 2026-09-28.
 Existing [adapter evidence](001-adapter-capabilities.md), the
@@ -167,8 +167,8 @@ Codex OTel is a candidate under the same design, pending Follow-up 3 and 4.
      linked to the run.
    - Nested product processes do not inherit the exporter settings. Their usage
      is recorded as missing, never as zero.
-   - Linking by run changes what R01 calls a linked session. That wording needs
-     an explicit requirements decision before implementation.
+   - Linking by run changes what R01 calls a linked session. R01 now records
+     this wording.
 3. **Supported sessions.**
    - Only sessions launched by the measurement CLI are in scope.
    - Desktop, IDE and launcher-owned sessions are not.
@@ -297,8 +297,6 @@ never across products, because token semantics differ.
   token counts.
 
 **Revisit:**
-- The R01 linkage wording.
-- Whether R08 must name the loopback receiver.
 - Codex sandbox network behavior.
 - Agreement between metrics and events.
 - Flush behavior for short print-mode runs.
