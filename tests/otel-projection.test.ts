@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { decodeLogsRequest, projectRecord } from '../src/otel-projection.js';
-import { apiError, apiRequest, logRecord, logsRequest, profile, sessionStart, userPrompt } from './helpers/otel-fixture.js';
+import { apiError, apiRequest, assistantResponse, logRecord, logsRequest, profile, sessionStart, userPrompt } from './helpers/otel-fixture.js';
 
 const options = { processId: 'process-1' };
 const forbidden = ['synthetic.person', 'org-synthetic', 'account-synthetic', 'user_synthetic', 'anon-synthetic',
@@ -59,6 +59,23 @@ test('session-start keeps only its trigger and whether managed sources exist', (
 test('raw body events are flagged as content exposure and project nothing', () => {
   const [projected] = only(logsRequest([logRecord('api_request_body', 3, { body: 'synthetic content' }, options)]));
   expect(projected).toEqual({ ok: false, reason: 'content_enabled' });
+});
+
+test('redacted prompt and response attributes project as other events', () => {
+  const projected = only(logsRequest([userPrompt(1, options), assistantResponse(2, options)]));
+  expect(projected).toMatchObject([{ ok: true, record: { eventType: 'other', fields: null } }, { ok: true, record: { eventType: 'other', fields: null } }]);
+  expect(JSON.stringify(projected)).not.toContain('REDACTED');
+});
+
+test('prompt or response values other than the exact redaction marker are flagged as content exposure', () => {
+  const exposed = [
+    userPrompt(1, options, 'synthetic prompt text'), assistantResponse(2, options, 'synthetic response text'),
+    userPrompt(3, options, ''), userPrompt(4, options, '[REDACTED]'), assistantResponse(5, options, 7),
+    apiRequest(6, options, { prompt: 'synthetic prompt text' }),
+  ];
+  const projected = only(logsRequest(exposed));
+  expect(projected).toEqual(exposed.map(() => ({ ok: false, reason: 'content_enabled' })));
+  expect(JSON.stringify(projected)).not.toContain('synthetic');
 });
 
 test('records without a valid sequence, timestamp, session or complete token counts are invalid', () => {

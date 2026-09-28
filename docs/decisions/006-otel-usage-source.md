@@ -361,6 +361,8 @@ Follow-up 4 must validate that profile first.
   - a sequence gap;
   - a non-empty or unreadable `managed_settings.sources`;
   - a raw body event;
+  - a `prompt` or `response` attribute whose value is not exactly `<REDACTED>`,
+    the documented default when content logging is off;
   - an invalid record;
   - a record timed before the process was registered or after the receipt time;
   - a mismatched `app.version`, `harness_delta.process_id` attribute or
@@ -376,7 +378,9 @@ Follow-up 4 must validate that profile first.
 - Contiguous records committed before that point remain partial usage.
 - A conflict rolls back its whole request.
 - An invalid record drops its whole request, because its position is unknown.
-  The request is still acknowledged.
+  Content exposure (a raw body event or an unredacted `prompt` or `response`)
+  also drops its whole request, and it is the recorded reason when a request
+  has both. The request is still acknowledged.
 
 **Storage:**
 - `otel_records` keeps allowlisted fields and a closed query-source category.
