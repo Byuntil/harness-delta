@@ -17,16 +17,21 @@ and Claude Code, isolated behind product adapters; target status does not imply 
 Collect only while the measurement CLI runs and only when the project is registered,
 the measurement task is active, and the session is linked. A session is linked
 explicitly, or at run level when the measurement CLI launched its product process
-and a per-process credential binds that process's telemetry to one project, task
-and run. Session identifiers such a process reports later, for example after a
-reset, stay linked to that run. Usage of nested processes that do not inherit the
-launch settings is missing, not zero. Desktop, IDE and launcher-owned sessions are
-not linked this way. Installation must not start collection or transmission.
+and a per-process credential binds that process's telemetry to one project, task,
+and run. Session identifiers that the process later reports under the same
+credential, in sequence order (for example, after a reset), stay linked to that run.
+Run-level linkage authorizes only credential-authenticated telemetry received by
+the CLI's loopback receiver; opening transcript, rollout, or other session files
+still requires an explicit session and source mapping. Usage of nested product
+processes is never accepted under the parent process's credential; without their
+own credential it is missing, not zero. Desktop, IDE, and launcher-owned sessions
+are not linked this way. Installation must not start collection or transmission.
 Unlinked sessions are out of scope.
 
 Acceptance: unrelated projects, inactive tasks, and unlinked sessions contribute
-no contents or usage; telemetry with a missing, forged or revoked process credential
-is rejected before decoding; restarting does not automatically backfill the offline
+no contents or usage; each receiver rejects telemetry without its own valid,
+unrevoked process credential before decoding, and never stores or logs request
+headers or rejected bodies; restarting does not automatically backfill the offline
 interval.
 
 ## R02 - Data minimization and capability evidence
@@ -121,8 +126,11 @@ public deployment, public signup, and billing are out of scope.
 A loopback receiver that the measurement CLI starts for one launched product process
 is a local collection boundary under R01, not an integration or central service.
 It listens only on a loopback interface, accepts only that process's credential,
-forwards nothing, and stops accepting data when measurement of the process ends.
-The CLI never enables product telemetry in global or user configuration.
+forwards nothing to any other destination, and stops accepting data when the
+credential is revoked at pause, finalization, or deletion. The CLI enables product
+telemetry only through per-invocation settings of the launched process, points
+every exporter it can configure at that receiver or turns it off, and never edits
+global, user, or project configuration.
 
 Acceptance: unauthorized reads/writes/deletes fail, retries remain idempotent, and
 central failure does not block local measurement.
