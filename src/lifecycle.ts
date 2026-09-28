@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { IdSchema, ProductVersionSchema, TaskMetadataSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
 import { interruptManagedRuns } from './managed-journal.js';
+import { revokeOtelProcesses } from './otel-journal.js';
 
 export type TaskState = 'registered' | 'active' | 'paused' | 'finalized';
 export type Outcome = 'success' | 'failed' | 'aborted';
@@ -70,6 +71,7 @@ export class Lifecycle {
         }
       } else {
         interruptManagedRuns(this.store, taskId, 'pause', now);
+        revokeOtelProcesses(this.store, taskId, 'pause', now);
         this.store.execute('UPDATE active_intervals SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL', [now, taskId]);
       }
     });
@@ -117,6 +119,7 @@ export class Lifecycle {
           (outcome === 'success' && criteriaMet.length !== metadata.criterion_ids.length)) throw new Error('invalid_criteria');
       const now = this.now(task);
       interruptManagedRuns(this.store, taskId, 'finalize', now);
+      revokeOtelProcesses(this.store, taskId, 'finalize', now);
       this.store.execute('INSERT INTO outcomes(task_id,status,criteria_met,first_success,assessed_at) VALUES (?,?,?,?,?)',
         [taskId, outcome, JSON.stringify([...criteriaMet].sort()), task.first_success, now]);
       this.store.execute("UPDATE tasks SET state = 'finalized', finalized_at = ?, last_transition_at = ?, generation = generation + 1 WHERE id = ?", [now, now, taskId]);
@@ -134,6 +137,8 @@ export class Lifecycle {
       this.rejectDeleted('session', sessionId);
       const metadata = TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
       if (metadata.product !== product) throw new Error('product_mismatch');
+      // OTel and file adapter observations must never be summed in one task report.
+      if (this.store.get('SELECT id FROM otel_processes WHERE task_id = ?', [taskId])) throw new Error('source_conflict');
       this.store.execute('INSERT INTO sessions(id,project_id,task_id,source_path,product,product_version) VALUES (?,?,?,?,?,?)',
         [sessionId, task.project_id, taskId, path, product, version]);
     });

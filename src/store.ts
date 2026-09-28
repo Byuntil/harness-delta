@@ -12,7 +12,7 @@ export class Store {
     this.db = new Database(path);
     try {
       const version = this.db.pragma('user_version', { simple: true });
-      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql', '004_managed_observation.sql'];
+      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql', '004_managed_observation.sql', '005_otel_receiver.sql'];
       if (typeof version !== 'number' || !Number.isInteger(version) || version < 0 || version > migrations.length) {
         throw new Error('unsupported_schema_version');
       }
