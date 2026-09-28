@@ -1,9 +1,11 @@
 # Native OpenTelemetry export as the primary Claude Code usage source
 
-Status: accepted 2026-09-28; not implemented. No receiver, CLI, storage,
-report-schema or collection-scope change exists yet. The Follow-up 1 wording for
-run-level linkage (R01) and the loopback receiver boundary (R08) was decided
-separately and is recorded in the requirements.
+Status: accepted 2026-09-28; Follow-ups 1 and 2 are done. The Follow-up 1
+wording for run-level linkage (R01) and the loopback receiver boundary (R08)
+was decided separately and is recorded in the requirements. An internal,
+synthetic-only receiver and its storage (migration 005) now exist; see
+[Offline receiver](#offline-receiver-follow-up-2). It launches no product
+process. There is no CLI, report-schema change or supported product version yet.
 Requirements: [R01, R02, R04, R05, R07, R08, R09 and R10](../requirements.md).
 R11 tool diagnostics are out of scope here. Documentation checked 2026-09-28.
 Existing [adapter evidence](001-adapter-capabilities.md), the
