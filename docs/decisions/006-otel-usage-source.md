@@ -447,11 +447,12 @@ that does not echo the input.
   block follows the same levels, per variable.
 - A settings `env` value replaces the inherited shell value. Settings can set a
   variable but not remove one, so the builder sets every variable it depends on.
-- Project and local settings cannot set the OTel exporter, content and beta
-  tracing variables (v2.1.282 or later). They can still turn a selector off with
-  `none` or a content option off with `0`, but not when managed settings, a
-  `--settings` file or the launch environment sets that variable; the builder
-  sets all of them. No variable the builder sets is ignored in `--settings`.
+- Project and local settings cannot set the OTel exporter variables (v2.1.282
+  or later), `OTEL_LOG_RAW_API_BODIES` or the detailed beta tracing pair
+  (v2.1.251 or later). They can still turn a selector off with `none`, or
+  `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_CONTENT` or `OTEL_LOG_TOOL_DETAILS` off
+  with `0`, but not when managed settings, a `--settings` file or the launch
+  environment sets that variable; the builder sets all of them. No variable the builder sets is ignored in `--settings`.
 - Managed settings lock the destination per variable (v2.1.217 or later): a
   managed generic endpoint removes developer-set per-signal endpoints, a managed
   protocol removes per-signal protocols, and managed credentials remove
