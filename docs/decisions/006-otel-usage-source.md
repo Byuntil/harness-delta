@@ -6,8 +6,8 @@ was decided separately and is recorded in the requirements. An internal,
 synthetic-only receiver and its storage (migration 005) now exist; see
 [Offline receiver](#offline-receiver-follow-up-2). It launches no product
 process. There is no CLI, report-schema change or supported product version yet.
-The offline part of Follow-up 3 (launch-settings builders and a documented
-precedence analysis) exists; its live check has not been run. See
+Follow-up 3 added launch-settings builders, a documented precedence analysis
+and a prompt-free live check. See
 [Launch settings](#launch-settings-follow-up-3).
 Requirements: [R01, R02, R04, R05, R07, R08, R09 and R10](../requirements.md).
 R11 tool diagnostics are out of scope here. Documentation checked 2026-09-28.
@@ -170,8 +170,10 @@ Codex OTel is a candidate under the same design, pending Follow-up 3 and 4.
    - A process can report several session IDs, for example after `/clear`.
      A new `session.id` arriving under the same token, in sequence order, stays
      linked to the run.
-   - Nested product processes do not inherit the exporter settings. Their usage
-     is recorded as missing, never as zero.
+   - Nested product processes do not inherit the exporter destination or
+     credential. Their usage is recorded as missing, never as zero. They can
+     inherit the enable setting; see [Launch settings](#launch-settings-follow-up-3)
+     and R08.
    - Linking by run changes what R01 calls a linked session. R01 now records
      this wording.
 3. **Supported sessions.**
@@ -408,7 +410,8 @@ Tests: `tests/otel-projection.test.ts` and `tests/otel-receiver.test.ts`.
 An internal builder in `src/otel-launch-settings.ts` produces the per-invocation
 settings for one launched Claude Code process. Like the receiver, it is not
 exported from the package entry point, has no CLI and launches no process.
-Documentation checked 2026-09-28; no product process has been run.
+Documentation checked 2026-09-28. The live check below was run separately
+with the maintainer's approval; the builder itself launches nothing.
 
 **Claude settings.** The builder writes `{"env": {...}}` to a 0600 file in a
 private 0700 directory and returns `--settings <path>` as the only arguments,
@@ -475,21 +478,34 @@ that does not echo the input.
   variables come from the OpenTelemetry exporter specification; the Claude Code
   documentation does not list them.
 
-**Needs a live check** before any support claim:
-- that `--settings` values win over the same variables in user settings and the
-  shell for this product version;
+**Live check (2026-09-28, Claude Code 2.1.283).** One interactive process was
+started with these settings and ended without a prompt, so no model request
+was made. The launch environment set conflicting exporter variables that
+pointed at a second loopback listener (a decoy). Results:
+- The decoy received nothing. The receiver received two `/v1/logs` posts, both
+  accepted, and no request failed authentication, so the generic and
+  per-signal token headers did not arrive duplicated.
+- The process became ready: the first record was `managed_settings_resolved`
+  at sequence 0 in the launch session with no managed sources, and sequences
+  0–11 were contiguous with matching `app.version` and process attribute. No
+  usage or content event arrived.
+- The debug log did not contain the token; it showed metrics off and the logs
+  exporter at the receiver over `http/json`.
+- A `SessionStart` hook, a subprocess, saw `CLAUDE_CODE_ENABLE_TELEMETRY` and
+  `BETA_TRACING_ENDPOINT` set and every `OTEL_EXPORTER_OTLP_*` variable unset.
+  This confirms the nested-process limitation above; R08 records it.
+- A run with a temporary, empty configuration directory, to test the user
+  settings layer, stopped before telemetry started and was inconclusive. The
+  receiver recorded it as `ordering_missing`.
+
+**Still unverified:**
+- that `--settings` values win over the same variables in user settings
+  (documented; the live check covered only the launch environment);
 - that `0` disables `OTEL_LOG_RAW_API_BODIES`, `OTEL_LOG_MANAGED_SETTINGS` and
-  the beta tracing flags (only enabling values are documented);
-- that the exporter posts to `/v1/logs` and the first batch starts with
-  `managed_settings_resolved` at the profile's sequence value, carrying
-  `app.version`, `session.id` and `harness_delta.process_id`;
-- that the generic and per-signal copies of the token header arrive as one
-  value; a duplicated header would fail authentication and the run would fail
-  closed;
+  the beta tracing flags, and that content stays off when a prompt is sent;
 - an `otelHeadersHelper` in user settings, which `--settings` cannot remove,
   adds its headers to exports and blocks every export when it fails;
-- whether nested processes see `CLAUDE_CODE_ENABLE_TELEMETRY`;
-- whether the `--settings` values appear in debug logs or session records.
+- whether the `--settings` values appear in session records.
 
 **Codex overrides** ([configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference),
 [basics](https://learn.chatgpt.com/docs/config-file/config-basic),
@@ -506,8 +522,10 @@ that does not echo the input.
   appear in the process list, so the builder accepts no credentials. The
   receiver therefore cannot authenticate a Codex process, and Codex support
   stays blocked until an argv-free credential source is verified.
-- Whether an inline table replaces or merges configured exporter tables, which
-  could add configured headers or another exporter, and what Codex exports
-  without a turn need a live check.
+- Live check (codex-cli 0.156.1, same conditions, overrides pointing at the
+  decoy only): without a turn, Codex posted three `application/json` batches
+  (about 43 KB) to `/v1/logs`. Their content was not read. Whether an inline
+  table replaces or merges configured exporter tables, which could add
+  configured headers or another exporter, remains unverified.
 
 Tests: `tests/otel-launch-settings.test.ts`.
