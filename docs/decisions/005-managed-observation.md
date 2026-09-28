@@ -1,6 +1,8 @@
 # Internal managed observation lifecycle
 
 Status: synthetic offline implementation; no real producer or complete reporting enabled.
+Qualifying the headless stream interface as a real producer is paused by
+[ADR 006](006-otel-usage-source.md).
 Requirements: [R01–R05, R07 and R11](../requirements.md).
 
 ## Scope and producer boundary

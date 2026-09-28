@@ -15,11 +15,19 @@ The tool measures metadata and outcomes for real development tasks. Local operat
 must work without GitHub or a central server. Target integrations are Codex app/CLI
 and Claude Code, isolated behind product adapters; target status does not imply support.
 Collect only while the measurement CLI runs and only when the project is registered,
-the measurement task is active, and the session is explicitly linked. Installation
-must not start collection or transmission. Unlinked sessions are out of scope.
+the measurement task is active, and the session is linked. A session is linked
+explicitly, or at run level when the measurement CLI launched its product process
+and a per-process credential binds that process's telemetry to one project, task
+and run. Session identifiers such a process reports later, for example after a
+reset, stay linked to that run. Usage of nested processes that do not inherit the
+launch settings is missing, not zero. Desktop, IDE and launcher-owned sessions are
+not linked this way. Installation must not start collection or transmission.
+Unlinked sessions are out of scope.
 
 Acceptance: unrelated projects, inactive tasks, and unlinked sessions contribute
-no contents or usage; restarting does not automatically backfill the offline interval.
+no contents or usage; telemetry with a missing, forged or revoked process credential
+is rejected before decoding; restarting does not automatically backfill the offline
+interval.
 
 ## R02 - Data minimization and capability evidence
 
@@ -109,6 +117,12 @@ requires a separate request and confirmed result.
 The initial proposed server is a single-team, single-process SQLite service with
 hashed administrator-issued bearer tokens and project permissions. Validate locally;
 public deployment, public signup, and billing are out of scope.
+
+A loopback receiver that the measurement CLI starts for one launched product process
+is a local collection boundary under R01, not an integration or central service.
+It listens only on a loopback interface, accepts only that process's credential,
+forwards nothing, and stops accepting data when measurement of the process ends.
+The CLI never enables product telemetry in global or user configuration.
 
 Acceptance: unauthorized reads/writes/deletes fail, retries remain idempotent, and
 central failure does not block local measurement.

@@ -20,6 +20,8 @@ concurrent-turn, interrupted-turn, or complete observation validation.
 | Codex CLI exec JSON and rollout JSONL | 0.156.1 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by unverified exceptional boundaries and child accounting |
 | Codex desktop | Not probed | Unsupported until a dedicated app session establishes identity, version, and counter behavior; CLI evidence does not establish app parity |
 | Claude Code print JSON and transcript JSONL | 2.1.283 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by message revisions, exceptional boundaries, and child accounting |
+| Claude Code native OpenTelemetry export | Not observed | Unverified primary candidate ([ADR 006](006-otel-usage-source.md)); settings precedence, export, flush and loss behavior are unverified |
+| Codex OpenTelemetry export | Not observed | Unverified candidate ([ADR 006](006-otel-usage-source.md)); per-invocation overrides, event-level token counts and sandbox network behavior are unverified |
 
 ## Fields
 
@@ -66,6 +68,11 @@ The probe did not enforce a durable session link before processing stream usage;
 that is a limitation of this feasibility probe, not production gate evidence.
 Only files whose names matched these exact IDs were subsequently opened. The
 metadata inside agreed with the known working directory and session IDs.
+
+OpenTelemetry sources have no file to open. Their scope comes from run-level
+linkage under R01: a per-process credential issued at launch, checked before any
+payload is decoded. No OpenTelemetry source was enabled or observed for this
+record, and neither row in the source table is a support claim.
 
 A production adapter must receive an explicit project/task/session/source mapping
 before opening a source. Do not discover membership by opening all transcripts.
