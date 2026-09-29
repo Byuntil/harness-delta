@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "node_modules/.cache/conformance",
+    "noEmit": false
+  },
+  "include": ["scripts/conformance/*.ts"],
+  "exclude": ["node_modules", "dist", "scripts/conformance/*.test.ts", "scripts/conformance/vitest.config.ts"]
+}

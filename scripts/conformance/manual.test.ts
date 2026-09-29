@@ -1,11 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { expect, test } from 'vitest';
 import { admissionCatalog, traverseCatalog } from './catalog.js';
 import { confirmationPlan } from './confirm.js';
 import { createInvestigation, runInvestigation } from './investigate.js';
 import { parseCandidate, type CandidateInspection } from './parse-candidate.js';
 import { codex01580Candidate } from './candidate.js';
-import { main } from './runner.js';
+import { main, type RunnerEnvironment } from './runner.js';
 
 const sessionId = '11112222-3333-4444-5555-666677778888';
 const rollout = `rollout-2026-01-01T00-00-00-${sessionId}.jsonl`;
@@ -22,17 +24,53 @@ const inspection: CandidateInspection = {
   traversal: traverseCatalog([], admissionCatalog),
 };
 
-test('the manual entry refuses a live run and does not spawn a product', () => {
-  expect(() => main()).toThrow(/^live_run_not_approved$/);
+test('the manual entry refuses non-interactive or unexpected invocations before any product command', async () => {
+  const written: string[] = [];
+  let created = 0;
+  const environment = (interactive: boolean, codexHomeSet = false): RunnerEnvironment => ({
+    interactive, codexHomeSet, cwd: process.cwd(), write: text => { written.push(text); },
+    createDeps: () => { created += 1; throw new Error('deps_created'); },
+  });
+  for (const argv of [[], ['--yes'], ['--out', 'relative'], ['--out', '/abs', '--yes'], ['--out', '/abs', '--dangerously-bypass-hook-trust']]) {
+    expect(await main(argv, environment(true))).toBe(2);
+  }
+  const allowed = join(process.cwd(), '.harness-delta/work/synthetic/live');
+  expect(await main(['--out', allowed], environment(false))).toBe(2);
+  expect(await main(['--out', allowed], environment(true, true))).toBe(2);
+  for (const outside of ['/abs', join(process.cwd(), 'docs'), join(process.cwd(), '.harness-delta/../docs')]) {
+    expect(await main(['--out', outside], environment(true))).toBe(2);
+  }
+  const linkRoot = mkdtempSync(join(tmpdir(), 'hd-conf-link-'));
+  try {
+    mkdirSync(join(process.cwd(), '.harness-delta/work'), { recursive: true });
+    const link = join(process.cwd(), '.harness-delta/work', `link-${basename(linkRoot)}`);
+    symlinkSync(linkRoot, link);
+    try {
+      expect(await main(['--out', join(link, 'live')], environment(true))).toBe(2);
+    } finally {
+      rmSync(link);
+    }
+  } finally {
+    rmSync(linkRoot, { recursive: true, force: true });
+  }
+  expect(written).toContain('codex_home_unsupported\n');
+  expect(written).toContain('out_must_be_under_harness_delta\n');
+  expect(created).toBe(0);
+  expect(written).toContain('interactive_terminal_required\n');
   const runner = readFileSync(new URL('./runner.ts', import.meta.url), 'utf8');
-  expect(runner).not.toContain('child_process');
-  expect(runner).not.toContain('spawn(');
   expect(runner).not.toContain('dangerously-bypass-hook-trust');
+  expect(runner).not.toContain('--yes');
   const source = readFileSync(new URL('./investigate.ts', import.meta.url), 'utf8');
   expect(source).not.toContain('linkSession');
   expect(source).not.toContain('parseSnapshot');
   expect(source).not.toContain('Collector');
   expect(source).not.toContain("from '../../src/store.js'");
+  for (const file of ['./live.ts', './runner.ts']) {
+    const text = readFileSync(new URL(file, import.meta.url), 'utf8');
+    expect(text).not.toContain('linkSession');
+    expect(text).not.toContain('Collector');
+    expect(text).not.toContain('store.js');
+  }
 });
 
 test('synthetic investigation stops without opening files or writing events', () => {

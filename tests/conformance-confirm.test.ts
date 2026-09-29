@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 import { confirmationPlan, readConfirmation, renderConfirmation } from '../scripts/conformance/confirm.js';
 import { matchExactSessionFilename } from '../scripts/conformance/filename.js';
-import { hookTrustArguments, rejectBypass } from '../scripts/conformance/hook.js';
+import { hookTrustArguments, rejectBypass, sessionStartHookIdentity, sessionStartTrustedHash } from '../scripts/conformance/hook.js';
 
 const lines = [
   'command: /synthetic/codex-not-run',
@@ -56,10 +56,15 @@ test('hook trust arguments use the source-derived state key and reject unsafe ha
   const stateKey = '/<session-flags>/config.toml:session_start:0:0';
   expect(stateKey.includes('"')).toBe(false);
   expect(stateKey.includes('\\')).toBe(false);
-  expect(hookTrustArguments({ command: '/synthetic/hook', trustedHash: hash })).toEqual([
+  const args = hookTrustArguments({ command: '/synthetic/hook', trustedHash: hash });
+  expect(args).toEqual([
     '-c', 'hooks.SessionStart=[{hooks=[{type="command",command="/synthetic/hook"}]}]',
-    '-c', `hooks.state."${stateKey}".trusted_hash="${hash}"`,
+    '-c', `hooks.state={"${stateKey}"={trusted_hash="${hash}"}}`,
   ]);
+  // Codex rust-v0.158.0 takes the key before the first `=` and splits it on every `.`
+  // without honoring quotes, so a quoted dotted key would be split apart.
+  const keySegments = args.filter((_, index) => index % 2 === 1).map(arg => arg.slice(0, arg.indexOf('=')).split('.'));
+  expect(keySegments).toEqual([['hooks', 'SessionStart'], ['hooks', 'state']]);
   expect(() => hookTrustArguments({ command: '/synthetic/hook', trustedHash: 'a'.repeat(64) })).toThrow(/^invalid_hook_trust$/);
   expect(() => hookTrustArguments({ command: '/synthetic/hook', trustedHash: `sha256:${'A'.repeat(64)}` })).toThrow(/^invalid_hook_trust$/);
   expect(() => hookTrustArguments({ command: '/synthetic/hook', trustedHash: 'sha256:abc' })).toThrow(/^invalid_hook_trust$/);
@@ -68,4 +73,15 @@ test('hook trust arguments use the source-derived state key and reject unsafe ha
   }
   expect(() => rejectBypass(['--dangerously-bypass-hook-trust'])).toThrow(/^bypass_rejected$/);
   expect(readFileSync(new URL('../scripts/conformance/hook.ts', import.meta.url), 'utf8')).not.toContain('node:fs');
+});
+
+test('the SessionStart trusted hash follows the source-derived normalized identity', () => {
+  // Reference digest computed independently (Python hashlib) over the pinned preimage.
+  expect(sessionStartHookIdentity('/synthetic/hook')).toBe(
+    '{"event_name":"session_start","hooks":[{"async":false,"command":"/synthetic/hook","timeout":600,"type":"command"}]}',
+  );
+  expect(sessionStartTrustedHash('/synthetic/hook')).toBe('sha256:8db9f718a661878ce480f044378622df9ded752e63415b48110deb677cac4485');
+  expect(() => sessionStartTrustedHash('relative/hook')).toThrow(/^invalid_hook_command$/);
+  const command = '/synthetic/hook';
+  expect(() => hookTrustArguments({ command, trustedHash: sessionStartTrustedHash(command) })).not.toThrow();
 });

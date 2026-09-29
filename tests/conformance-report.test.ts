@@ -84,6 +84,13 @@ test('counter classification stores outcomes only', () => {
   const execMiss = counters({ total, exec: vector({ ...total, input: 11 }) });
   expect(execMiss.exec_equals_rollout_total).toBe('fail');
   expect(JSON.stringify(execMiss)).not.toMatch(/\d/);
+  // `codex exec --json` usage reports no total_tokens; compare the fields it reports.
+  const execStream = vector({ ...total, totalTokens: null });
+  expect(counters({ total, exec: execStream }).exec_equals_rollout_total).toBe('pass');
+  expect(counters({ total, exec: vector({ ...execStream, output: 2 }) }).exec_equals_rollout_total).toBe('fail');
+  expect(counters({ total, exec: vector({ ...execStream, cacheWrite: null }) }).exec_equals_rollout_total).toBe('pass');
+  expect(counters({ total, exec: vector({ ...execStream, reasoning: null }) }).exec_equals_rollout_total).toBe('invalid');
+  expect(counters({ total: vector({ ...total, cached: null }), exec: execStream }).exec_equals_rollout_total).toBe('fail');
   const prior = vector({ input: 4, output: 1, cached: 0, reasoning: 0, cacheWrite: 0, totalTokens: 5 });
   const last = vector({ input: 6, output: 0, cached: 0, reasoning: 0, cacheWrite: 0, totalTokens: 6 });
   expect(counters({ total, priorTotal: prior, last }).resume_total_equals_prior_plus_last).toBe('pass');

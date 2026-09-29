@@ -57,12 +57,16 @@ export function projectReport(input: {
   };
 }
 
-export function writeRestrictedReport(directory: string, report: ConformanceReport): void {
-  const body = `${JSON.stringify(report)}\n`;
-  const finalPath = join(directory, 'conformance-report.json');
-  const temporary = join(directory, `.conformance-report.${process.pid}.tmp`);
+export function writeRestrictedJson(directory: string, fileName: string, value: unknown): void {
+  const body = `${JSON.stringify(value)}\n`;
+  const finalPath = join(directory, fileName);
+  const temporary = join(directory, `.${fileName}.${process.pid}.tmp`);
   writeFileSync(temporary, body, { mode: 0o600 });
   chmodSync(temporary, 0o600);
   renameSync(temporary, finalPath);
   chmodSync(finalPath, 0o600);
+}
+
+export function writeRestrictedReport(directory: string, report: ConformanceReport): void {
+  writeRestrictedJson(directory, 'conformance-report.json', report);
 }
