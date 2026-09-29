@@ -12,7 +12,9 @@ The approved live checks of Follow-ups 3 and 4 have run; see
 [Live checks](#live-checks-follow-ups-3-and-4). They are bounded observations,
 not a support claim; user-settings precedence remains open. On 2026-09-29 Codex
 OTel was not adopted as a usage source; the rollout-file adapter is the primary
-Codex usage candidate (see [Decision](#decision)).
+Codex usage candidate (see [Decision](#decision)). The ADR 004 evidence mapping of
+Follow-up 5 is recorded in [Evidence mapping](#evidence-mapping-follow-up-5); no
+scope has all eleven facts verified, so complete totals remain unavailable.
 Requirements: [R01, R02, R04, R05, R07, R08, R09 and R10](../requirements.md).
 R11 tool diagnostics are out of scope here. Documentation checked 2026-09-28.
 Existing [adapter evidence](001-adapter-capabilities.md), the
@@ -335,6 +337,8 @@ never across products, because token semantics differ.
    - record flush and loss behavior.
 5. Map the ADR 004 evidence to this source before any complete-total claim.
    Then prepare the R09 pilot protocol within one product and version.
+   The mapping is in [Evidence mapping](#evidence-mapping-follow-up-5). The R09
+   pilot protocol is not prepared: its frozen inputs are open user decisions.
 
 ## Offline receiver (Follow-up 2)
 
@@ -647,3 +651,64 @@ Tests: `tests/otel-launch-settings.test.ts`.
     matched exec usage and excluded the zero-output request.
   - Interactive session identity before file access is unresolved.
   - See the [Codex 0.158.0 rollout check](001-adapter-capabilities.md#codex-01580-rollout-check).
+
+## Evidence mapping (Follow-up 5)
+
+Mapped 2026-09-29 without a new product run, from this ADR, the
+[coverage evidence policy](004-complete-measurement-readiness.md), the
+[adapter capabilities](001-adapter-capabilities.md), the
+[adapter profiles](007-adapter-version-profiles.md) and a manual Codex 0.158.0
+conformance run (one `exec` turn and one resume, 2026-09-29) whose runner is
+proposed in [#12](https://github.com/Byuntil/harness-delta/pull/12). That run's detailed results are not yet
+published; they are cited here only as supporting observations.
+
+**Scopes:**
+- Claude OTel: Claude Code 2.1.283 processes launched with the per-invocation
+  settings of [Launch settings](#launch-settings-follow-up-3). The receiver and
+  launch settings are internal and synthetic-only; no version profile ships and
+  no measurement command launches them yet.
+- Codex rollout: the file adapter. Production accepts 0.156.1 only, through an
+  explicit manual link. 0.158.0 is an unregistered candidate observed in `exec`
+  mode. Interactive Codex linkage is unsupported. Each cell names the version it
+  describes when the versions differ.
+
+**States.** *Verified*: the harness mechanism is tested and the product behavior
+it relies on was observed for this version and mode. *Mechanism only*: the harness
+side is tested with synthetic input, but the product behavior is not established.
+*Unknown*: not established. *Gap*: a known reason the fact does not hold for that
+scope (ADR 004 `violated`). No cell currently reaches *Verified*.
+
+| Fact | Claude OTel (launched, 2.1.283) | Codex rollout |
+| --- | --- | --- |
+| `scopeBeforeAccess` | Mechanism only: token checked before decoding, scope rechecked before the body; the token path was observed live | Mechanism only: registry rejection and an explicit manual link before reads. In the manual 0.158.0 `exec` run, the file was found by the exact exec-stream thread ID and a per-invocation SessionStart hook matched it. Interactive: gap |
+| `freshSession` | Unknown: a new session ID is preassigned, but no source proves the task had no unobserved prior work | Unknown: a new thread is fresh; linking an existing session relies on the baseline rule, which does not recover earlier usage |
+| `readyBeforeFirstRequest` | Mechanism only: the receiver listens before launch, and the first batch started at sequence 0 in the live checks; interactive startup and context usage are unknown | Unknown: the product writes the rollout; whether it records every request from the start is not established (see `requestUniverse`) |
+| `continuousObservation` | Mechanism only: sequence contiguity, revocation and uncertain windows; export can be lost on abrupt exit | Mechanism only: pause and restart exclusion, rotation and truncation fail closed, no backfill |
+| `fixedModel` | Unknown: the model is stored per request, but no rule fails a run on a model change | Mechanism only: a `turn_context.model` change blocks, but turn context does not prove the effective configuration ([ADR 001](001-adapter-capabilities.md)), and no model change was exercised |
+| `boundedTopology` | Unknown: only `sdk` to `main` observed; subagent and compaction values unobserved; nested processes did not receive the checked exporter variables, so their usage is expected to be missing | Gap for 0.158.0: its topology and `thread_settings_applied` admission gates are not cleared (ADR 007). Review of openai/codex rust-v0.158.0 shows `collab_*` events are not persisted to the rollout, and no current rule blocks sub-agent activity items. 0.156.1: fails closed on its known shapes (ADR 001) |
+| `requestUniverse` | Unknown: retries and auxiliary requests unobserved | Gap: a zero-output `response.completed` with nonzero input appears in the OTel export but in neither the rollout nor exec usage (0.158.0, ADR 001). Its meaning is undocumented, and [ADR 005](005-managed-observation.md) forbids omitting an unobserved warm-up request. Failed attempts unobserved |
+| `terminalAccounting` | Unknown: no documented terminal watermark; one print-mode run's timing was consistent with a flush at shutdown | Unknown: after process exit, `exec` usage equalled the rollout total in one run and one resume (0.158.0), but process exit is not a terminal barrier (ADR 004) and no production barrier exists |
+| `immutableIdentity` | Mechanism only: request-ID keys, conflicts rejected | Mechanism only: cumulative-vector keys, equal replays add nothing, conflicts fail |
+| `durableFlush` | Mechanism only: success only after the SQLite commit; product-side export loss unknown | Mechanism only: collector transaction and partial-line waiting |
+| `counterSemantics` | Unknown: cache components were zero live, so their semantics are untested | Unknown: on 0.158.0, cumulative totals held, total equalled input plus output, and cached and cache-write were within input; cache-write and reasoning were zero, so their inclusion and overlap are untested |
+
+**Consequences:**
+- No scope has all eleven facts verified, so `complete_tokens` stays null and a
+  comparison can use only partial usage with explicit missingness.
+- A pilot compares within one product and version, using one usage source for
+  both arms.
+- Subagents, retries, compaction and the unrecorded zero-output request can make
+  loss differential between arms when the arms use these features differently.
+  This must be validated, not assumed.
+- Codex updated itself from 0.156.1 to 0.158.0 during this work. The process-only
+  update controls in ADR 007 are documented but not verified against pinned
+  binaries.
+
+**R09 pilot protocol:** not prepared. Its frozen inputs are open user decisions,
+and R09 forbids invented defaults: eligibility, classification, participants,
+versions and manifests, product and model settings, allocation method and ratio,
+primary and quality metrics, margins, sample plan, follow-up, stopping rules,
+missingness policy, confidence level, analysis version, and the deviation and
+version-drift policy. The R10 analysis validation, a shipped usage-source profile,
+verified version pinning, the allocator and a quality metric are also
+prerequisites.
