@@ -2,6 +2,8 @@
 
 These minimal metadata-only examples are handwritten. They omit content-bearing
 fields deliberately and are not a full transcript schema or a support claim.
+They exercise the registered Codex 0.156.1 and Claude Code 2.1.283 profiles.
+They are not admission evidence for 0.158.0.
 The final two records in each file are adversarial, invented shapes, not observed
 product events. See [capability evidence](../../../docs/decisions/001-adapter-capabilities.md).
 

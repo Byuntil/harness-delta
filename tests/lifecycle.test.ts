@@ -82,6 +82,29 @@ test('session linking validates the task and product without reading source cont
   } finally { store.close(); }
 });
 
+test('session link rejects unregistered versions before reading a file', () => {
+  const store = new Store(':memory:');
+  const life = new Lifecycle(store);
+  try {
+    store.execute('INSERT INTO projects(id) VALUES (?)', ['p1']);
+    life.createTask('p1', 't1', { ...metadata, product: 'codex' });
+    const missing = '/synthetic/does-not-exist-unregistered.jsonl';
+    for (const [sessionId, version] of [
+      ['s9', '0.158.0'],
+      ['s10', '0.156.1-rc.1'],
+      ['s11', '0.156.1+build.1'],
+      ['s12', '0.156.10'],
+      ['s13', '2.1.283'],
+    ] as const) {
+      expect(() => life.linkSession('t1', sessionId, missing, 'codex', version)).toThrow(/^unsupported$/);
+    }
+    expect(() => life.linkSession('t1', 's14', missing, 'codex', '>=0.156.1')).toThrow();
+    expect(() => life.linkSession('t1', 's15', missing, 'claude_code', '0.156.1')).toThrow(/^unsupported$/);
+    expect(() => life.linkSession('t1', 's16', missing, 'claude_code', '2.1.283')).toThrow(/^product_mismatch$/);
+    expect(store.all('SELECT id FROM sessions')).toEqual([]);
+  } finally { store.close(); }
+});
+
 test('entry detection tolerates non-file process arguments', () => {
   expect(isEntrypoint('-')).toBe(false);
   expect(isEntrypoint(undefined)).toBe(false);

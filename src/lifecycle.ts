@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { lookupFileProfile } from './adapter-profiles.js';
 import { IdSchema, ProductVersionSchema, TaskMetadataSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
 import { interruptManagedRuns } from './managed-journal.js';
@@ -130,6 +131,7 @@ export class Lifecycle {
 
   linkSession(taskId: string, sessionId: string, sourcePath: string, product: string, version: string): void {
     IdSchema.parse(sessionId); z.enum(['codex', 'claude_code']).parse(product); ProductVersionSchema.parse(version);
+    if (lookupFileProfile(product, version) === 'unsupported') throw new Error('unsupported');
     const path = resolve(sourcePath);
     this.store.transaction(() => {
       const task = this.task(taskId);

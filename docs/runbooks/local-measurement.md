@@ -21,6 +21,8 @@ node dist/cli.js --db local.db session link SESSION_ID --task task1 --source /pa
 node dist/cli.js --db local.db collect --task task1
 ```
 
+`--version` must be the exact registered version for that product.
+
 Only explicit linked files are opened, after registered/active scope is checked.
 No global transcript discovery occurs. The first poll establishes a baseline.
 **Begin a new prompt/turn after collection starts.** A turn already running at
@@ -85,6 +87,14 @@ Complete means/change rates remain unavailable while coverage is partial.
 JSON and Markdown contain the same snapshot and a metadata-only fingerprint.
 The same DB data, settings and cutoff reproduce the same period report. Preserve
 the generated report if you need a historical snapshot after deletion or new data.
+
+## Versions, conformance, and update controls
+
+Registered file adapters are partial. They currently accept Codex CLI 0.156.1 and Claude Code 2.1.283 only. An unregistered version, range, or suffix is rejected before the file is read and is not stored. Codex 0.158.0 is not registered. See [ADR 007](../decisions/007-adapter-version-profiles.md).
+
+The repository runner at `scripts/conformance/` is manual. Installation, collection, hooks, and CI do not invoke it. CI runs offline synthetic unit tests of the report projector, the candidate parser, and the confirmation helpers. CI never runs the runner. Design approval is not live-run approval.
+
+Before an experiment, verify update controls against the pinned binaries. Freeze the product, application, executable provenance, and model/settings. Use process-only controls and do not edit config files. Codex's documented one-off override is `-c check_for_update_on_startup=false`. Claude's documented process environment is `DISABLE_AUTOUPDATER=1`. `DISABLE_UPDATES=1` also blocks manual updates. These are documentation findings dated 2026-09-29, not pinned-binary runtime verification. Check versions before and after the run. On drift, stop measurement, mark uncertainty, and follow the frozen deviation policy. Do not relink, backfill, or rerandomize. This checklist does not enable R09 and does not waive R10.
 
 ## Recovery and limits
 

@@ -74,6 +74,8 @@ This was a user-approved bounded check on 2026-09-29, on macOS arm64 with codex-
 
 The adapter still accepts only 0.156.1. Supporting 0.158.0 needs its own tested change.
 
+File adapters accept only the exact registered versions Codex CLI 0.156.1 and Claude Code 2.1.283. `session link --version` is required manual input. Unregistered versions, ranges, and suffixes are rejected before the file is read and are not stored. Codex 0.158.0 is not a registered file adapter. OTel profiles are a separate allowlist and are not consulted by this file registry. See [ADR 007](007-adapter-version-profiles.md).
+
 ## Fields
 
 `available` means observed in this bounded probe, not a universal product guarantee.
@@ -152,6 +154,7 @@ from these feasibility probes. No raw source hashes or raw exception messages pe
 - Parent/child: unverified. Do not auto-link descendants or add parent/child totals.
 - Unknown versions/formats, partial writes, conflicting revisions: unsupported until
   covered by parser and boundary tests; preserve a reason, never manufacture zero.
+  Exact file-adapter registration is defined in [ADR 007](007-adapter-version-profiles.md).
 - Current bounded snapshot reader: local file identity, size, modification time,
   generation, baseline and allowlisted metadata fingerprints. Incomplete final lines
   wait for completion. Every new collector ignores durable checkpoints for resumption.

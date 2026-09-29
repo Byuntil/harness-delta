@@ -1,6 +1,7 @@
 import { SourceFailure, sourceCategory, type SourceDiagnosticCategory } from './source-errors.js';
 import { constants, closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { lookupFileProfile } from './adapter-profiles.js';
 import { parseSnapshot, metadataKey, type SourceScope, type Snapshot } from './adapters.js';
 import { TimestampSchema } from './contracts.js';
 import { type Clock, utcNow } from './lifecycle.js';
@@ -51,6 +52,7 @@ export class Collector {
           if(previous && previous.generation!==link.generation)previous=undefined;
           let stage:SourceDiagnosticCategory='read_failed';
           try {
+            if (lookupFileProfile(link.product, link.product_version) === 'unsupported') throw new Error('unsupported');
             bytes=this.read(link.source_path);
             if(previous && bytes.identity!==previous.identity)throw new SourceFailure('identity_changed');
             if(previous && bytes.size<previous.size)throw new SourceFailure('source_truncated');
