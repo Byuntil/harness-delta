@@ -8,7 +8,7 @@ import { Lifecycle } from '../src/lifecycle.js';
 import { Deletion } from '../src/deletion.js';
 import { aggregateTask } from '../src/metrics.js';
 import { OtelReceiver } from '../src/otel-receiver.js';
-import { apiError, apiRequest, launchSessionId, logRecord, logsRequest, profile, sessionStart, syntheticVersion, userPrompt } from './helpers/otel-fixture.js';
+import { apiError, apiRequest, assistantResponse, launchSessionId, logRecord, logsRequest, profile, sessionStart, syntheticVersion, userPrompt } from './helpers/otel-fixture.js';
 
 const resources: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const clean of resources.splice(0).reverse()) await clean(); });
@@ -294,6 +294,33 @@ test('raw body events show content capture was enabled and end measurement', asy
   expect((await post(receiver, logsRequest([sessionStart(0, options), logRecord('api_request_body', 1, { body: 'synthetic content' }, options)]))).status).toBe(200);
   expect(processRow(store)).toMatchObject({ uncertain_reason: 'content_enabled' });
   expect(dump(store)).not.toContain('synthetic content');
+});
+
+test('an unredacted prompt shows content capture was enabled and ends measurement', async () => {
+  const { store, clock } = setup();
+  const receiver = await open(store, clock);
+  expect((await post(receiver, logsRequest([sessionStart(0, options), userPrompt(1, options, 'synthetic prompt text')]))).status).toBe(200);
+  expect(processRow(store)).toMatchObject({ uncertain_reason: 'content_enabled' });
+  expect(dump(store)).not.toContain('synthetic prompt text');
+});
+
+test('an unredacted response ends measurement after earlier batches stay partial', async () => {
+  const { store, clock } = setup();
+  const receiver = await open(store, clock);
+  expect((await post(receiver, logsRequest([sessionStart(0, options), apiRequest(1, options)]))).status).toBe(200);
+  expect((await post(receiver, logsRequest([assistantResponse(2, options, 'synthetic response text')]))).status).toBe(200);
+  expect(processRow(store)).toMatchObject({ uncertain_reason: 'content_enabled' });
+  expect(count(store, 'events')).toBe(1);
+  expect(dump(store)).not.toContain('synthetic response text');
+});
+
+test('content exposure is reported even when an invalid record precedes it in the batch', async () => {
+  const { store, clock } = setup();
+  const receiver = await open(store, clock);
+  const invalid = apiRequest(1, { ...options, at: 'yesterday' });
+  expect((await post(receiver, logsRequest([sessionStart(0, options), invalid, userPrompt(2, options, 'synthetic prompt text')]))).status).toBe(200);
+  expect(processRow(store)).toMatchObject({ uncertain_reason: 'content_enabled' });
+  expect(dump(store)).not.toContain('synthetic prompt text');
 });
 
 test('pause, finalization and deletion revoke the token before late batches are decoded', async () => {

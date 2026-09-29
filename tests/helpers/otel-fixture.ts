@@ -48,8 +48,10 @@ export const apiError = (sequence: number, options: RecordOptions, overrides: Re
     model: 'synthetic-model', error: 'synthetic private error text', status_code: 529, duration_ms: 300, attempt: 3,
     request_id: `req_error_${sequence}`, client_request_id: `client-error-${sequence}`, query_source: 'compact', ...overrides,
   }, options);
-export const userPrompt = (sequence: number, options: RecordOptions) =>
-  logRecord('user_prompt', sequence, { prompt_length: 42, prompt: '<REDACTED>' }, options);
+export const userPrompt = (sequence: number, options: RecordOptions, prompt: Value = '<REDACTED>') =>
+  logRecord('user_prompt', sequence, { prompt_length: 42, prompt }, options);
+export const assistantResponse = (sequence: number, options: RecordOptions, response: Value = '<REDACTED>') =>
+  logRecord('assistant_response', sequence, { model: 'synthetic-model', response_length: 17, query_source: 'repl_main_thread', response }, options);
 
 export function logsRequest(records: unknown[], resource: Record<string, Value> = {}) {
   return { resourceLogs: [{ resource: { attributes: attributes({ 'service.name': 'claude-code', 'host.name': 'synthetic-host', ...resource }) },

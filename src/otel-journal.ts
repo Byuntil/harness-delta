@@ -164,8 +164,9 @@ export function ingestOtelLogs(store: Store, processId: string, records: readonl
       let uncertain: UncertainReason | undefined;
       try {
         const projected = records.map(record => projectRecord(record, profile));
-        // An invalid record has no trustworthy position, so none of this batch is accepted.
-        const failed = projected.find(item => !item.ok);
+        // A failed projection (an invalid record without a trustworthy position, or content exposure)
+        // rejects the whole batch. Content exposure is reported first, so an invalid record cannot hide it.
+        const failed = projected.find(item => !item.ok && item.reason === 'content_enabled') ?? projected.find(item => !item.ok);
         if (failed && !failed.ok) throw new Uncertain(failed.reason);
         const ordered = projected.flatMap(item => item.ok ? [item.record] : []).sort((a, b) => a.sequence - b.sequence);
         for (const record of ordered) {

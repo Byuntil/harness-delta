@@ -103,10 +103,16 @@ function timestamp(record: DecodedRecord): string | undefined {
 }
 
 const contentEvents = new Set(['api_request_body', 'api_response_body']);
+// Documented as present with this exact value unless content logging is enabled.
+const contentAttributes = ['prompt', 'response'];
+const redacted = '<REDACTED>';
 const triggers = new Set(['startup', 'change', 'refused']);
 export function projectRecord(record: DecodedRecord, profile: OtelVersionProfile): Projection {
   const name = text(record.attributes.get('event.name'));
   if (name !== undefined && contentEvents.has(name)) return { ok: false, reason: 'content_enabled' };
+  if (contentAttributes.some(key => record.attributes.has(key) && text(record.attributes.get(key)) !== redacted)) {
+    return { ok: false, reason: 'content_enabled' };
+  }
   const sequence = integer(record.attributes.get('event.sequence'));
   const occurredAt = timestamp(record);
   const sessionId = IdSchema.safeParse(text(record.attributes.get('session.id')));
