@@ -176,17 +176,22 @@ content-free `session_id` and `transcript_path` before file access; exec and
 interactive delivery/timing remain unverified. See the version-pinned
 [SessionStart schema](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/hooks/schema/generated/session-start.command.input.schema.json).
 The runner may use it for an ephemeral process/session/path mapping, retaining only
-ID, path, `source` and cwd-match in memory. Missing/conflicting linkage or
-`clear`/`compact`/`fork` transitions stop the initial scenario.
+ID, path, `source` and cwd-match in memory. The exec runner locates the rollout by the
+exec-stream thread ID and uses the hook as a cross-check: a missing hook is recorded,
+not a stop, while conflicting linkage, any rejected delivery or an unexpected
+`source` (including `clear`/`compact`/`fork`) stops the scenario before the file is read.
 
-The runner uses **option (b)**, `-c hooks.state."<session-flags key>".trusted_hash="<hash>"`,
-for our hook in this invocation only; option (a), `--dangerously-bypass-hook-trust`,
+The runner uses **option (b)**, `-c hooks.state={"<session-flags key>"={trusted_hash="<hash>"}}`,
+for our hook in this invocation only. The state map is in the TOML value because Codex
+splits a `-c` key path on every `.` without honoring quotes, and the session-flags key
+contains dots. Option (a), `--dangerously-bypass-hook-trust`,
 is rejected. Version-specific key/hash construction stays in `scripts/conformance/`,
 not production profiles. Inference from the [hook state rules](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/hooks/src/config_rules.rs):
 this does not disable existing trusted hooks; the confirmation plan must disclose
 that the user's own trusted hooks may run. Never accept persistent TUI trust or
 bypass managed policy. A separately approved live check must verify key/hash,
-no config write, hook delivery and request/warmup/file timing; no hook means no read.
+no config write, hook delivery and request/warmup/file timing. A path that relies on the
+hook alone for linkage must not read any file without a hook.
 
 Production SessionStart linkage is **not decided**. A separate proposal will address
 its authorization, run-level session transitions and interactive scope; interactive
@@ -249,5 +254,8 @@ No ADR 001/006 edits occur in this design batch.
   artifact rule. Other artifacts remain English.
 - Conformance hook trust uses option (b), per-invocation `trusted_hash` for our hook
   only. Option (a) is rejected; live execution still needs separate approval.
+- Correct the option (b) literal to the value-side state map, and state that the exec
+  runner locates by exec-stream thread ID with the hook as a cross-check (approved
+  after source review showed the quoted-key form cannot match).
 
 Production use of SessionStart for linkage is not decided and needs its own proposal.

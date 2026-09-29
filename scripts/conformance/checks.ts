@@ -50,15 +50,19 @@ function tokenEquality(vector: CounterVector | null): CheckOutcome {
   return vector.totalTokens === vector.input + vector.output ? 'pass' : 'fail';
 }
 
-function sameVector(left: CounterVector | null, right: CounterVector | null): CheckOutcome {
-  if (left === null || right === null) return 'not_observed';
+const execCoreFields = ['input', 'cached', 'output', 'reasoning'] as const;
+
+/** Exec usage omits `total_tokens` and may omit cache-write; compare what it reports. */
+function execMatchesTotal(exec: CounterVector | null, total: CounterVector | null): CheckOutcome {
+  if (exec === null || total === null) return 'not_observed';
+  for (const field of execCoreFields) if (!safe(exec[field])) return 'invalid';
   for (const field of vectorFields) {
-    const first = left[field];
-    const second = right[field];
-    if (first === null && second === null) continue;
-    if (first === null || second === null) return 'fail';
-    if (!safe(first) || !safe(second)) return 'invalid';
-    if (first !== second) return 'fail';
+    const reported = exec[field];
+    if (reported === null) continue;
+    const recorded = total[field];
+    if (recorded === null) return 'fail';
+    if (!safe(reported) || !safe(recorded)) return 'invalid';
+    if (reported !== recorded) return 'fail';
   }
   return 'pass';
 }
@@ -86,7 +90,7 @@ export function classifyCounters(input: {
   const checks = blank();
   checks.total_equals_input_plus_output = tokenEquality(input.total);
   checks.last_equals_input_plus_output = tokenEquality(input.last);
-  checks.exec_equals_rollout_total = sameVector(input.exec, input.total);
+  checks.exec_equals_rollout_total = execMatchesTotal(input.exec, input.total);
   checks.resume_total_equals_prior_plus_last = resumed(input.total, input.priorTotal, input.last);
   checks.cached_subset_of_input = subset(input.total?.cached ?? null, input.total?.input ?? null, input.total);
   checks.cache_write_subset_of_input = subset(input.total?.cacheWrite ?? null, input.total?.input ?? null, input.total);

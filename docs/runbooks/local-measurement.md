@@ -92,7 +92,18 @@ the generated report if you need a historical snapshot after deletion or new dat
 
 Registered file adapters are partial. They currently accept Codex CLI 0.156.1 and Claude Code 2.1.283 only. An unregistered version, range, or suffix is rejected before the file is read and is not stored. Codex 0.158.0 is not registered. See [ADR 007](../decisions/007-adapter-version-profiles.md).
 
-The repository runner at `scripts/conformance/` is manual. Installation, collection, hooks, and CI do not invoke it. CI runs offline synthetic unit tests of the report projector, the candidate parser, and the confirmation helpers. CI never runs the runner. Design approval is not live-run approval.
+The repository runner at `scripts/conformance/` is manual. Installation, collection, hooks, and CI do not invoke it. CI runs offline synthetic unit tests of the report projector, the candidate parser, the confirmation and hook-trust helpers, and the exec-stream reducer. CI never runs the runner. Design approval is not live-run approval.
+
+To run the Codex 0.158.0 exec conformance check after approving its live protocol, compile the scripts into the ignored cache and start the runner from the repository root in an interactive terminal:
+
+```sh
+npx tsc -p tsconfig.conformance.json
+node node_modules/.cache/conformance/scripts/conformance/runner.js --out "$PWD/.harness-delta/work/<work-id>/live"
+```
+
+The runner prints its plan and starts no product process until you type `confirm`; there is no option that skips this. It refuses a non-interactive terminal, a set `CODEX_HOME`, and an output directory outside `.harness-delta/`. It checks `codex --version` before and after, runs one `codex exec` turn and one exact-session resume with synthetic prompts, locates the rollout by the exec-stream thread ID, and cross-checks a per-invocation SessionStart hook. It writes a restricted report of check outcomes, counts and catalog key names, without IDs, paths, text or token values. The rollout file it creates contains the synthetic prompts, replies and instructions and is left in place. The manual suite `npx vitest run --config scripts/conformance/vitest.config.ts` exercises the runner against a synthetic stand-in, not a product.
+
+The per-invocation hook override is observed to work for `codex exec` 0.158.0. Source review indicates that an interactive Codex start which connects to an already running app-server daemon does not pass per-invocation hook configuration to that daemon; a control run was consistent with this but did not prove it. Interactive linkage remains unsupported.
 
 Before an experiment, verify update controls against the pinned binaries. Freeze the product, application, executable provenance, and model/settings. Use process-only controls and do not edit config files. Codex's documented one-off override is `-c check_for_update_on_startup=false`. Claude's documented process environment is `DISABLE_AUTOUPDATER=1`. `DISABLE_UPDATES=1` also blocks manual updates. These are documentation findings dated 2026-09-29, not pinned-binary runtime verification. Check versions before and after the run. On drift, stop measurement, mark uncertainty, and follow the frozen deviation policy. Do not relink, backfill, or rerandomize. This checklist does not enable R09 and does not waive R10.
 
