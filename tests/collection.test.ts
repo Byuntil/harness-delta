@@ -22,6 +22,19 @@ function fixture() {
  writeFileSync(source,JSON.stringify(header)+'\n');
  return {root,source,store,life,clock,turn,set:(s:number)=>{now=at(s);},cleanup:()=>{store.close();rmSync(root,{recursive:true,force:true});}};
 }
+test('collector does not read an unregistered linked version', () => {
+  const fixture = collectionFixture('codex');
+  try {
+    fixture.store.execute("UPDATE sessions SET product_version = '0.158.0' WHERE id = 's1'", []);
+    fixture.life.start('t1');
+    const reads = fixture.reads();
+    fixture.collector.tick('t1');
+    expect(fixture.reads()).toBe(reads);
+    expect(fixture.store.eventCount()).toBe(0);
+    expect(fixture.store.all<{ status: string; reason: string }>('SELECT status, reason FROM observations').at(-1))
+      .toEqual({ status: 'error', reason: 'unsupported' });
+  } finally { fixture.cleanup(); }
+});
 test('inactive and unlinked scopes cause no source reads',()=>{
  const f=fixture();let reads=0;const collector=new Collector(f.store,f.clock,()=>{reads++;throw new Error('PRIVATE');});
  try {collector.tick('t1');expect(reads).toBe(0);f.life.start('t1');f.store.execute('DELETE FROM sessions',[]);collector.tick('t1');expect(reads).toBe(0);}finally{f.cleanup();}

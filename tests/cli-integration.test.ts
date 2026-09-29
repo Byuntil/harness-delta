@@ -32,3 +32,28 @@ test('CLI register/link/foreground collect/human outcome/report/delete keeps raw
   expect(await run(['delete','task','t1'])).toBe(0);const deleted=new Store(file);try{expect(deleted.eventCount()).toBe(0);expect(deleted.get('SELECT id FROM tombstones WHERE kind=? AND id=?',['task','t1'])).toBeDefined();}finally{deleted.close();}
  }finally{if(collecting){process.emit('SIGINT');await collecting;}rmSync(root,{recursive:true,force:true});}
 });
+
+test('CLI rejects an unregistered session version without a session row', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cli-unregistered-'));
+  const file = join(root, 'local.db');
+  const run = (args: string[]) => main(['--db', file, ...args]);
+  const errors: string[] = [];
+  const write = vi.spyOn(process.stderr, 'write').mockImplementation(value => {
+    errors.push(String(value));
+    return true;
+  });
+  try {
+    expect(await run(['project', 'add', 'p1', '--root', root])).toBe(0);
+    expect(await run(['task', 'register', 't1', '--project', 'p1', '--type', 'feature', '--size', 'small', '--assignee', 'u1', '--product', 'codex', '--model', 'synthetic', '--criteria', 'c1'])).toBe(0);
+    expect(await run([
+      'session', 'link', 's9', '--task', 't1', '--source', '/synthetic/does-not-exist-unregistered.jsonl',
+      '--product', 'codex', '--version', '0.158.0',
+    ])).toBe(2);
+    expect(errors.join('')).toContain('input_or_state_error');
+    const store = new Store(file);
+    try { expect(store.all('SELECT id FROM sessions')).toEqual([]); } finally { store.close(); }
+  } finally {
+    write.mockRestore();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

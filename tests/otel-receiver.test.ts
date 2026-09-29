@@ -88,11 +88,11 @@ test('registration requires a registered project, an active claude_code task and
 
 test('OTel and file adapter sources are exclusive within one task', async () => {
   const adapter = setup();
-  adapter.life.linkSession('t1', 'file-session', '/synthetic/file.jsonl', 'claude_code', syntheticVersion);
+  adapter.life.linkSession('t1', 'file-session', '/synthetic/file.jsonl', 'claude_code', '2.1.283');
   await expect(OtelReceiver.start(adapter.store, launch, profile, { clock: adapter.clock })).rejects.toThrow('otel_source_conflict');
   const otel = setup();
   await open(otel.store, otel.clock);
-  expect(() => otel.life.linkSession('t1', 'file-session', '/synthetic/file.jsonl', 'claude_code', syntheticVersion)).toThrow('source_conflict');
+  expect(() => otel.life.linkSession('t1', 'file-session', '/synthetic/file.jsonl', 'claude_code', '2.1.283')).toThrow('source_conflict');
 });
 
 test('missing, forged and foreign tokens are rejected before the body is decoded', async () => {
