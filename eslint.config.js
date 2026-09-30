@@ -6,6 +6,7 @@ import tseslint from "typescript-eslint";
 export default defineConfig(
   globalIgnores([
     "node_modules/", "dist/", "coverage/", ".harness-delta/", ".superpowers/", ".husky/_/",
+    ".agents/skills/",
   ]),
   {
     files: ["**/*.{js,mjs,cjs}"],
