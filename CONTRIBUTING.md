@@ -37,7 +37,9 @@ include new TypeScript directories there when adding them.
 
 Run `npm run lint:fix` to apply supported automatic fixes, then inspect the diff.
 Normal checks never apply fixes. Warnings fail the lint command. Generated output,
-dependencies, and private `.harness-delta/` records are excluded. Linting is not a
+dependencies, private `.harness-delta/` records, and locally installed
+`.agents/skills/` packages are excluded. Skill packages are not part of the project
+TypeScript program; validate them with their own tooling. Linting is not a
 formatter; no additional formatting conventions or lint-staged dependency are added.
 
 TypeScript is pinned to a 6.0 release compatible with the installed typescript-eslint
