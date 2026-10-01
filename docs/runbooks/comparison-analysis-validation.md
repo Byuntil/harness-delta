@@ -44,3 +44,49 @@ and [the version 1 dossier](../validation/comparison-analysis-validation-v1.md) 
 actual results. `status: pass` applies only to these fixtures. `r10_status` remains
 `unvalidated`, adoption remains `inconclusive`, and real assignment still rejects
 with `real_experiment_disabled`. Partial report usage remains partial.
+
+## Separate bounded mean-effect and deadline-quality study
+
+The independent confidence study implements [ADR 010](../decisions/010-comparison-confidence-validation.md).
+It does not reinterpret the v1 sharp-null tail as an average-effect interval.
+
+```sh
+npm test -- tests/comparison-confidence-method.test.ts tests/comparison-confidence-evidence.test.ts
+npm run analysis:validate:confidence
+mkdir -p .harness-delta/confidence-validation-results
+npm run --silent analysis:validate:confidence > .harness-delta/confidence-validation-results/evidence.json
+```
+
+This command has its own ignored `.harness-delta/confidence-validation-build/`
+output and accepts no arguments (including data, bound, seed or alpha overrides).
+Normal tests use bounded anchors, compatibility/registry checks and mutation
+checks; the complete confidence calibration is explicitly invoked by this command.
+Neither study is exported or built into the product. The original command and
+its argument rejection remain supported separately.
+
+The full confidence run checks every potential table for usage {0,1,2} and
+binary task deadline success under nine fixed designs with N<=4. It maximizes
+a weighted, target-centered tail over every compatible completed schedule,
+re-realizing outcomes on each reference assignment. It compares membership,
+envelopes and diagnostics to an independent full-table oracle. Exact per-truth
+coverage is checked at all five frozen alphas; no pooling can hide a failing truth.
+The 108 zipped endpoint pairs provide limited joint stress checks, not exhaustive
+usage-by-quality Cartesian coverage. The union-bound argument is stated separately.
+
+Evidence reports expected/executed identities and hashes, worst coverage with
+witness table IDs, exact ranges of per-truth miss/empty/no-narrowing probabilities,
+weighted expected cardinalities, compatibility widths and confidence widths
+conditional on a nonempty set. Empty outcomes are preserved separately. Every
+observation's exact envelope/set/diagnostics and every truth/alpha coverage result
+contribute to deterministic audit hashes. A table ID decodes base-L digits in
+A1,B1,A2,B2 order, first digit least significant. This permits reproducing witnesses.
+Source hashes include the independent oracle, wrappers, compiler settings and tests.
+
+Always distinguish KTargets (observational compatibility) from C (post-test
+confidence membership). A width reduction from the global lattice to KTargets is
+not inferential narrowing. A hull encloses a finite set; it does not establish
+interior real-valued membership. Wide or empty sets do not establish savings,
+quality noninferiority or adoption. Read the
+[confidence dossier](../validation/comparison-confidence-validation-v1.md) for
+actual results and precision limitations. Real token scales, ratios, MNAR,
+carryover, stopping, practical margins and real admission remain unvalidated.

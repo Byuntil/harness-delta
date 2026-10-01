@@ -2,7 +2,13 @@
 
 Local synthetic execution on 2026-10-01. This is bounded 2B1 evidence; R10 remains
 **unvalidated**, adoption **inconclusive**, and real experiments disabled.
-Remote CI was not run for this uncommitted work.
+This dossier records the original source snapshot subsequently committed as
+`3648532d674e31e86bbb07a4ccf4478b17baae43` (merged by PR #17). The original local
+execution preceded that commit; remote CI was not part of the execution recorded
+here. Its numbers and fingerprints below remain historical evidence. Later
+package/compiler changes can alter a rerun source hash without changing the
+v1 method, cases or settings. The separate confidence study documents its own
+[results and rerun provenance](comparison-confidence-validation-v1.md).
 
 ## Executed evidence
 
