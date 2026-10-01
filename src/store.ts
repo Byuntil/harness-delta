@@ -1,18 +1,18 @@
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import type { Event } from './contracts.js';
-import { EventSchema } from './contracts.js';
+import { EventSchema, TimestampSchema } from './contracts.js';
 
 type EventRow = Omit<Event, 'payload'> & { payload: string };
 
 export class Store {
   private readonly db: Database.Database;
 
-  constructor(path: string) {
+  constructor(path: string, private readonly receiptClock: () => string = () => new Date().toISOString()) {
     this.db = new Database(path);
     try {
       const version = this.db.pragma('user_version', { simple: true });
-      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql', '004_managed_observation.sql', '005_otel_receiver.sql', '006_task_comparison.sql'];
+      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql', '004_managed_observation.sql', '005_otel_receiver.sql', '006_task_comparison.sql', '007_comparison_reports.sql'];
       if (typeof version !== 'number' || !Number.isInteger(version) || version < 0 || version > migrations.length) {
         throw new Error('unsupported_schema_version');
       }
@@ -65,6 +65,9 @@ export class Store {
       }
       this.execute('INSERT INTO events(id, project_id, task_id, session_id, source_key, occurred_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [event.id, event.project_id, event.task_id, event.session_id, event.source_key, event.occurred_at, payload]);
+      const receipt = TimestampSchema.safeParse(this.receiptClock());
+      if (!receipt.success) throw new Error('invalid_receipt_time');
+      this.execute('INSERT INTO event_receipts(event_id,recorded_at) VALUES (?,?)', [event.id, new Date(receipt.data).toISOString()]);
       return true;
     });
   }

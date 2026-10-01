@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import { affectedComparisonProtocols, invalidateComparisonSnapshots } from './reports/comparison-invalidation.js';
 import { IdSchema, TimestampSchema } from './contracts.js';
 import { utcNow, type Clock } from './lifecycle.js';
 import type { Store } from './store.js';
 
 export class Deletion {
-  constructor(private readonly store: Store, private readonly clock: Clock = utcNow) {}
+  constructor(private readonly store: Store, private readonly clock: Clock = utcNow, private readonly discloseReports: (ids: readonly string[]) => void = () => {}) {}
 
   isDeleted(kind: 'task' | 'project' | 'session', id: string): boolean {
     return Boolean(this.store.get('SELECT id FROM tombstones WHERE kind = ? AND id = ?', [kind, id]));
@@ -12,7 +13,7 @@ export class Deletion {
 
   deleteTask(taskId: string): void {
     IdSchema.parse(taskId);
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       if (this.isDeleted('task', taskId)) return;
       if (!this.store.get('SELECT id FROM tasks WHERE id = ?', [taskId])) throw new Error('unknown_task');
       this.deleteComparisonData(taskId);
@@ -24,9 +25,14 @@ export class Deletion {
 
   deleteProject(projectId: string): void {
     IdSchema.parse(projectId);
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       if (this.isDeleted('project', projectId)) return;
       if (!this.store.get('SELECT id FROM projects WHERE id = ?', [projectId])) throw new Error('unknown_project');
+      for (const protocol of this.store.all<{ id: string }>('SELECT id FROM comparison_protocols WHERE project_id=?', [projectId])) {
+        const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocol.id]).map(row => row.report_id);
+        if (ids.length) this.discloseReports(ids);
+        invalidateComparisonSnapshots(this.store, protocol.id, 'deletion', TimestampSchema.parse(this.clock()));
+      }
       for (const task of this.store.all<{ id: string }>('SELECT id FROM tasks WHERE project_id = ?', [projectId])) this.deleteTask(task.id);
       this.tombstone('project', projectId);
       this.store.execute('DELETE FROM projects WHERE id = ?', [projectId]);
@@ -41,7 +47,7 @@ export class Deletion {
 
   applyRetention(projectId: string, now: string): number {
     IdSchema.parse(projectId); TimestampSchema.parse(now);
-    return this.store.transaction(() => {
+    return this.store.immediateTransaction(() => {
       const project = this.store.get<{ retention_days: number | null }>('SELECT retention_days FROM projects WHERE id = ?', [projectId]);
       if (!project) throw new Error('unknown_project');
       if (project.retention_days === null) throw new Error('retention_not_configured');
@@ -59,15 +65,17 @@ export class Deletion {
       'SELECT project_id,key_id FROM comparison_identity_keys WHERE task_id = ?', [taskId])) {
       this.store.execute('INSERT OR IGNORE INTO comparison_identity_tombstones(project_id,key_id,deleted_at) VALUES (?,?,?)', [key.project_id, key.key_id, now]);
     }
-    for (const assignment of this.store.all<{ protocol_id: string }>(
-      'SELECT protocol_id FROM comparison_assignments WHERE task_id = ?', [taskId])) {
-      this.store.execute("UPDATE comparison_protocols SET status = 'invalidated_by_deletion', invalidated_reason = 'deletion', data_revision = data_revision + 1 WHERE id = ?", [assignment.protocol_id]);
+    for (const protocolId of affectedComparisonProtocols(this.store, taskId)) {
+      this.store.execute("UPDATE comparison_protocols SET status = 'invalidated_by_deletion', invalidated_reason = 'deletion', data_revision = data_revision + 1 WHERE id = ?", [protocolId]);
+      const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocolId]).map(row => row.report_id);
+      if (ids.length) this.discloseReports(ids);
+      invalidateComparisonSnapshots(this.store, protocolId, 'deletion', now);
       // Purge private shuffled queues and replay positions for the entire affected experiment.
       // Retained assignments may still support their ordinary scoped task lifecycle.
-      this.store.execute('DELETE FROM comparison_allocation_state WHERE protocol_id = ?', [assignment.protocol_id]);
+      this.store.execute('DELETE FROM comparison_allocation_state WHERE protocol_id = ?', [protocolId]);
     }
     // Task-scoped identity, assignment, confirmation and deviation rows cascade with tasks.
-    // No randomized snapshots/report payloads exist in this first batch.
+    // Snapshots, hashes, lineage and dependency mappings have been purged above.
   }
 
   private tombstone(kind: string, id: string): void {

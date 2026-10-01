@@ -2,10 +2,10 @@
 
 [한국어](task-comparison.ko.md)
 
-This first batch lets contributors exercise configuration registration, durable
-allocation, manual application evidence and human outcomes using synthetic tasks.
+Contributors can exercise configuration registration, durable allocation, manual
+application evidence, human outcomes and assignment reports using synthetic tasks.
 **Real randomized experiment allocation is disabled.** The complete team workflow,
-file exchange, randomized reports and validated inference are later gates. Existing
+file exchange, method validation and validated inference are later gates. Existing
 local measurement continues under its own [runbook](local-measurement.md).
 See [ADR 008](../decisions/008-task-comparison-workflow.md) and
 [requirements R09/R10](../requirements.md#r09---randomized-task-comparisons).
@@ -218,12 +218,70 @@ workflow will require supported exact versions, an explicit task/session/source 
 a running collector and explicit confirmation linkage (`session link --confirmation`).
 Neither assignment nor confirmation reads session contents or backfills earlier usage.
 
+## Create a synthetic assignment report
+
+After following the synthetic registration/allocation steps above, choose a cutoff
+no later than the current time. The dates below match the artificial 2030 example;
+replace the cutoff with the endpoint for your adjusted validation dates, and invoke
+after that cutoff. Snapshot creation reads only stored allowlisted metadata. A task
+with no injected usage has missing usage, never zero. The CLI provides no synthetic
+source reader or fixture-injection command.
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison snapshot create demo-comparison --id demo-report-1 --cutoff 2030-01-02T02:00:00Z --reason initial
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format json
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format markdown
+```
+
+Create these reports **before deleting the task** in the following example. Otherwise
+the protocol is already invalidated and snapshot creation rejects it. Retry with the
+same report ID and identical options returns the frozen result. Changing an option
+under that ID conflicts. Later evidence creates a new ID:
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison snapshot create demo-comparison --id demo-report-2 --cutoff 2030-01-02T02:00:00Z --supersedes demo-report-1 --reason evidence_updated
+```
+
+Use `late_arrival` for newly received observations at the same cutoff,
+`evidence_updated` for other new evidence at the same cutoff, or `cutoff_advanced`
+with a strictly later cutoff. Noninitial revisions require a valid parent for the
+same protocol; `initial` cannot have a parent. Evaluation time is captured by the CLI;
+it cannot be supplied as historical knowledge time. Existing usage receipt times
+from older databases remain unknown, not fabricated during migration.
+
+Read the `total`, original-assignment `arms`, `deadline_counts`, composition,
+incomplete `blocks` and supplementary `actual_configuration_summary`. The deadline
+success denominator includes all assigned tasks, including never-started and
+outcome-missing tasks. It is null while any follow-up is pending. Recruitment/follow-up
+still open makes the report provisional even when a task finalized early. Events and
+assessments exactly at cutoff/deadline are excluded from the half-open endpoint.
+Pause/resume/rework never move the deadline. Original assignment always remains;
+actual A/B/other/mixed/unknown histories are supplementary declarations, with runtime
+uncertainty/drift shown separately. Project registration counts are context, not
+inferred eligibility or randomized sample units.
+
+Partial distributions identify their observed-task denominator; complete totals,
+cost, savings, confidence intervals, p-values and adoption remain unavailable. A
+passing synthetic report does not enable `real_experiment` allocation or establish
+R10 analysis validity. Assignment, confirmation and reporting authorize no session
+read: exact supported source versions, registered project, active task, explicit
+session/source linkage and a running collector still govern ordinary measurement.
+
+Deleting a contributing task, applying configured retention, deleting its project,
+or discovering an identity conflict purges all affected managed snapshots and their
+hashes/dependencies. Old IDs return an invalidated envelope; no original arm counts
+are retained or reconstructed. Deleting an unassigned registration contributor can
+also invalidate a report. The CLI discloses affected report IDs before purge; only
+opaque tombstones survive. Saved output/backups remain outside that deletion. No
+report ID reuse, old-snapshot import, team exchange or allocator-authority bypass is
+provided. See ADR 008 for the full time, revision and deletion contracts.
+
 ## Inspect and delete
 
 Existing task reports continue to show missing/partial usage, never a full randomized
 endpoint or adoption result. A synthetic task without injected observations has
-missing usage, not zero. No team exchange, network transmission or randomized
-comparison report is available in this batch.
+missing usage, not zero. Synthetic assignment reports are available as described below. Team exchange,
+network transmission, validated inference and real allocation remain unavailable.
 
 ```sh
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite delete task task-1

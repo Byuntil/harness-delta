@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { affectedComparisonProtocols, invalidateComparisonSnapshots } from './reports/comparison-invalidation.js';
 import { IdSchema } from './contracts.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { AssignmentInputSchema, comparisonTimestamp, parseComparison } from './comparison-contracts.js';
@@ -8,7 +9,7 @@ import { Lifecycle } from './lifecycle.js';
 import type { TaskRow } from './lifecycle.js';
 import type { Store } from './store.js';
 
-export interface AllocationDependencies { clock?: () => string; shuffle?: (values: readonly string[]) => readonly string[]; }
+export interface AllocationDependencies { clock?: () => string; shuffle?: (values: readonly string[]) => readonly string[]; discloseReports?: (ids: readonly string[]) => void; }
 export interface AssignmentRow {
   id: string; task_id: string; project_id: string; protocol_id: string; variant_id: string;
   assigned_at: string; recorded_at: string; followup_ends_at: string; stratum_id: string;
@@ -41,10 +42,13 @@ function rejectTombstones(store: Store, input: AssignmentInput, keys: readonly s
     if (store.get('SELECT key_id FROM comparison_identity_tombstones WHERE project_id = ? AND key_id = ?', [input.project_id, key])) throw new Error('deleted_identifier');
   }
 }
-function invalidateIdentityConflict(store: Store, taskIds: readonly string[]): void {
-  const protocolIds = new Set(taskIds.flatMap(taskId => store.all<{ protocol_id: string }>('SELECT protocol_id FROM comparison_assignments WHERE task_id = ?', [taskId]).map(row => row.protocol_id)));
+function invalidateIdentityConflict(store: Store, taskIds: readonly string[], now: string, discloseReports?: (ids: readonly string[]) => void): void {
+  const protocolIds = new Set(taskIds.flatMap(taskId => affectedComparisonProtocols(store, taskId)));
   for (const id of protocolIds) {
     store.execute("UPDATE comparison_protocols SET status = 'identity_conflict', invalidated_reason = 'identity_conflict', data_revision = data_revision + 1 WHERE id = ? AND status != 'invalidated_by_deletion'", [id]);
+    const reports = store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [id]).map(row => row.report_id);
+    if (reports.length) discloseReports?.(reports);
+    invalidateComparisonSnapshots(store, id, 'identity_conflict', now);
     store.execute('DELETE FROM comparison_allocation_state WHERE protocol_id = ?', [id]);
   }
 }
@@ -87,7 +91,7 @@ export function assignTask(store: Store, input: unknown, dependencies: Allocatio
     // A requested existing canonical ID can expose a late duplicate even without a known alias.
     if (store.get('SELECT task_id FROM comparison_preregistrations WHERE task_id = ?', [config.task_id]) && !mappedTaskIds.includes(config.task_id)) mappedTaskIds.push(config.task_id);
     if (mappedTaskIds.length > 1) {
-      invalidateIdentityConflict(store, mappedTaskIds);
+      invalidateIdentityConflict(store, mappedTaskIds, now, dependencies.discloseReports);
       return { error: 'identity_conflict' } as const;
     }
     const canonicalId = mappedTaskIds[0] ?? config.task_id;

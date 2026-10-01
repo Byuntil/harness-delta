@@ -81,7 +81,7 @@ be bypassed locally, so CI and review remain required verification layers.
 ## Task comparison workflow
 
 The [task comparison runbook](docs/runbooks/task-comparison.md) describes the
-synthetic-only first batch. Configuration registration, durable assignment and
+synthetic-only workflow and assignment reports. Configuration registration, durable assignment and
 manual application evidence do not enable real experiments, sharing or inference.
 See [ADR 008](docs/decisions/008-task-comparison-workflow.md) for contracts and limits.
 

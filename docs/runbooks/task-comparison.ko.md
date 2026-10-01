@@ -4,8 +4,8 @@
 
 첫 번째 구현 단계에서는 합성 작업을 사용해 구성 등록, 영구 배정,
 수동 적용 증거와 사람이 평가한 결과를 검증할 수 있습니다.
-**실제 무작위 실험의 배정은 비활성화되어 있습니다.** 전체 팀 워크플로,
-파일 교환, 무작위 비교 보고서와 검증된 통계적 추론은 이후 단계의 승인 조건을 충족해야 합니다.
+**실제 무작위 실험의 배정은 비활성화되어 있습니다.** 합성 데이터의 배정 기준 보고서는 지원됩니다. 전체 팀 워크플로,
+파일 교환과 검증된 통계적 추론은 이후 단계의 승인 조건을 충족해야 합니다.
 기존 로컬 측정은 별도의 [실행 가이드](local-measurement.ko.md)를 따릅니다.
 [ADR 008](../decisions/008-task-comparison-workflow.md)과
 [요구사항 R09/R10](../requirements.md#r09---randomized-task-comparisons)을 참고하세요.
@@ -225,12 +225,66 @@ API로 시각을 제공한다면 `confirmConfiguration`의 타임스탬프와 �
 명시적인 확인 기록 연결(`session link --confirmation`)이 필요합니다.
 배정이나 적용 확인은 세션 내용을 읽거나 이전 사용량을 소급 수집하지 않습니다.
 
+## 합성 배정 보고서 생성
+
+위의 합성 등록·배정 단계를 수행한 뒤 현재 시각보다 늦지 않은 cutoff를 선택하세요.
+아래 날짜는 가상의 2030년 예제에 맞춘 값입니다. 조정한 검증 날짜에 맞춰 cutoff를
+바꾸고 그 시각 이후에 실행하세요. 스냅샷 생성은 저장된 허용 목록의 메타데이터만
+읽습니다. 사용량을 주입하지 않은 작업은 0이 아니라 누락입니다. CLI에는 합성
+소스 읽기나 테스트 픽스처 주입 명령이 없습니다.
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison snapshot create demo-comparison --id demo-report-1 --cutoff 2030-01-02T02:00:00Z --reason initial
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format json
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format markdown
+```
+
+다음 절의 예제에서 **작업을 삭제하기 전에** 보고서를 생성하세요. 이미 삭제했다면
+프로토콜이 무효화되어 스냅샷 생성이 거부됩니다. 같은 보고서 ID와 동일한 옵션으로
+재시도하면 고정된 결과를 반환합니다. 같은 ID의 옵션을 바꾸면 충돌합니다.
+이후 증거에는 새로운 ID를 사용하세요:
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison snapshot create demo-comparison --id demo-report-2 --cutoff 2030-01-02T02:00:00Z --supersedes demo-report-1 --reason evidence_updated
+```
+
+같은 cutoff에서 새로 수신된 관측에는 `late_arrival`, 그 밖의 새 증거에는
+`evidence_updated`를 사용하세요. `cutoff_advanced`는 엄격히 더 늦은 cutoff를
+요구합니다. 초기 버전 외에는 같은 프로토콜의 유효한 부모 보고서가 필요하며,
+`initial`에는 부모를 지정할 수 없습니다. 평가 시각은 CLI가 기록합니다. 과거에
+무엇을 알고 있었는지 나타내는 시각을 사용자가 지정할 수 없습니다. 이전 DB의
+사용량 수신 시각은 마이그레이션에서 만들어 넣지 않고 미확인으로 유지합니다.
+
+`total`, 원래 배정 기준 `arms`, `deadline_counts`, 작업 구성, 미완성 `blocks`와
+보조 `actual_configuration_summary`를 확인하세요. 마감 내 성공률의 분모는
+시작하지 않은 작업과 결과가 누락된 작업을 포함한 모든 배정 작업입니다.
+하나라도 추적 기간이 남으면 성공률은 null입니다. 작업이 일찍 종료되어도 모집이나
+추적 기간이 열려 있으면 잠정 보고서입니다. cutoff 또는 마감과 정확히 같은 시각의
+이벤트·평가는 반개구간의 결과 지표에서 제외됩니다. 일시정지·재개·재작업은 마감을
+바꾸지 않습니다. 원래 배정은 항상 유지되며 실제 A/B/다른 구성/혼합/미확인 기록은
+보조 선언입니다. 런타임 불확실성·변경도 따로 표시합니다. 프로젝트 등록 건수는
+맥락 정보이며, 적격성이나 무작위 실험 표본 수로 간주하지 않습니다.
+
+부분 관측 분포는 관측된 작업의 분모를 명시합니다. 완전한 총량, 비용, 절감률,
+신뢰구간, p-value와 도입 판단은 제공하지 않습니다. 합성 보고서 검사를 통과해도
+`real_experiment` 배정이나 R10 분석 방법 검증을 충족하지 않습니다. 배정·확인·보고는
+세션 읽기를 승인하지 않습니다. 일반 측정에는 정확한 소스 버전 지원, 등록된
+프로젝트, 활성 작업, 명시적인 세션·소스 연결과 실행 중인 수집기가 계속 필요합니다.
+
+기여한 작업의 삭제, 설정된 보존 기간 정리, 프로젝트 삭제 또는 식별자 충돌은
+관련 관리 스냅샷과 해시·의존성을 모두 제거합니다. 이전 ID는 무효화 응답을
+반환하며 원래 그룹별 건수를 보존하거나 복원하지 않습니다. 미배정 등록 작업의
+삭제도 보고서를 무효화할 수 있습니다. CLI는 제거 전에 관련 보고서 ID를 알리며
+불투명한 삭제 표식만 남깁니다. 저장한 출력·백업은 이 삭제 범위 밖에 있습니다.
+보고서 ID 재사용, 이전 스냅샷 가져오기, 팀 파일 교환 또는 배정 권한 우회는
+제공하지 않습니다. 시간·버전·삭제 계약의 전체 내용은 ADR 008을 참고하세요.
+
 ## 조회 및 삭제
 
 기존 작업 보고서는 계속 누락되거나 부분적으로 관측된 사용량을 표시하며,
 완전한 무작위 비교 결과 지표나 도입 판단 결과를 제공하지 않습니다.
 관측값을 주입하지 않은 합성 작업의 사용량은 0이 아니라 누락 상태입니다.
-이번 구현 단계에서는 팀 간 교환, 네트워크 전송 또는 무작위 비교 보고서를 제공하지 않습니다.
+아래 절의 합성 배정 보고서는 지원됩니다. 팀 간 교환, 네트워크 전송, 검증된 통계적 추론과 실제 실험 배정은 제공하지 않습니다.
 
 ```sh
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite delete task task-1
