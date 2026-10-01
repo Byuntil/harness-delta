@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { requireConfigurationConfirmation, bindConfigurationToSession } from './config-confirmation.js';
 import { lookupFileProfile } from './adapter-profiles.js';
 import { IdSchema, ProductVersionSchema, TaskMetadataSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
@@ -63,6 +64,7 @@ export class Lifecycle {
       if (task.state !== from) throw new Error('invalid_transition');
       TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
       const now = this.now(task);
+      if (to === 'active') requireConfigurationConfirmation(this.store, taskId, now);
       this.store.execute('UPDATE tasks SET state = ?, started_at = COALESCE(started_at, ?), generation = generation + 1, last_transition_at = ? WHERE id = ?',
         [to, now, now, taskId]);
       if (to === 'active') {
@@ -119,6 +121,10 @@ export class Lifecycle {
       if (criteriaMet.some(id => !metadata.criterion_ids.includes(id)) ||
           (outcome === 'success' && criteriaMet.length !== metadata.criterion_ids.length)) throw new Error('invalid_criteria');
       const now = this.now(task);
+      if (outcome === 'aborted' && this.store.get('SELECT id FROM comparison_assignments WHERE task_id = ?', [taskId])) {
+        this.store.execute('INSERT INTO comparison_deviations(id,task_id,occurred_at,recorded_at,reason_code) VALUES (?,?,?,?,?)',
+          [randomUUID(), taskId, now, now, 'cancellation']);
+      }
       interruptManagedRuns(this.store, taskId, 'finalize', now);
       revokeOtelProcesses(this.store, taskId, 'finalize', now);
       this.store.execute('INSERT INTO outcomes(task_id,status,criteria_met,first_success,assessed_at) VALUES (?,?,?,?,?)',
@@ -129,7 +135,7 @@ export class Lifecycle {
     });
   }
 
-  linkSession(taskId: string, sessionId: string, sourcePath: string, product: string, version: string): void {
+  linkSession(taskId: string, sessionId: string, sourcePath: string, product: string, version: string, confirmationId?: string): void {
     IdSchema.parse(sessionId); z.enum(['codex', 'claude_code']).parse(product); ProductVersionSchema.parse(version);
     if (lookupFileProfile(product, version) === 'unsupported') throw new Error('unsupported');
     const path = resolve(sourcePath);
@@ -139,10 +145,12 @@ export class Lifecycle {
       this.rejectDeleted('session', sessionId);
       const metadata = TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
       if (metadata.product !== product) throw new Error('product_mismatch');
+      if (this.store.get('SELECT id FROM comparison_assignments WHERE task_id = ?', [taskId]) && !confirmationId) throw new Error('configuration_confirmation_required');
       // OTel and file adapter observations must never be summed in one task report.
       if (this.store.get('SELECT id FROM otel_processes WHERE task_id = ?', [taskId])) throw new Error('source_conflict');
       this.store.execute('INSERT INTO sessions(id,project_id,task_id,source_path,product,product_version) VALUES (?,?,?,?,?,?)',
         [sessionId, task.project_id, taskId, path, product, version]);
+      if (confirmationId) bindConfigurationToSession(this.store, confirmationId, sessionId);
     });
   }
 
