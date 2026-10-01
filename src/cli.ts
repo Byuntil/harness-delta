@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerExchangeCommands, ExchangeCliError } from './exchange/cli.js';
 import { Command, CommanderError } from 'commander';
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -74,12 +75,13 @@ export async function main(argv: string[]): Promise<number> {
   report.command('period <id>').requiredOption('--cutoff <UTC>').option('--format <json|markdown>','output format','json')
     .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(periodReport(db(),id,options.cutoff),options.format));});
   registerComparisonCommands(program, db, print);
+  registerExchangeCommands(program, db, print);
   try {
     await program.parseAsync(argv, { from: 'user' });
     return 0;
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
-    process.stderr.write('input_or_state_error\n');
+    process.stderr.write(error instanceof ExchangeCliError ? error.message + '\n' : 'input_or_state_error\n');
     return 2;
   } finally { store?.close(); }
 }
