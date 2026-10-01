@@ -2,6 +2,7 @@
 import { Command, CommanderError } from 'commander';
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { registerComparisonCommands } from './comparison-cli.js';
 import { Store } from './store.js';
 import { Lifecycle, type Outcome } from './lifecycle.js';
 import { Deletion } from './deletion.js';
@@ -43,9 +44,9 @@ export async function main(argv: string[]): Promise<number> {
     .action((id: string, options: { outcome: Outcome; met: string[] }) => { life().finalize(id, options.outcome, options.met); });
   task.command('show <id>').action((id: string) => { print(life().summary(id)); });
   program.command('session').command('link <id>').requiredOption('--task <id>').requiredOption('--source <file>')
-    .requiredOption('--product <codex|claude_code>').requiredOption('--version <version>')
-    .action((id: string, options: { task: string; source: string; product: string; version: string }) => {
-      life().linkSession(options.task, id, options.source, options.product, options.version);
+    .requiredOption('--product <codex|claude_code>').requiredOption('--version <version>').option('--confirmation <id>', 'Explicit task configuration confirmation')
+    .action((id: string, options: { task: string; source: string; product: string; version: string; confirmation?: string }) => {
+      life().linkSession(options.task, id, options.source, options.product, options.version, options.confirmation);
     });
   const remove = program.command('delete');
   remove.command('task <id>').action((id: string) => { deletion().deleteTask(id); });
@@ -72,6 +73,7 @@ export async function main(argv: string[]): Promise<number> {
     .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(aggregateTask(db(),id,options.cutoff),options.format));});
   report.command('period <id>').requiredOption('--cutoff <UTC>').option('--format <json|markdown>','output format','json')
     .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(periodReport(db(),id,options.cutoff),options.format));});
+  registerComparisonCommands(program, db, print);
   try {
     await program.parseAsync(argv, { from: 'user' });
     return 0;

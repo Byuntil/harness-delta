@@ -1,0 +1,237 @@
+# Local task comparison workflow
+
+[한국어](task-comparison.ko.md)
+
+This first batch lets contributors exercise configuration registration, durable
+allocation, manual application evidence and human outcomes using synthetic tasks.
+**Real randomized experiment allocation is disabled.** The complete team workflow,
+file exchange, randomized reports and validated inference are later gates. Existing
+local measurement continues under its own [runbook](local-measurement.md).
+See [ADR 008](../decisions/008-task-comparison-workflow.md) and
+[requirements R09/R10](../requirements.md#r09---randomized-task-comparisons).
+
+Use Node 24, install with `npm ci`, then `npm run build`. Commands below use
+`node dist/cli.js`; an installed package uses `hm`. Keep the database and example
+input files in an ignored local directory such as `.harness-delta/comparison-demo/`.
+Create that directory before writing the input files. Use a dedicated synthetic
+store. No product executable, server, Docker, worktree,
+model request, installation of a harness or setting changes are needed.
+
+## Register configuration
+
+Write `variant-a.json` with this **synthetic** input:
+
+```json
+{
+  "schema_version": 1,
+  "id": "variant-a",
+  "harness_version": "a-v1",
+  "instruction_manifest_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "product": "synthetic",
+  "product_version": "1.0.0",
+  "model": "synthetic-model",
+  "reasoning_setting": "none",
+  "policy_version": "synthetic-policy-v1",
+  "policy_status": "eligible"
+}
+```
+
+Write `variant-b.json` with `id: variant-b`, `harness_version: b-v1` and a different
+64-character lowercase hexadecimal manifest hash. Keep runtime settings identical.
+These artificial hashes exercise registration only; they are not real A/B manifests.
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite project add demo --root .
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite variant register --config .harness-delta/comparison-demo/variant-a.json
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite variant register --config .harness-delta/comparison-demo/variant-b.json
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite variant show variant-a
+```
+
+For eventual real use, A is a reviewed version of the existing harness and B a
+reviewed navigation instruction manifest. Register metadata here; keep Repo Map
+indexes and navigation tools in their source project. Do not copy instructions,
+source identifiers, prompts, responses, criterion text or paths into these inputs.
+Registering a version does not register its usage adapter or enable experiments.
+
+## Preregister and freeze the protocol
+
+Write `protocol.json` using this synthetic contract example. **Replace both UTC
+recruitment dates with your intended validation interval before registering.**
+Freeze before its start; assign during `[recruitment_start, recruitment_end)`.
+All metric/sample/margin values below are synthetic inputs, not recommendations
+for a real experiment. To revise any registered draft, use a new protocol ID.
+
+```json
+{
+  "schema_version": 1,
+  "id": "demo-comparison",
+  "project_id": "demo",
+  "team_id": "demo-team",
+  "mode": "randomized_task",
+  "purpose": "synthetic_validation",
+  "protocol_version": "protocol-v1",
+  "eligibility_version": "eligibility-v1",
+  "classification_version": "classification-v1",
+  "participants": ["user-1", "user-2"],
+  "environment_ids": ["environment-1", "environment-2"],
+  "variant_ids": ["variant-a", "variant-b"],
+  "recruitment_start": "2030-01-01T00:00:00Z",
+  "recruitment_end": "2030-01-02T00:00:00Z",
+  "allocation_method": "balanced_blocks",
+  "allocation_version": "balanced-blocks-v1",
+  "allocation_ratio": [1, 1],
+  "block_size": 4,
+  "strata": [{
+    "id": "stratum-1",
+    "assignees": ["user-1", "user-2"],
+    "types": ["feature"],
+    "sizes": ["small"],
+    "allocator_id": "allocator-1"
+  }],
+  "primary_metric": "input_total",
+  "quality_metric": "criterion_fulfillment",
+  "quality_margin": 0.05,
+  "minimum_effect": 0.1,
+  "sample_plan": {"target_tasks": 8, "planning_basis_id": "synthetic-basis"},
+  "followup_seconds": 3600,
+  "stopping_rule": {"kind": "fixed_recruitment", "version": "stopping-v1"},
+  "missingness_policy": {
+    "version": "missingness-v1",
+    "max_usage_missing_rate": 0.1,
+    "max_outcome_missing_rate": 0.1
+  },
+  "deviation_policy": {"mismatch": "continue", "unknown": "continue", "version_drift": "stop"},
+  "confidence_level": 0.95,
+  "analysis_plan_version": "synthetic-analysis-v1",
+  "sensitivity_plan_ids": ["synthetic-sensitivity"]
+}
+```
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison register --config .harness-delta/comparison-demo/protocol.json
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison freeze demo-comparison
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison show demo-comparison
+```
+
+Missing inputs cannot freeze. Invalid/overlapping strata, unavailable participants,
+ineligible variants and unmatched runtime settings fail. `real_experiment` drafts
+may be recorded/frozen for review, but allocation always rejects them; no readiness
+flag overrides R10. These operations do not validate analysis or start collection.
+
+## Preregister a task and reveal its persistent assignment
+
+Write `task.json` before execution:
+
+```json
+{
+  "schema_version": 1,
+  "protocol_id": "demo-comparison",
+  "project_id": "demo",
+  "logical_task_id": "logical-task-1",
+  "task_id": "task-1",
+  "alias_ids": ["known-alias-1"],
+  "metadata": {
+    "type": "feature",
+    "expected_size": "small",
+    "assignee": "user-1",
+    "product": "synthetic",
+    "model": "synthetic-model",
+    "criterion_ids": ["criterion-1"]
+  },
+  "environment_id": "environment-1",
+  "code_base_commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "allocator_id": "allocator-1"
+}
+```
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison assign --config .harness-delta/comparison-demo/task.json
+```
+
+The example code commit is synthetic. Real registration will use its actual code
+baseline separately from the harness manifest. Assignment can atomically register
+a task or attach an identical already registered, unstarted task. The receipt is
+printed after commit and includes one assigned variant, assignment ID and fixed
+deadline. Re-running the same command returns it with `reused: true`.
+
+Reuse the declared identity for retries/rework. Declare known aliases before
+allocation; alias registration returns the canonical task. New requirements need a
+new task/criteria/identity. The tool cannot detect undeclared semantic duplicates.
+A conflict discovered after separate assignments blocks the affected protocols.
+Do not copy the SQLite file to create another authoritative writer.
+
+## Confirm application and record human outcomes
+
+Read the assigned configuration, manually apply its reviewed instructions and start
+a fresh task session. This synthetic example exercises declarations without a
+product session. Write `confirmation.json` with the **assigned variant from the
+receipt** and, optionally, an occurrence time at/after assignment and no later than now.
+Omitting `occurred_at` captures the invocation time:
+
+```json
+{
+  "schema_version": 1,
+  "id": "confirmation-1",
+  "task_id": "task-1",
+  "occurred_at": "2030-01-01T00:00:00Z",
+  "evidence_method": "self_attested",
+  "actual_variant_id": "variant-a",
+  "product": "synthetic",
+  "product_version": "1.0.0",
+  "model": "synthetic-model",
+  "reasoning_setting": "none",
+  "environment_id": "environment-1"
+}
+```
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite task confirm-config --config .harness-delta/comparison-demo/confirmation.json
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite task config-history task-1
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite task start task-1
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite task first-complete task-1
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite task assess-first task-1 --result success
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite task finalize task-1 --outcome success --met criterion-1
+```
+
+Use nullable actual fields for explicit unknown configuration. New confirmations use
+new IDs; prior evidence is immutable. Matching declarations are `confirmed` with
+`self_attested` evidence, not mechanically verified. Crossover remains in the
+original assignment. Frozen mismatch/unknown policies can stop the task; runtime
+drift pauses measurement and cannot automatically reassign the old task. Finalizing as `aborted` records a cancellation deviation while preserving the
+assignment. Human assessment determines completion; CI alone cannot finalize it. Use the existing
+`pause`, `resume` and `rework` commands as appropriate.
+
+Optional selected-artifact verification uses `evidence_method: selected_artifact_hash`
+and `--artifact instructions=path/to/instructions.md`. Only explicitly supplied
+instruction files are read (1–256 unique artifact IDs, each at most 1 MiB); paths and
+contents are never retained. The manifest is SHA-256 of UTF-8 compact JSON containing
+`[{"artifact_id":"instructions","sha256":"<file-sha256>"}]`, sorted by artifact ID
+in code-point order. Use lowercase hexadecimal hashes. The check describes current
+files, omit `occurred_at` so the invocation captures the check time. If supplied through
+the API it must equal `confirmConfiguration`'s timestamp; earlier occurrences are
+valid only for self-attestation. Product/model/global settings remain declarations.
+
+The synthetic CLI deliberately cannot `session link` a synthetic product or read a
+real session in this validation store. Test fixtures inject synthetic usage only in
+tests. Ordinary Codex/Claude collection remains separate; a future admitted real
+workflow will require supported exact versions, an explicit task/session/source map,
+a running collector and explicit confirmation linkage (`session link --confirmation`).
+Neither assignment nor confirmation reads session contents or backfills earlier usage.
+
+## Inspect and delete
+
+Existing task reports continue to show missing/partial usage, never a full randomized
+endpoint or adoption result. A synthetic task without injected observations has
+missing usage, not zero. No team exchange, network transmission or randomized
+comparison report is available in this batch.
+
+```sh
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite delete task task-1
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison show demo-comparison
+```
+
+Deletion invalidates the experiment and stops new assignments; related evidence and
+private replay queues are removed. Known identity/alias tombstones reject reuse.
+Retained tasks may finish their normal lifecycle. Project deletion removes its
+comparison data; explicitly configured retention uses the same deletion path.
+Deletion cannot erase exported copies (export itself is not implemented here).

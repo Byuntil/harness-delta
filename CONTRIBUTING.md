@@ -78,6 +78,13 @@ be bypassed locally, so CI and review remain required verification layers.
   Agent-assisted tasks require independent agent review. Manual contributions can
   use normal maintainer review without an AI account, plugin, or subscription.
 
+## Task comparison workflow
+
+The [task comparison runbook](docs/runbooks/task-comparison.md) describes the
+synthetic-only first batch. Configuration registration, durable assignment and
+manual application evidence do not enable real experiments, sharing or inference.
+See [ADR 008](docs/decisions/008-task-comparison-workflow.md) for contracts and limits.
+
 ## File adapter profiles
 
 Registered file adapters live in `src/adapter-profiles.ts`. Registration is an exact `(product, version)` allowlist. A new version whose semantics are unchanged is data, fixtures, and evidence. A semantic change is a named code variant plus tests; the old variant is not edited to fit the new version. Codex 0.158.0 lives under `scripts/conformance/` and is not registered. The conformance runner is manual. `npm test` runs offline synthetic unit tests of the report projector, the candidate parser, and the confirmation helpers. It does not run the conformance runner, spawn product CLIs, or open real sessions. See [ADR 007](docs/decisions/007-adapter-version-profiles.md).
