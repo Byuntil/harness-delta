@@ -1,6 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": { "rootDir": "../..", "outDir": "../../.harness-delta/analysis-validation-build", "declaration": false, "sourceMap": false },
-  "include": ["./*.ts", "../../tests/helpers/analysis-oracle.ts"],
+  "include": ["./runner.ts", "../../tests/helpers/analysis-oracle.ts"],
   "exclude": ["../../node_modules", "../../dist"]
 }

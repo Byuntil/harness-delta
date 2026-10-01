@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "rootDir": "../..", "outDir": "../../.harness-delta/confidence-validation-build", "declaration": false, "sourceMap": false },
+  "include": ["./confidence-runner.ts", "../../tests/helpers/confidence-oracle.ts"],
+  "exclude": ["../../node_modules", "../../dist"]
+}

@@ -29,7 +29,8 @@
     "check:privacy": "node scripts/check-private-records.mjs",
     "check": "npm run check:privacy && npm run lint && npm run typecheck && npm test && npm run build",
     "prepack": "npm run build",
-    "analysis:validate": "node scripts/analysis-validation-command.mjs"
+    "analysis:validate": "node scripts/analysis-validation-command.mjs",
+    "analysis:validate:confidence": "node scripts/confidence-validation-command.mjs"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",

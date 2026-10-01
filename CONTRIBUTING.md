@@ -173,3 +173,12 @@ branch protection or mean a remote run has passed.
 The [comparison analysis validation runbook](docs/runbooks/comparison-analysis-validation.md)
 reproduces the bounded synthetic study with `npm run analysis:validate`. Its exact
 oracle checks are separate from full R10 validation and real experiment readiness.
+
+## Offline statistical validation
+
+Use the [analysis validation runbook](docs/runbooks/comparison-analysis-validation.md)
+for the separate `npm run analysis:validate` sharp-null arithmetic study and
+`npm run analysis:validate:confidence` bounded mean-effect/deadline-quality study.
+Both are synthetic development commands under Node 24. Full confidence calibration
+is opt-in, outside normal unit tests. Neither enables production inference or real
+experiments; preserve the fixed registries, failures and historical evidence.

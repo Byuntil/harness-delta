@@ -83,7 +83,7 @@ import { sourceFiles,main } from '../scripts/analysis-validation/runner.js';
 import * as statisticModule from '../scripts/analysis-validation/statistics.js';
 test('source closure covers every study source and changes to oracle, wrapper, settings or cases alter provenance',()=>{
   const declared=sourceFiles.filter(x=>x.startsWith('scripts/analysis-validation/')&&x.endsWith('.ts')).map(x=>x.split('/').at(-1)).sort();
-  expect(declared).toEqual(readdirSync('scripts/analysis-validation').filter(x=>x.endsWith('.ts')).sort());
+  expect(declared).toEqual(readdirSync('scripts/analysis-validation').filter(x=>x.endsWith('.ts')&&!x.startsWith('confidence')).sort());
 });
 test('injected candidate mismatch becomes failed evidence and a nonzero command status',()=>{
   const spy=vi.spyOn(statisticModule,'computeStatistic').mockReturnValue({numerator:999n,denominator:1n});
