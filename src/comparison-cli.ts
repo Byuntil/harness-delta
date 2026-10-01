@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { createComparisonSnapshot, readComparisonSnapshot } from './reports/comparison-snapshot.js';
+import { renderComparisonReport } from './reports/comparison-render.js';
+import type { ComparisonSnapshotRequest } from './reports/comparison-contracts.js';
 import type { Command } from 'commander';
 import { assignTask } from './allocation.js';
 import { freezeProtocol, registerProtocol, registerVariant, showProtocol, showVariant } from './comparison.js';
@@ -16,7 +19,15 @@ export function registerComparisonCommands(program: Command, store: () => Store,
   comparison.command('register').requiredOption('--config <file>').action((options: { config: string }) => { registerProtocol(store(), readConfig(options.config)); });
   comparison.command('freeze <id>').action((id: string) => { freezeProtocol(store(), id, new Date().toISOString()); });
   comparison.command('show <id>').action((id: string) => { print(showProtocol(store(), id)); });
-  comparison.command('assign').requiredOption('--config <file>').action((options: { config: string }) => { print(assignTask(store(), readConfig(options.config))); });
+  comparison.command('assign').requiredOption('--config <file>').action((options: { config: string }) => { print(assignTask(store(), readConfig(options.config), { discloseReports: ids => { print({ invalidating_reports: ids }); } })); });
+  comparison.command('snapshot').command('create <protocol-id>')
+    .requiredOption('--id <report-id>').requiredOption('--cutoff <UTC>').requiredOption('--reason <reason>')
+    .option('--supersedes <report-id>').action((protocolId: string, options: { id: string; cutoff: string; reason: ComparisonSnapshotRequest['revisionReason']; supersedes?: string }) => {
+      print(createComparisonSnapshot(store(), { reportId: options.id, protocolId, cutoff: options.cutoff, revisionReason: options.reason,
+        ...(options.supersedes ? { supersedesReportId: options.supersedes } : {}) }));
+    });
+  comparison.command('report <report-id>').option('--format <json|markdown>', 'output format', 'json')
+    .action((reportId: string, options: { format: string }) => { process.stdout.write(renderComparisonReport(readComparisonSnapshot(store(), reportId), options.format)); });
   const task = program.commands.find(command => command.name() === 'task');
   if (!task) throw new Error('task_commands_missing');
   task.command('confirm-config').requiredOption('--config <file>')

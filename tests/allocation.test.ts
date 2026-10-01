@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, cpSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { transpileModule, ModuleKind, ScriptTarget } from 'typescript';
 import { Worker } from 'node:worker_threads';
 import { expect, test } from 'vitest';
@@ -141,11 +141,12 @@ test('two real SQLite writers racing an identity commit one assignment and one p
     const compiled = join(root, 'compiled'); mkdirSync(compiled);
     writeFileSync(join(compiled, 'package.json'), '{"type":"module"}');
     symlinkSync(join(process.cwd(), 'node_modules'), join(compiled, 'node_modules'), 'dir');
-    for (const name of readdirSync(new URL('../src/', import.meta.url))) {
+    for (const name of readdirSync(new URL('../src/', import.meta.url), { recursive: true, encoding: 'utf8' })) {
       if (!name.endsWith('.ts')) continue;
       const output = transpileModule(readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8'), {
         compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2023 },
       }).outputText;
+      mkdirSync(dirname(join(compiled, name)), { recursive: true });
       writeFileSync(join(compiled, name.replace(/\.ts$/, '.js')), output);
     }
     cpSync(new URL('../src/migrations/', import.meta.url), join(compiled, 'migrations'), { recursive: true });

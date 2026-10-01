@@ -18,7 +18,7 @@ export async function main(argv: string[]): Promise<number> {
   program.exitOverride().configureOutput({ writeErr: () => process.stderr.write('invalid_command\n') });
   const db = () => store ??= new Store(program.opts<{ db: string }>().db);
   const life = () => new Lifecycle(db());
-  const deletion = () => new Deletion(db());
+  const deletion = () => new Deletion(db(), undefined, ids => { print({ invalidating_reports: ids }); });
   const print = (value: unknown) => { process.stdout.write(`${JSON.stringify(value)}\n`); };
   const project = program.command('project');
   project.command('add <id>').requiredOption('--root <directory>').action((id: string, options: { root: string }) => { life().registerProject(id, options.root); });
