@@ -1,3 +1,4 @@
+import { retireSource, assertUnsealedIdentity } from './exchange/deletion.js';
 import { z } from 'zod';
 import { affectedComparisonProtocols, invalidateComparisonSnapshots } from './reports/comparison-invalidation.js';
 import { IdSchema } from './contracts.js';
@@ -45,6 +46,7 @@ function rejectTombstones(store: Store, input: AssignmentInput, keys: readonly s
 function invalidateIdentityConflict(store: Store, taskIds: readonly string[], now: string, discloseReports?: (ids: readonly string[]) => void): void {
   const protocolIds = new Set(taskIds.flatMap(taskId => affectedComparisonProtocols(store, taskId)));
   for (const id of protocolIds) {
+    retireSource(store, id, 'identity_conflict', now);
     store.execute("UPDATE comparison_protocols SET status = 'identity_conflict', invalidated_reason = 'identity_conflict', data_revision = data_revision + 1 WHERE id = ? AND status != 'invalidated_by_deletion'", [id]);
     const reports = store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [id]).map(row => row.report_id);
     if (reports.length) discloseReports?.(reports);
@@ -100,6 +102,7 @@ export function assignTask(store: Store, input: unknown, dependencies: Allocatio
       if (original.project_id !== config.project_id) throw new Error('project_mismatch');
       assertPreregistration(store, canonicalId, config);
       if (original.allocator_id !== config.allocator_id) throw new Error('allocator_conflict');
+      assertUnsealedIdentity(store, canonicalId, keys);
       bindIdentityKeys(store, config, canonicalId);
       if (original.protocol_id !== config.protocol_id || canonicalId !== config.task_id) {
         if (Date.parse(now) < Date.parse(original.assigned_at)) throw new Error('clock_regression');

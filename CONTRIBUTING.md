@@ -82,7 +82,10 @@ be bypassed locally, so CI and review remain required verification layers.
 
 The [task comparison runbook](docs/runbooks/task-comparison.md) describes the
 synthetic-only workflow and assignment reports. Configuration registration, durable assignment and
-manual application evidence do not enable real experiments, sharing or inference.
+manual application evidence do not enable real experiments or inference.
+Explicit synthetic [file exchange and frozen team reports](docs/runbooks/team-file-exchange.md)
+use a separate strict sharing boundary with static writer mappings and conservative
+deletion. They do not enable live experiments or prove team completeness.
 See [ADR 008](docs/decisions/008-task-comparison-workflow.md) for contracts and limits.
 
 ## File adapter profiles

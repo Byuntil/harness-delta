@@ -1,3 +1,5 @@
+import { deleteMappedProject } from './exchange/invalidation.js';
+import { recordSourceTaskDeletion, recordSourceProjectDeletion } from './exchange/deletion.js';
 import { z } from 'zod';
 import { affectedComparisonProtocols, invalidateComparisonSnapshots } from './reports/comparison-invalidation.js';
 import { IdSchema, TimestampSchema } from './contracts.js';
@@ -16,6 +18,7 @@ export class Deletion {
     this.store.immediateTransaction(() => {
       if (this.isDeleted('task', taskId)) return;
       if (!this.store.get('SELECT id FROM tasks WHERE id = ?', [taskId])) throw new Error('unknown_task');
+      recordSourceTaskDeletion(this.store, taskId, TimestampSchema.parse(this.clock()));
       this.deleteComparisonData(taskId);
       for (const session of this.store.all<{ id: string }>('SELECT id FROM sessions WHERE task_id = ?', [taskId])) this.tombstone('session', session.id);
       this.tombstone('task', taskId);
@@ -28,6 +31,8 @@ export class Deletion {
     this.store.immediateTransaction(() => {
       if (this.isDeleted('project', projectId)) return;
       if (!this.store.get('SELECT id FROM projects WHERE id = ?', [projectId])) throw new Error('unknown_project');
+      deleteMappedProject(this.store, projectId, TimestampSchema.parse(this.clock()));
+      recordSourceProjectDeletion(this.store, projectId, TimestampSchema.parse(this.clock()));
       for (const protocol of this.store.all<{ id: string }>('SELECT id FROM comparison_protocols WHERE project_id=?', [projectId])) {
         const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocol.id]).map(row => row.report_id);
         if (ids.length) this.discloseReports(ids);
