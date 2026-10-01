@@ -167,3 +167,9 @@ Pull requests and pushes to `main` run Node 24 checks on macOS. The workflow nee
 no private plans, session data, or agent credentials. It does not perform agent
 review or prove requirement completeness. Adding the workflow does not configure
 branch protection or mean a remote run has passed.
+
+## Offline comparison method study
+
+The [comparison analysis validation runbook](docs/runbooks/comparison-analysis-validation.md)
+reproduces the bounded synthetic study with `npm run analysis:validate`. Its exact
+oracle checks are separate from full R10 validation and real experiment readiness.
