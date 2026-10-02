@@ -15,7 +15,7 @@ exec/resume admission on 2026-09-29 used policy `codex-rollout-m2-v1`, source re
 The original source digest was recomputed from committed application files and
 its archived sanitized report passed the pure admission gate offline.
 
-The integrated implementation has digest
+At integration commit `2a12046502dd8f908c396255fe91d47b3a9b715e`, the implementation had digest
 `3fb4968e892787a013192ed875ef8c03019592d4273c1319220c8d22af915e73`.
 Only `src/lifecycle.ts` differs within the digest closure: main's configuration
 confirmation and comparison lifecycle controls are preserved. Assessing the
@@ -101,6 +101,43 @@ Existing admission tests reject stale identity and missing required checks.
 Normal checks never execute product conformance. A contributor without archived
 private evidence can reproduce these synthetic checks; they do not need a real
 session or personal plugin.
+
+## Bounded model-support diagnosis
+
+A separately authorized diagnostic on 2026-10-02 requested `gpt-6.1-sol` with
+reasoning effort `high` on installed Codex CLI 0.158.0, using the existing ChatGPT
+authentication. One synthetic initial exec and one resume of that exact session
+were attempted, with the same `ready`/`again` prompts and read-only sandbox as the
+earlier bounded execution. Both exited nonzero before a completed turn. The linked
+native error records contained an HTTP 400 JSON wrapper whose message rejected
+the model for Codex with a ChatGPT account. Settings and session linkage were
+checked against native metadata; backend model identity was not attested.
+
+The stream reducer now retains only fixed `failureReasons` enums from error and
+failed-turn events. It recognizes a single JSON message wrapper and the complete
+account-rejection template, without retaining arbitrary provider codes, model
+names, messages or HTTP bodies. Synthetic tests cover that wrapper, unknown
+errors, unrelated item events, report privacy and stopping before source lookup
+or automatic resume. The default runner still stops on a nonzero product exit. The one
+diagnostic continuation after the failed initial was a separately approved local
+adapter; it does not qualify the default runner.
+
+The model cache listed the requested model and effort, but a catalog is not an
+entitlement check, as explained in the [official OpenAI documentation](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server).
+The observed rejection establishes the current authentication path's failure;
+the precise backend policy and availability through other paths remain unverified.
+The [official model guide](https://learn.chatgpt.com/docs/models) documents the
+same `codex exec -m gpt-6.1-sol` selection and states that availability depends on
+rollout, sign-in method and client. This diagnosis does not establish a universal
+CLI or ChatGPT-account limitation, nor an invalid model name or reasoning effort.
+No model substitution, new authentication, provider rerouting or client-identity
+override was performed. Restoring successful inference needs a separately
+approved supported execution path. These failed calls produced no usable usage
+measurement; unavailable usage is not observed zero.
+
+This diagnostic change also changes the implementation digest closure. Historical
+admission evidence is not rebound to the new code, and no fresh admission is
+claimed. `completeTotals` remains false and `complete_tokens` remains null.
 
 Further work requires a separately approved live qualification scope and, for
 complete measurement, a validated producer contract satisfying all eleven facts.

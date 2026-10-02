@@ -22,6 +22,7 @@ test('exec stream reduction keeps the thread id in memory and the usage vector w
   expect(reduced.summary).toEqual({
     types: { 'thread.started': 1, 'turn.started': 1, 'item.completed': 1, 'turn.completed': 1, 'turn.failed': 1, other: 2 },
     unparsed: 1, threadIdPresent: true, turnCompleted: 1, threadIdConflict: false,
+    failureReasons: ['unclassified_error'],
   });
   expect(JSON.stringify(reduced.summary)).not.toContain('SECRET');
   expect(JSON.stringify(reduced.summary)).not.toContain(threadId);
@@ -44,4 +45,41 @@ test('exec stream reduction fails closed on missing, invalid or conflicting valu
   expect(twice.usage).toBeNull();
   expect(twice.summary.turnCompleted).toBe(2);
   expect(readFileSync(new URL('../scripts/conformance/exec-stream.ts', import.meta.url), 'utf8')).not.toContain('node:fs');
+});
+
+test('failed exec preserves only fixed model rejection reasons, including a ChatGPT account rejection', () => {
+  const reduced = reduceExecStream(stream(
+    { type: 'error', message: "The 'synthetic-model' model is not supported when using Codex with a ChatGPT account." },
+    { type: 'turn.failed', error: { code: 'model_not_supported', message: 'SECRET_DETAIL' } },
+    { type: 'error', code: 'SECRET_ERROR_CODE', message: 'SECRET_UNKNOWN' },
+    { type: 'item.completed', item: { text: "The 'synthetic-model' model is not supported when using Codex with a ChatGPT account." } },
+  ));
+  expect(reduced.summary.failureReasons).toEqual(['chatgpt_account_model_not_supported', 'model_not_supported', 'unclassified_error']);
+  expect(reduced.usage).toBeNull();
+  expect(JSON.stringify(reduced.summary)).not.toMatch(/SECRET|synthetic-model|ChatGPT account/);
+});
+
+test('failure projection rejects misleading messages and does not infer model support from unrelated events', () => {
+  const reduced = reduceExecStream(stream(
+    { type: 'error', message: 'A model may not be supported: SECRET' },
+    { type: 'turn.failed', error: null },
+    { type: 'item.completed', code: 'model_not_supported' },
+    { type: 'turn.completed', usage },
+  ));
+  expect(reduced.summary.failureReasons).toEqual(['unclassified_error']);
+  expect(reduceExecStream('').summary.failureReasons).toEqual([]);
+});
+
+test('failure projection decodes the observed HTTP JSON message wrapper without retaining its body', () => {
+  const message = JSON.stringify({ type: 'error', status: 400, error: {
+    type: 'invalid_request_error',
+    message: "The 'synthetic-model' model is not supported when using Codex with a ChatGPT account.",
+  }, secret: 'SECRET_HTTP_BODY' });
+  const reduced = reduceExecStream(stream(
+    { type: 'error', message },
+    { type: 'turn.failed', error: { message } },
+    { type: 'error', message: JSON.stringify({ error: { code: 'model_not_supported', message: 'SECRET' } }) },
+  ));
+  expect(reduced.summary.failureReasons).toEqual(['chatgpt_account_model_not_supported', 'model_not_supported']);
+  expect(JSON.stringify(reduced.summary)).not.toMatch(/SECRET|synthetic-model|invalid_request_error/);
 });

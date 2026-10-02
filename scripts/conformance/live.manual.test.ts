@@ -127,6 +127,33 @@ test('an unconfirmed plan starts no product process', async () => {
   }
 });
 
+test('a JSON-wrapped model rejection keeps a fixed reason and stops before source lookup or automatic resume', async () => {
+  const { deps, calls, outDir } = fakeDeps('ok');
+  const spawnProduct = deps.spawnProduct.bind(deps);
+  deps.spawnProduct = (args, options) => {
+    if (args[0] !== 'exec') return spawnProduct(args, options);
+    calls.push([...args]);
+    const message = JSON.stringify({ type: 'error', status: 400, error: {
+      message: "The 'synthetic-model' model is not supported when using Codex with a ChatGPT account.",
+    }, secret: 'SECRET_BODY' });
+    return Promise.resolve({ code: 1, timedOut: false, spawnError: false, startedAt: Date.now(), exitedAt: Date.now(),
+      stdout: [
+        { type: 'thread.started', thread_id: sessionId },
+        { type: 'error', message },
+        { type: 'turn.failed', error: { message } },
+      ].map(row => JSON.stringify(row)).join('\n') });
+  };
+  const report = await runLive(deps, outDir);
+  expect(report.stop).toBe('nonzero_exit');
+  expect(report.stages).toHaveLength(1);
+  expect(report.stages[0]).toMatchObject({ rolloutMatch: 'not_checked', conformance: null,
+    exec: { turnCompleted: 0, failureReasons: ['chatgpt_account_model_not_supported'] } });
+  expect(calls.map(args => args[0])).toEqual(['--version', 'exec', '--version']);
+  const written = readFileSync(join(outDir, 'conformance-live-report.json'), 'utf8');
+  expect(written).not.toMatch(/SECRET|synthetic-model/);
+  expect(written).not.toContain(sessionId);
+});
+
 test('a confirmed synthetic run links both stages through the hook and reports enums only', async () => {
   const { deps, calls, printed, outDir } = fakeDeps('ok');
   const report = await runLive(deps, outDir);
