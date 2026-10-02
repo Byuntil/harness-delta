@@ -47,7 +47,7 @@ export function registerExchangeCommands(program: Command, store: () => Store, p
   team.command('snapshot').command('create').requiredOption('--config <file>').action((o:{config:string})=>exchangeAction(()=>{
     const report=createTeamSnapshot(store(),readExchangeFile(o.config));print({status:'created',snapshot_id:report.snapshot_id,snapshot_hash:report.snapshot_hash});
   }));
-  team.command('report').argument('<snapshot-id>').option('--format <format>','json or markdown','json').action((id:string,o:{format:string})=>exchangeAction(()=>{
+  team.command('report').argument('<snapshot-id>').option('--format <format>','json, markdown or markdown-readable','json').action((id:string,o:{format:string})=>exchangeAction(()=>{
     process.stdout.write(renderTeamReport(readTeamSnapshot(store(),id),o.format));
   }));
 

@@ -26,7 +26,7 @@ export function registerComparisonCommands(program: Command, store: () => Store,
       print(createComparisonSnapshot(store(), { reportId: options.id, protocolId, cutoff: options.cutoff, revisionReason: options.reason,
         ...(options.supersedes ? { supersedesReportId: options.supersedes } : {}) }));
     });
-  comparison.command('report <report-id>').option('--format <json|markdown>', 'output format', 'json')
+  comparison.command('report <report-id>').option('--format <json|markdown|markdown-readable>', 'output format', 'json')
     .action((reportId: string, options: { format: string }) => { process.stdout.write(renderComparisonReport(readComparisonSnapshot(store(), reportId), options.format)); });
   const task = program.commands.find(command => command.name() === 'task');
   if (!task) throw new Error('task_commands_missing');

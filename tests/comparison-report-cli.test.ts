@@ -32,10 +32,16 @@ test('synthetic CLI creates and renders a frozen report with no collection and d
     expect(renderComparisonReport(report, 'markdown')).toContain(created.snapshot_hash);
     output = ''; expect(await run(['comparison', 'report', 'report-1', '--format', 'markdown'])).toBe(0);
     expect(output).toContain('# Assignment comparison report');
+    output = ''; expect(await run(['comparison', 'report', 'report-1', '--format', 'markdown-readable'])).toBe(0);
+    expect(output).toContain('| Assigned cohort | 1 | 0 | 1 | 0 |');
+    expect(output).toContain('Unassigned eligibility: unknown');
     output = ''; expect(await run(['delete', 'task', 'task-1'])).toBe(0);
     expect(JSON.parse(output) as unknown).toEqual({ invalidating_reports: ['report-1'] });
     output = ''; expect(await run(['comparison', 'report', 'report-1'])).toBe(0);
     expect(JSON.parse(output) as unknown).toMatchObject({ validity_status: 'invalidated', original_cohort: 'unavailable_due_to_deletion' });
+    output = ''; expect(await run(['comparison', 'report', 'report-1', '--format', 'markdown-readable'])).toBe(0);
+    expect(output).toContain('Original cohort: unavailable\\_due\\_to\\_deletion');
+    expect(output).not.toContain('| Assigned cohort |');
     expect(await run(['comparison', 'snapshot', 'create', request.protocolId, '--id', request.reportId, '--cutoff', request.cutoff, '--reason', 'initial'])).toBe(2);
     expect(await run(['comparison', 'report', 'PRIVATE_SENTINEL?', '--format', 'bad'])).toBe(2);
     expect(errors).toBe('input_or_state_error\ninput_or_state_error\n');
