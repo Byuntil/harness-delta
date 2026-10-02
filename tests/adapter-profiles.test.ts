@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 import { lookupFileProfile, registeredFileProfiles } from '../src/adapter-profiles.js';
 
-test('lookup returns only the two exact registered profiles', () => {
+test('lookup returns only exact registered profiles', () => {
   expect(registeredFileProfiles.map(profile => [profile.product, profile.version])).toEqual([
     ['codex', '0.156.1'],
     ['claude_code', '2.1.283'],
+    ['codex', '0.158.0'],
   ]);
   expect(lookupFileProfile('codex', '0.156.1')).toMatchObject({
     kind: 'registered', product: 'codex', version: '0.156.1', counterMode: 'cumulative_total',
@@ -15,7 +16,7 @@ test('lookup returns only the two exact registered profiles', () => {
     kind: 'registered', product: 'claude_code', version: '2.1.283', counterMode: 'message_components',
     evidence: { completeTotals: false, reasoning: 'unmeasurable' },
   });
-  for (const version of ['0.158.0', '0.156.1-rc.1', '0.156.1+build.1', '0.156.10', '0.156.1 ', '2.1.283']) {
+  for (const version of ['0.159.0', '0.158.0-rc.1', '0.158.0+build.1', '0.156.1-rc.1', '0.156.1+build.1', '0.156.10', '0.156.1 ', '2.1.283']) {
     expect(lookupFileProfile('codex', version)).toBe('unsupported');
   }
   expect(lookupFileProfile('claude_code', '0.156.1')).toBe('unsupported');

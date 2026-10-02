@@ -17,7 +17,7 @@ concurrent-turn, interrupted-turn, or complete observation validation.
 
 | Source | Version observed | Status and blocker |
 | --- | --- | --- |
-| Codex CLI exec JSON and rollout JSONL | 0.156.1 (adapter); 0.158.0 (bounded check) | Primary Codex usage candidate. Partial adapter for explicitly linked, sequential sessions; the adapter accepts 0.156.1 only. Complete measurement is blocked by unverified exceptional boundaries and child accounting. See the [0.158.0 rollout check](#codex-01580-rollout-check) |
+| Codex CLI exec JSON and rollout JSONL | 0.156.1 and 0.158.0 (partial adapters) | Primary Codex usage candidate. Partial adapter for explicitly linked, sequential sessions; the adapter accepts these exact registered versions. Complete measurement is blocked by unverified exceptional boundaries and child accounting. See the [0.158.0 rollout check](#codex-01580-rollout-check) |
 | Codex desktop | Not probed | Unsupported until a dedicated app session establishes identity, version, and counter behavior; CLI evidence does not establish app parity |
 | Claude Code print JSON and transcript JSONL | 2.1.283 | Partial adapter for explicitly linked, sequential sessions; complete measurement blocked by message revisions, exceptional boundaries, and child accounting |
 | Claude Code native OpenTelemetry export | 2.1.283 | Unsupported primary candidate ([ADR 006](006-otel-usage-source.md)). Bounded live checks: shell-layer precedence held, session start at sequence 0, prompt and response redacted (second run), and in two single-request print-mode runs the event usage matched the result usage, with timing consistent with a shutdown flush. Cache semantics, user-settings precedence, interactive usage, subagents, compaction, retries and nested-process usage are unverified |
@@ -72,9 +72,9 @@ This was a user-approved bounded check on 2026-09-29, on macOS arm64 with codex-
   - nonzero reasoning;
   - handling of `cache_write_input_tokens` (the adapter reads four usage fields).
 
-The adapter still accepts only 0.156.1. Supporting 0.158.0 needs its own tested change.
+0.158.0 was admitted on 2026-09-29 after a fresh typed-confirmed exec/resume run passed the M2 partial-scope gate. The observed multi-agent capability was `v2`; no child activity was observed. Counter agreement, paired/root turns and a newly observed same-thread resume checkpoint passed. The shared production parser is covered by normal registry/link/collector/report synthetic integration tests. At admission time this did not establish a live product collector window, complete coverage or interactive linkage. The later bounded collector smoke and current offline integration retain partial-only limits; see the [readiness assessment](../validation/codex-01580-offline-readiness.md).
 
-File adapters accept only the exact registered versions Codex CLI 0.156.1 and Claude Code 2.1.283. `session link --version` is required manual input. Unregistered versions, ranges, and suffixes are rejected before the file is read and are not stored. Codex 0.158.0 is not a registered file adapter. OTel profiles are a separate allowlist and are not consulted by this file registry. See [ADR 007](007-adapter-version-profiles.md).
+File adapters accept only the exact registered versions Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283. `session link --version` is required manual input. Unregistered versions, ranges, and suffixes are rejected before the file is read and are not stored. Codex 0.158.0 is registered under the [M2 partial-scope policy and admission workflow](../runbooks/codex-version-admission.md). OTel profiles are a separate allowlist and are not consulted by this file registry. See [ADR 007](007-adapter-version-profiles.md).
 
 ## Fields
 

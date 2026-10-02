@@ -1,3 +1,4 @@
+import { multiAgentAllowed, type CollaborationMode, type MultiAgentVersion } from '../../src/codex-rollout-policy.js';
 export interface CounterVector {
   readonly input: number | null;
   readonly cached: number | null;
@@ -21,6 +22,9 @@ export const checkNames = [
   'root_turn_topology',
   'thread_settings_applied',
   'session_id_matches_id',
+  'collaboration_mode_allowed',
+  'multi_agent_version_allowed',
+  'no_child_activity',
 ] as const;
 
 export type CheckName = typeof checkNames[number];
@@ -111,7 +115,7 @@ export function classifyTopology(input: {
   rootTurnId: string | null;
   collaborationModePresent: boolean;
   multiAgentVersionPresent: boolean;
-  threadSettingsApplied: 'absent' | 'ambiguous';
+  threadSettingsApplied: 'absent' | 'same_thread' | 'ambiguous';
   sessionMetaId: string | null;
   sessionMetaSessionId: string | null;
   linkedSessionId: string | null;
@@ -122,10 +126,9 @@ export function classifyTopology(input: {
     : started === null || complete === null ? 'fail'
     : !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(started) || !/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/.test(complete) ? 'invalid'
     : started === complete ? 'pass' : 'fail';
-  const root = input.collaborationModePresent || input.multiAgentVersionPresent ? 'fail'
-    : input.rootTurnId === null ? 'not_observed'
+  const root = input.rootTurnId === null ? 'not_observed'
     : input.turnId === null || input.rootTurnId !== input.turnId ? 'fail' : 'pass';
-  const settings = input.threadSettingsApplied === 'absent' ? 'not_observed' : 'fail';
+  const settings = input.threadSettingsApplied === 'absent' ? 'not_observed' : input.threadSettingsApplied === 'same_thread' ? 'pass' : 'fail';
   const session = input.sessionMetaSessionId === null ? 'not_observed'
     : input.sessionMetaId === null || input.linkedSessionId === null ? 'fail'
     : input.sessionMetaId === '' || input.sessionMetaSessionId === '' || input.linkedSessionId === '' ? 'invalid'
@@ -165,7 +168,6 @@ function pairOutcome(pair: TurnPair): CheckOutcome {
 
 function contextOutcome(context: TurnContextFact): CheckOutcome {
   if (context.rootTurnIdNonString) return 'invalid';
-  if (context.collaborationModePresent || context.multiAgentVersionPresent) return 'fail';
   if (context.rootTurnId === null) return 'not_observed';
   if (context.turnId === null) return 'fail';
   if (!turnIdPattern.test(context.turnId) || !turnIdPattern.test(context.rootTurnId)) return 'invalid';
@@ -174,10 +176,13 @@ function contextOutcome(context: TurnContextFact): CheckOutcome {
 
 export function classifySessionTopology(input: {
   pairs: readonly TurnPair[];
+  collaborationModes: readonly CollaborationMode[];
+  multiAgentVersions: readonly MultiAgentVersion[];
+  childActivity: boolean;
   turnContexts: readonly TurnContextFact[];
   collaborationModePresent: boolean;
   multiAgentVersionPresent: boolean;
-  threadSettingsApplied: 'absent' | 'ambiguous';
+  threadSettingsApplied: 'absent' | 'same_thread' | 'ambiguous';
   sessionMetaId: string | null;
   sessionMetaSessionId: string | null;
   linkedSessionId: string | null;
@@ -185,12 +190,14 @@ export function classifySessionTopology(input: {
   taskCompleteTurnId: string | null;
   turnId: string | null;
   rootTurnId: string | null;
-}): Pick<CheckMap, 'paired_turn_ids' | 'root_turn_topology' | 'thread_settings_applied' | 'session_id_matches_id'> {
+}): Pick<CheckMap, 'paired_turn_ids' | 'root_turn_topology' | 'thread_settings_applied' | 'session_id_matches_id' | 'collaboration_mode_allowed' | 'multi_agent_version_allowed' | 'no_child_activity'> {
   const single = classifyTopology(input);
   const paired = input.pairs.reduce<CheckOutcome>((current, pair) => foldCheck(current, pairOutcome(pair)), 'not_observed');
-  let root = input.turnContexts.reduce<CheckOutcome>((current, context) => foldCheck(current, contextOutcome(context)), 'not_observed');
-  if (input.collaborationModePresent || input.multiAgentVersionPresent) root = foldCheck(root, 'fail');
+  const root = input.turnContexts.reduce<CheckOutcome>((current, context) => foldCheck(current, contextOutcome(context)), 'not_observed');
   return {
+    collaboration_mode_allowed: input.collaborationModes.length === 0 ? 'not_observed' : input.collaborationModes.every(mode => mode === 'default' || mode === 'plan') ? 'pass' : 'fail',
+    multi_agent_version_allowed: input.multiAgentVersions.length === 0 ? 'not_observed' : input.multiAgentVersions.every(multiAgentAllowed) ? 'pass' : 'fail',
+    no_child_activity: input.childActivity ? 'fail' : 'pass',
     paired_turn_ids: input.pairs.length === 0 ? single.paired_turn_ids : paired,
     root_turn_topology: root,
     thread_settings_applied: single.thread_settings_applied,

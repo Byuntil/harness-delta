@@ -25,7 +25,7 @@ function fixture() {
 test('collector does not read an unregistered linked version', () => {
   const fixture = collectionFixture('codex');
   try {
-    fixture.store.execute("UPDATE sessions SET product_version = '0.158.0' WHERE id = 's1'", []);
+    fixture.store.execute("UPDATE sessions SET product_version = '0.159.0' WHERE id = 's1'", []);
     fixture.life.start('t1');
     const reads = fixture.reads();
     fixture.collector.tick('t1');

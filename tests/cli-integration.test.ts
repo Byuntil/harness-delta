@@ -47,7 +47,7 @@ test('CLI rejects an unregistered session version without a session row', async 
     expect(await run(['task', 'register', 't1', '--project', 'p1', '--type', 'feature', '--size', 'small', '--assignee', 'u1', '--product', 'codex', '--model', 'synthetic', '--criteria', 'c1'])).toBe(0);
     expect(await run([
       'session', 'link', 's9', '--task', 't1', '--source', '/synthetic/does-not-exist-unregistered.jsonl',
-      '--product', 'codex', '--version', '0.158.0',
+      '--product', 'codex', '--version', '0.159.0',
     ])).toBe(2);
     expect(errors.join('')).toContain('input_or_state_error');
     const store = new Store(file);

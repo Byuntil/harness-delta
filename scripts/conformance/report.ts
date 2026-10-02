@@ -1,3 +1,4 @@
+import type { CollaborationMode, MultiAgentVersion } from '../../src/codex-rollout-policy.js';
 import { chmodSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CatalogTraversal } from './catalog.js';
@@ -10,6 +11,7 @@ export interface ExpectationDiff {
 }
 
 export interface ConformanceReport {
+  readonly modes: { readonly collaboration: readonly CollaborationMode[]; readonly multiAgent: readonly MultiAgentVersion[] };
   readonly version: string;
   readonly scenario: string;
   readonly matchedPaths: readonly string[];
@@ -34,6 +36,7 @@ function differences(actual: CheckMap, expected: Partial<CheckMap> | CheckMap, o
 }
 
 export function projectReport(input: {
+  modes?: ConformanceReport['modes'];
   version: string;
   scenario: string;
   traversal: CatalogTraversal;
@@ -43,6 +46,7 @@ export function projectReport(input: {
   blocked: boolean;
 }): ConformanceReport {
   return {
+    modes: input.modes ?? { collaboration: [], multiAgent: [] },
     version: input.version,
     scenario: input.scenario,
     matchedPaths: input.traversal.matchedPaths,

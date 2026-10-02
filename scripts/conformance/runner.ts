@@ -1,3 +1,6 @@
+import { lookupCandidate } from './candidate.js';
+import { evidenceIdentity } from './evidence.js';
+import { lookupFileProfile } from '../../src/adapter-profiles.js';
 import { spawn } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -119,8 +122,14 @@ function realExisting(path: string): string {
  * any option that skips confirmation. Prints only the plan, the stop reason and the report location.
  */
 export async function main(argv: readonly string[], environment: RunnerEnvironment): Promise<number> {
+  const requested = argv.length === 4 && argv[0] === '--candidate' ? argv[1] : '0.158.0';
+  const candidate = lookupCandidate(requested ?? '');
+  if (!candidate || lookupFileProfile('codex', candidate.previousVersion) === 'unsupported') {
+    environment.write('unknown_candidate_or_previous_profile\n'); return 2;
+  }
+  if (argv[0] === '--candidate') argv = argv.slice(2);
   if (argv.length !== 2 || argv[0] !== '--out' || argv[1] === undefined || !isAbsolute(argv[1])) {
-    environment.write('usage: runner --out <absolute directory>\n');
+    environment.write('usage: runner [--candidate <exact version>] --out <absolute directory>\n');
     return 2;
   }
   const localRecords = realExisting(resolve(environment.cwd, '.harness-delta'));
@@ -142,7 +151,7 @@ export async function main(argv: readonly string[], environment: RunnerEnvironme
     environment.write('run_from_repository_root\n');
     return 2;
   }
-  const report = await runLive(environment.createDeps(), out);
+  const report = await runLive(environment.createDeps(), out, candidate, evidenceIdentity(environment.cwd, candidate));
   environment.write(`stop: ${report.stop ?? 'none'}\n`);
   if (report.confirmed) environment.write(`report: ${join(out, 'conformance-live-report.json')}\n`);
   return report.stop === null ? 0 : 1;

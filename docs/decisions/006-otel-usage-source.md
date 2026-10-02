@@ -662,14 +662,19 @@ conformance run (one `exec` turn and one resume, 2026-09-29) whose runner is
 proposed in [#12](https://github.com/Byuntil/harness-delta/pull/12). That run's detailed results are not yet
 published; they are cited here only as supporting observations.
 
+Updated after the separately confirmed M2 admission run on 2026-09-29:
+0.158.0 passed its required partial-scope checks and was registered. This updates
+the scope and topology mechanism below; it does not clear complete-measurement
+facts. See the [admission evidence](001-adapter-capabilities.md#codex-01580-rollout-check).
+
 **Scopes:**
 - Claude OTel: Claude Code 2.1.283 processes launched with the per-invocation
   settings of [Launch settings](#launch-settings-follow-up-3). The receiver and
   launch settings are internal and synthetic-only; no version profile ships and
   no measurement command launches them yet.
-- Codex rollout: the file adapter. Production accepts 0.156.1 only, through an
-  explicit manual link. 0.158.0 is an unregistered candidate observed in `exec`
-  mode. Interactive Codex linkage is unsupported. Each cell names the version it
+- Codex rollout: the file adapter. Production accepts exact versions 0.156.1
+  and 0.158.0 through an explicit manual link. The 0.158.0 evidence covers `exec`
+  and same-session resume under the M2 partial-scope policy. Interactive Codex linkage is unsupported. Each cell names the version it
   describes when the versions differ.
 
 **States.** *Verified*: the harness mechanism is tested and the product behavior
@@ -685,7 +690,7 @@ scope (ADR 004 `violated`). No cell currently reaches *Verified*.
 | `readyBeforeFirstRequest` | Mechanism only: the receiver listens before launch, and the first batch started at sequence 0 in the live checks; interactive startup and context usage are unknown | Unknown: the product writes the rollout; whether it records every request from the start is not established (see `requestUniverse`) |
 | `continuousObservation` | Mechanism only: sequence contiguity, revocation and uncertain windows; export can be lost on abrupt exit | Mechanism only: pause and restart exclusion, rotation and truncation fail closed, no backfill |
 | `fixedModel` | Unknown: the model is stored per request, but no rule fails a run on a model change | Mechanism only: a `turn_context.model` change blocks, but turn context does not prove the effective configuration ([ADR 001](001-adapter-capabilities.md)), and no model change was exercised |
-| `boundedTopology` | Unknown: only `sdk` to `main` observed; subagent and compaction values unobserved; nested processes did not receive the checked exporter variables, so their usage is expected to be missing | Gap for 0.158.0: its topology and `thread_settings_applied` admission gates are not cleared (ADR 007). Review of openai/codex rust-v0.158.0 shows `collab_*` events are not persisted to the rollout, and no current rule blocks sub-agent activity items. 0.156.1: fails closed on its known shapes (ADR 001) |
+| `boundedTopology` | Unknown: only `sdk` to `main` observed; subagent and compaction values unobserved; nested processes did not receive the checked exporter variables, so their usage is expected to be missing | Mechanism only for complete topology: 0.158.0 M2 partial admission passed root/turn and same-thread resume checkpoint checks, with capability `v2` and no observed children. Source-backed child activity items/events and inherited roots now block; synthetic regressions pass. Live child accounting remains unverified. 0.156.1 fails closed on its known shapes (ADR 001) |
 | `requestUniverse` | Unknown: retries and auxiliary requests unobserved | Gap: a zero-output `response.completed` with nonzero input appears in the OTel export but in neither the rollout nor exec usage (0.158.0, ADR 001). Its meaning is undocumented, and [ADR 005](005-managed-observation.md) forbids omitting an unobserved warm-up request. Failed attempts unobserved |
 | `terminalAccounting` | Unknown: no documented terminal watermark; one print-mode run's timing was consistent with a flush at shutdown | Unknown: after process exit, `exec` usage equalled the rollout total in one run and one resume (0.158.0), but process exit is not a terminal barrier (ADR 004) and no production barrier exists |
 | `immutableIdentity` | Mechanism only: request-ID keys, conflicts rejected | Mechanism only: cumulative-vector keys, equal replays add nothing, conflicts fail |

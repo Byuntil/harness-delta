@@ -3,7 +3,7 @@
 Harness Delta has metadata contracts and a local storage foundation. Read the
 [product requirements](docs/requirements.md) before proposing or implementing behavior.
 The repository provides a local measurement CLI and partial sequential adapters for
-Codex CLI 0.156.1 and Claude Code 2.1.283. These observations are incomplete and do
+Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283. These observations are incomplete and do
 not establish full task usage, app support, or descendant aggregation. See the
 [capability evidence and limits](docs/decisions/001-adapter-capabilities.md) and
 [local measurement runbook](docs/runbooks/local-measurement.md).
@@ -90,7 +90,7 @@ See [ADR 008](docs/decisions/008-task-comparison-workflow.md) for contracts and 
 
 ## File adapter profiles
 
-Registered file adapters live in `src/adapter-profiles.ts`. Registration is an exact `(product, version)` allowlist. A new version whose semantics are unchanged is data, fixtures, and evidence. A semantic change is a named code variant plus tests; the old variant is not edited to fit the new version. Codex 0.158.0 lives under `scripts/conformance/` and is not registered. The conformance runner is manual. `npm test` runs offline synthetic unit tests of the report projector, the candidate parser, and the confirmation helpers. It does not run the conformance runner, spawn product CLIs, or open real sessions. See [ADR 007](docs/decisions/007-adapter-version-profiles.md).
+Registered file adapters live in `src/adapter-profiles.ts`. Registration is an exact `(product, version)` allowlist. A new version whose semantics are unchanged is data, fixtures, and evidence. A semantic change is a named code variant plus tests; the old variant is not edited to fit the new version. Codex 0.158.0 uses the checkpoint variant and a historical exact-version admission. See the [admission workflow](docs/runbooks/codex-version-admission.md) and [current offline readiness limits](docs/validation/codex-01580-offline-readiness.md). The archived live report does not qualify the current source identity or establish whole-task completeness. The conformance runner is manual. `npm test` runs offline synthetic unit tests of the report projector, the candidate parser, and the confirmation helpers. It does not run the conformance runner, spawn product CLIs, or open real sessions. See [ADR 007](docs/decisions/007-adapter-version-profiles.md).
 
 ## Branch names
 

@@ -1,5 +1,8 @@
 # 로컬 측정 사용 안내
 
+See the [Codex exact-version admission and partial measurement workflow](codex-version-admission.md) for 0.158.0 and subsequent candidate versions.
+
+
 [English](local-measurement.md)
 
 Node.js 24가 필요합니다. `npm ci && npm run build`로 빌드한 뒤 저장소에서
@@ -108,7 +111,7 @@ DB 데이터·설정·보고 기준시각이 같으면 같은 기간 보고서�
 
 ## 버전, 적합성 확인, 업데이트 제어
 
-등록된 파일 어댑터는 부분 관측입니다. 현재 허용 버전은 Codex CLI 0.156.1과 Claude Code 2.1.283뿐입니다. 등록되지 않은 버전, 범위, 접미사는 파일을 읽기 전에 거절되며 세션으로 저장되지 않습니다. Codex 0.158.0은 등록되어 있지 않습니다. 자세한 기준은 [ADR 007](../decisions/007-adapter-version-profiles.md)을 참고하세요.
+등록된 파일 어댑터는 부분 관측입니다. 현재 허용 버전은 Codex CLI 0.156.1/0.158.0과 Claude Code 2.1.283입니다. 등록되지 않은 버전, 범위, 접미사는 파일을 읽기 전에 거절되며 세션으로 저장되지 않습니다. Codex 0.158.0은 M2 경계 내 단일 세션의 순차적 부분 사용량 수집용으로 등록되었습니다. 자세한 기준은 [ADR 007](../decisions/007-adapter-version-profiles.md)을 참고하세요.
 
 저장소의 적합성 확인 스크립트 `scripts/conformance/`는 수동으로만 실행합니다. 설치, 수집, 훅, CI는 이 스크립트를 실행하지 않습니다. CI는 오프라인 합성 단위 테스트로 보고서 투영, 후보 파서, 확인·훅 신뢰 도우미, exec 출력 축약기를 실행합니다. CI는 적합성 확인 실행기를 실행하지 않습니다. 설계 승인은 실제 제품 실행 승인이 아닙니다.
 

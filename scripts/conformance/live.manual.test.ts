@@ -148,9 +148,9 @@ test('a confirmed synthetic run links both stages through the hook and reports e
   expect(resume?.hook).toMatchObject({ received: 1, source: 'resume', sessionMatchesThread: true, transcriptMatchesRollout: true });
   expect(resume?.sameRolloutAsInitial).toBe(true);
   expect(resume?.conformance?.checks).toMatchObject({
-    exec_equals_rollout_total: 'pass', resume_total_equals_prior_plus_last: 'pass', thread_settings_applied: 'fail',
+    exec_equals_rollout_total: 'pass', resume_total_equals_prior_plus_last: 'pass', thread_settings_applied: 'pass',
   });
-  expect(resume?.conformance?.blocked).toBe(true);
+  expect(resume?.conformance?.blocked).toBe(false);
   const path = join(outDir, 'conformance-live-report.json');
   expect(statSync(path).mode & 0o777).toBe(0o600);
   const written = readFileSync(path, 'utf8');
@@ -216,3 +216,12 @@ test('suffixed versions, anomalous hooks and changed threads stop the run', asyn
   expect(moved.stop).toBe('thread_changed');
   expect(moved.stages).toHaveLength(2);
 }, 60_000);
+
+
+test('an old checkpoint in the initial history cannot satisfy the resumed-stage checkpoint gate', async () => {
+  const { deps, outDir } = fakeDeps('initial-checkpoint-only');
+  const report = await runLive(deps, outDir);
+  expect(report.stop).toBeNull();
+  expect(report.stages[0]?.conformance?.checks.thread_settings_applied).toBe('pass');
+  expect(report.stages[1]?.conformance?.checks.thread_settings_applied).toBe('not_observed');
+});

@@ -26,6 +26,7 @@ export function refusedChannel(): ProductChannel {
 }
 
 export function runInvestigation(input: {
+  version?: string;
   mapping: InvestigationMapping;
   channel: ProductChannel;
   plan: ConfirmationPlan;
@@ -51,7 +52,8 @@ export function runInvestigation(input: {
   return {
     status: 'report',
     report: projectReport({
-      version: '0.158.0',
+      modes: { collaboration: [...new Set(started.topology.collaborationModes)], multiAgent: [...new Set(started.topology.multiAgentVersions)] },
+      version: input.version ?? '0.158.0',
       scenario: 'synthetic',
       traversal: started.traversal,
       checks,
