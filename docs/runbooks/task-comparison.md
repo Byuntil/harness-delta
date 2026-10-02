@@ -231,7 +231,22 @@ source reader or fixture-injection command.
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison snapshot create demo-comparison --id demo-report-1 --cutoff 2030-01-02T02:00:00Z --reason initial
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format json
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format markdown
+node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison report demo-report-1 --format markdown-readable
 ```
+
+`json` remains the default. Existing `json` and `markdown` output and stored
+snapshot bytes are unchanged. Opt into `markdown-readable` for tables drawn from
+the same frozen report: original-assignment cohorts, partial component task n and
+distributions, follow-up, human quality, rework, composition, declared configuration
+and deviations. The reading-state table counts events, not tasks. Project
+registration activity does not establish an eligibility denominator.
+
+Partial-usage task counts and tasks with a combined token value can differ; input
+and output subsets can also differ. `unavailable` preserves null, while observed
+zero is displayed as 0. These subsets cannot establish full-task savings or
+practical equivalence. Invalidated reports show their reason and unavailable
+original cohort without rebuilding removed aggregates. Rendering neither collects
+new data nor enables inference or real experiments.
 
 Create these reports **before deleting the task** in the following example. Otherwise
 the protocol is already invalidated and snapshot creation rejects it. Retry with the

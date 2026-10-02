@@ -113,7 +113,23 @@ must have the same reviewed full settings/variants and digest.
 hm --db team.db team snapshot create --config team-snapshot.json
 hm --db team.db team report team-report-1 --format json
 hm --db team.db team report team-report-1 --format markdown
+hm --db team.db team report team-report-1 --format markdown-readable
 ```
+
+`json` remains the default. Existing `json` and `markdown` output and frozen
+snapshot bytes are unchanged. `markdown-readable` adds tables from the existing
+snapshot, including original imported cohorts, component-specific observed task n,
+quality, rework, follow-up, configuration deviations and the source revision vector.
+It performs no new measurement or aggregation. Reading-state counts are event
+counts; component n counts tasks with an observed value.
+
+Declared writer coverage is not task or token collection completeness. The full-team
+assignment and eligibility denominators remain unknown, even when every declared
+writer contributed. A missing writer is different from an accepted empty package.
+`unavailable` preserves null; observed zero remains 0. Partial components and
+unequal observed subsets cannot establish full-task savings, causal effects or
+practical equivalence. A retired snapshot renders only its invalidation reason and
+unavailable original cohort, with no reconstructed task identities or aggregates.
 
 An identical snapshot request returns the same frozen result. Use a new snapshot
 ID for updated evidence. `cutoff_mismatch` requires new source snapshots with a

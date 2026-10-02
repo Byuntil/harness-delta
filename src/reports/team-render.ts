@@ -1,3 +1,4 @@
+import { renderReadableComparison } from './comparison-readable.js';
 import type { TeamReport,InvalidatedTeamReport } from './team-snapshot.js';
 /** Markdown embeds the canonical report values without inventing another calculation. */
 export function renderTeamReport(report:TeamReport|InvalidatedTeamReport,format:string):string {
@@ -5,5 +6,6 @@ export function renderTeamReport(report:TeamReport|InvalidatedTeamReport,format:
   if(format==='markdown')return '# Synthetic team comparison report\n\n'+(report.validity_status==='valid'?
     'Team completeness: unverified. Declared writer coverage: '+report.declared_writer_coverage+'. Partial observations are not complete task totals. Adoption remains inconclusive.\n\n':
     'This original cohort is unavailable after invalidation.\n\n')+'```json\n'+JSON.stringify(report,null,2)+'\n```\n';
+  if(format==='markdown-readable')return renderReadableComparison(report);
   throw new Error('invalid_format');
 }
