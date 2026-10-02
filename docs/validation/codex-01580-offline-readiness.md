@@ -131,9 +131,24 @@ same `codex exec -m gpt-6.1-sol` selection and states that availability depends 
 rollout, sign-in method and client. This diagnosis does not establish a universal
 CLI or ChatGPT-account limitation, nor an invalid model name or reasoning effort.
 No model substitution, new authentication, provider rerouting or client-identity
-override was performed. Restoring successful inference needs a separately
-approved supported execution path. These failed calls produced no usable usage
+override was performed. These failed calls produced no usable usage
 measurement; unavailable usage is not observed zero.
+
+After explicit approval for an additional pair, the already-installed desktop
+CLI `0.159.0-alpha.12.1` completed one synthetic exec and one resume of its exact
+session with the same model, effort, existing authentication and read-only
+sandbox. Both exited zero with one completed turn and observed usage. Native
+metadata confirmed the exact session, model, effort and client version;
+configuration metadata and executable version remained unchanged. No native
+session content was read for this newer-client diagnostic. The existing
+environment filtering was preserved, with no client-identity override.
+
+Using the newer installed executable resolves this bounded model-support
+execution failure. This does not isolate the backend policy responsible for the
+older client's rejection or prove compatibility of arbitrary client versions.
+The newer version has no admitted adapter here: its successful model calls do
+not qualify the exact 0.158.0 adapter, register 0.159.0, or enable collection or
+complete measurement for it. Backend model identity remains unattested.
 
 This diagnostic change also changes the implementation digest closure. Historical
 admission evidence is not rebound to the new code, and no fresh admission is

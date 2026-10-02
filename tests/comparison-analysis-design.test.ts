@@ -49,6 +49,8 @@ test('bounds reject full queue and tail work separately; identities and layout c
   expect(()=>enumerateDesign({...design(4,2),order:'unknown'})).toThrow('invalid_design');
   expect(()=>enumerateDesign({...design(4,2),strata:[]})).toThrow('invalid_design');
 });
+// This exhaustive restart check creates 98 SQLite databases; CI filesystem
+// latency needs a separate budget without reducing the oracle coverage.
 test('each oracle full queue matches committed receipt order across restart without reading future slots',()=>{
   for(const b of [2,4,6,8]) for(const word of fullWords(b)) {
     const root=mkdtempSync(join(tmpdir(),'analysis-allocator-')),file=join(root,'synthetic.db');
@@ -69,4 +71,4 @@ test('each oracle full queue matches committed receipt order across restart with
       expect(JSON.stringify(receipts)).not.toMatch(/pending_variants|future|seed/);
     } finally {store.close();rmSync(root,{recursive:true,force:true});}
   }
-});
+}, 20_000);
