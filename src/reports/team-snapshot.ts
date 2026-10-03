@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { FlexibleTeamInputSchema,FlexibleTeamRequestSchema,projectFlexibleTeam,type FlexibleTeamReport } from './flexible-team.js';
 import { IdSchema } from '../contracts.js';
 import { parseComparison } from '../comparison-contracts.js';
 import { type Clock,utcNow } from '../lifecycle.js';
@@ -49,6 +51,7 @@ function projectTeam(input:TeamInput) {
       'as_of_is_coordinator_receipt_boundary','elapsed_is_not_human_labor','declared_configuration_does_not_prove_isolation','namespace_is_not_authenticated','team_completeness_unverified'],
   };
 }
+export type AnyTeamReport=TeamReport|FlexibleTeamReport;
 export type TeamReport=ReturnType<typeof projectTeam>&{snapshot_hash:string};
 type Reason='deletion'|'identity_conflict';
 function invalidated(id:string,reason:Reason) {
@@ -57,15 +60,16 @@ function invalidated(id:string,reason:Reason) {
 }
 export type InvalidatedTeamReport=ReturnType<typeof invalidated>;
 interface SnapshotRow {snapshot_id:string;shared_project_id:string;protocol_id:string;request_json:string;input_json:string;report_json:string;snapshot_hash:string;}
-function stored(row:SnapshotRow):TeamReport {
+function stored(row:SnapshotRow):AnyTeamReport {
   try {
-    const input=parseComparison(TeamInputSchema,JSON.parse(row.input_json) as unknown,'invalid_snapshot');
-    const hash=digest(input);const report={...projectTeam(input),snapshot_hash:hash};
+    const raw:unknown=JSON.parse(row.input_json);
+    const input=parseComparison(z.union([TeamInputSchema,FlexibleTeamInputSchema]),raw,'invalid_snapshot');
+    const hash=digest(input);const report=input.schema_version===2?projectFlexibleTeam(input):{...projectTeam(input),snapshot_hash:hash};
     if(hash!==row.snapshot_hash||canonicalJson(report)!==row.report_json||canonicalJson(input.request)!==row.request_json||input.request.snapshot_id!==row.snapshot_id||input.request.protocol_id!==row.protocol_id||input.request.shared_project_id!==row.shared_project_id)throw new Error('invalid_snapshot');
     return report;
   }catch{throw new Error('invalid_snapshot');}
 }
-export function readTeamSnapshot(store:Store,snapshotId:string):TeamReport|InvalidatedTeamReport {
+export function readTeamSnapshot(store:Store,snapshotId:string):AnyTeamReport|InvalidatedTeamReport {
   parseComparison(IdSchema,snapshotId,'invalid_report_id');
   return store.transaction(()=>{
     const tombstone=store.get<{reason:Reason}>('SELECT reason FROM exchange_team_report_tombstones WHERE snapshot_id=?',[snapshotId]);
@@ -77,8 +81,8 @@ export function readTeamSnapshot(store:Store,snapshotId:string):TeamReport|Inval
     return stored(row);
   });
 }
-export function createTeamSnapshot(store:Store,input:unknown,clock:Clock=utcNow):TeamReport {
-  const request=parseComparison(TeamRequestSchema,input,'invalid_snapshot_request');request.required_namespaces.sort(codePointOrder);
+export function createTeamSnapshot(store:Store,input:unknown,clock:Clock=utcNow):AnyTeamReport {
+  const request=parseComparison(z.union([TeamRequestSchema,FlexibleTeamRequestSchema]),input,'invalid_snapshot_request');request.required_namespaces.sort(codePointOrder);
   return store.immediateTransaction(()=>{
     if(store.get('SELECT snapshot_id FROM exchange_team_report_tombstones WHERE snapshot_id=?',[request.snapshot_id]))throw new Error('invalidated_report');
     const mapping=readMapping(store,request.shared_project_id,request.protocol_id,request.local_project_id);
@@ -98,9 +102,9 @@ export function createTeamSnapshot(store:Store,input:unknown,clock:Clock=utcNow)
     });
     const sequence=(store.get<{last_sequence:number}>('SELECT last_sequence FROM exchange_team_sequences WHERE shared_project_id=? AND protocol_id=?',[request.shared_project_id,request.protocol_id])?.last_sequence??0)+1;
     if(!Number.isSafeInteger(sequence))throw new Error('revision_overflow');
-    const captured=parseComparison(TeamInputSchema,{schema_version:1,descriptive_version:'team-descriptive-1',request,mapping,created_at:now,
+    const captured=parseComparison(z.union([TeamInputSchema,FlexibleTeamInputSchema]),{schema_version:request.schema_version,descriptive_version:request.schema_version===2?'flexible-team-descriptive-1':'team-descriptive-1',request,mapping,created_at:now,
       merged_revision:store.get<{revision:number}>('SELECT revision FROM exchange_merge_state WHERE shared_project_id=?',[request.shared_project_id])?.revision??0,snapshot_sequence:sequence,contributions},'invalid_snapshot');
-    const hash=digest(captured);const report={...projectTeam(captured),snapshot_hash:hash};
+    const hash=digest(captured);const report=captured.schema_version===2?projectFlexibleTeam(captured):{...projectTeam(captured),snapshot_hash:hash};
     store.execute('INSERT INTO exchange_team_snapshots VALUES (?,?,?,?,?,?,?)',[request.snapshot_id,request.shared_project_id,request.protocol_id,canonicalJson(request),canonicalJson(captured),canonicalJson(report),hash]);
     for(const namespace of request.required_namespaces)store.execute('INSERT INTO exchange_team_dependencies VALUES (?,?)',[request.snapshot_id,namespace]);
     store.execute('INSERT INTO exchange_team_sequences VALUES (?,?,?) ON CONFLICT(shared_project_id,protocol_id) DO UPDATE SET last_sequence=excluded.last_sequence',[request.shared_project_id,request.protocol_id,sequence]);

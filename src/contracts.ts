@@ -29,14 +29,29 @@ export const ToolSchema = z.strictObject({
   outcome: z.enum(['completed', 'failed', 'denied', 'cancelled', 'validation_failed', 'unknown']),
   category: z.literal('unclassified'),
 });
-export const EventSchema = z.strictObject({
+export const BillingComponentSchema = z.strictObject({
+  kind: z.enum(['ordinary_input', 'cache_read', 'cache_write', 'output']), reading: ReadingSchema,
+});
+export const UsageV2Schema = UsageSchema.extend({
+  schema_version: z.literal(2), model: ModelSchema.nullable(), runtime_evidence_id: IdSchema.nullable(),
+  attribution: z.enum(['verified', 'ambiguous', 'unknown']),
+  billing_components: z.array(BillingComponentSchema).max(4)
+    .refine(values => new Set(values.map(value => value.kind)).size === values.length),
+}).refine(value => value.attribution !== 'verified' || (value.model !== null && value.runtime_evidence_id !== null))
+  .refine(value => value.attribution !== 'ambiguous' || value.model === null);
+export const eventFields = {
   id: IdSchema, project_id: IdSchema, task_id: IdSchema, session_id: IdSchema,
   source_key: IdSchema, occurred_at: TimestampSchema,
+};
+export const LegacyEventSchema = z.strictObject({ ...eventFields,
   payload: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('session_linked') }), UsageSchema, ToolSchema,
   ]),
 });
-export type Event = z.infer<typeof EventSchema>;
+export const EventSchema = z.strictObject({ ...eventFields,
+  payload: z.union([z.strictObject({ kind: z.literal('session_linked') }), UsageSchema, UsageV2Schema, ToolSchema]),
+});
+export type Event = z.infer<typeof LegacyEventSchema>;
 
 export function addTokens(values: readonly number[]): number {
   let total = 0;

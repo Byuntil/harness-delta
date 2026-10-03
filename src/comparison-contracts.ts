@@ -16,7 +16,7 @@ export type Variant = z.infer<typeof VariantSchema>;
 const stratumSchema = z.strictObject({
   id: IdSchema, assignees: ids, types: ids, sizes: ids, allocator_id: IdSchema,
 });
-const protocolFields = {
+export const protocolFields = {
   schema_version: z.literal(1), id: IdSchema, project_id: IdSchema, team_id: IdSchema,
   mode: z.literal('randomized_task'), purpose: z.enum(['synthetic_validation', 'real_experiment']),
   protocol_version: IdSchema, eligibility_version: IdSchema, classification_version: IdSchema,
