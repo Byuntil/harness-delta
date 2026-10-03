@@ -1,7 +1,11 @@
+import admissions from './codex-admissions.json' with { type: 'json' };
+import { codexRolloutPolicy } from './codex-rollout-policy.js';
 export interface CodexRegisteredProfile {
   readonly kind: 'registered';
   readonly product: 'codex';
-  readonly version: '0.156.1';
+  readonly version: string;
+  readonly boundaryMode: 'legacy' | 'settings_checkpoint';
+  readonly commandDiagnostics: boolean;
   readonly counterMode: 'cumulative_total';
   readonly recognizedTypes: readonly [
     'session_meta', 'event_msg', 'response_item', 'world_state',
@@ -41,6 +45,8 @@ const codex01561 = {
   kind: 'registered',
   product: 'codex',
   version: '0.156.1',
+  boundaryMode: 'legacy',
+  commandDiagnostics: true,
   counterMode: 'cumulative_total',
   recognizedTypes: [
     'session_meta', 'event_msg', 'response_item', 'world_state',
@@ -59,6 +65,13 @@ const codex01561 = {
   },
 } as const satisfies CodexRegisteredProfile;
 
+/** Shared source semantics, not a registration. Candidate and runtime use this variant. */
+export const codexCheckpointSemantics = {
+  ...codex01561,
+  boundaryMode: 'settings_checkpoint',
+  commandDiagnostics: false,
+} as const;
+
 const claude21283 = {
   kind: 'registered',
   product: 'claude_code',
@@ -69,7 +82,19 @@ const claude21283 = {
   evidence: { completeTotals: false, reasoning: 'unmeasurable' },
 } as const satisfies ClaudeRegisteredProfile;
 
-export const registeredFileProfiles: readonly RegisteredFileProfile[] = [codex01561, claude21283];
+export interface CodexAdmission {
+  readonly version: string;
+  readonly previousVersion: string;
+  readonly sourceRef: string;
+  readonly policyRevision: string;
+  readonly implementationDigest: string;
+  readonly scenario: 'exec_initial_resume';
+}
+// Reviewed application data, never external config. A policy change requires fresh admission.
+const admittedCodex = (admissions as readonly CodexAdmission[])
+  .filter(entry => entry.policyRevision === codexRolloutPolicy.revision)
+  .map(entry => ({ ...codexCheckpointSemantics, version: entry.version }));
+export const registeredFileProfiles: readonly RegisteredFileProfile[] = [codex01561, claude21283, ...admittedCodex];
 
 export function lookupFileProfile(product: string, version: string): RegisteredFileProfile | 'unsupported' {
   return registeredFileProfiles.find(profile => profile.product === product && profile.version === version) ?? 'unsupported';

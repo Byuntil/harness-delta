@@ -1,0 +1,10 @@
+[
+  {
+    "version": "0.158.0",
+    "policyRevision": "codex-rollout-m2-v1",
+    "implementationDigest": "a53c612f08e045b3ee3e1b73669bec1b7f12b4acb3ff19c27a54f2cd9bb9ba90",
+    "sourceRef": "rust-v0.158.0",
+    "previousVersion": "0.156.1",
+    "scenario": "exec_initial_resume"
+  }
+]

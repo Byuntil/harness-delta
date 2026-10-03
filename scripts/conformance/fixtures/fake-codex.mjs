@@ -58,10 +58,11 @@ if (existing === undefined) {
     creator_account_id: 'SECRET_ACCOUNT', base_instructions: 'SECRET_INSTRUCTIONS',
   }));
   if (mode === 'duplicate-file') writeFileSync(join(day, `rollout-2026-01-01T00-00-01-${threadId}.jsonl`), '');
-} else {
-  appendFileSync(file, row('event_msg', { type: 'thread_settings_applied' }));
+} else if (mode !== 'initial-checkpoint-only') {
+  appendFileSync(file, row('event_msg', { type: 'thread_settings_applied', thread_id: threadId, thread_settings: { cwd, model: 'synthetic-model', developer_instructions: 'SECRET_CHECKPOINT' } }));
 }
-appendFileSync(file, row('turn_context', { model: 'synthetic-model', cwd, turn_id: turn, root_turn_id: turn }));
+if (existing === undefined && mode === 'initial-checkpoint-only') appendFileSync(file, row('event_msg', { type: 'thread_settings_applied', thread_id: threadId, thread_settings: { cwd, model: 'synthetic-model' } }));
+appendFileSync(file, row('turn_context', { model: 'synthetic-model', cwd, turn_id: turn, root_turn_id: turn, collaboration_mode: { mode: 'default' }, multi_agent_version: 'v1' }));
 appendFileSync(file, row('event_msg', { type: 'task_started', turn_id: turn }));
 if (trusted) {
   const hookInput = {

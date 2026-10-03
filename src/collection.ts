@@ -100,7 +100,7 @@ export class Collector {
           // resumes it: every process/run establishes its own current-tail baseline.
           this.store.execute(`INSERT INTO cursors(session_id,checkpoint) VALUES (?,?)
             ON CONFLICT(session_id) DO UPDATE SET checkpoint=excluded.checkpoint`,[link.id,JSON.stringify(checkpoint)]);
-          this.observe(taskId,previous?.lastAt??now,now,previous?'unmeasurable':'excluded',snapshot.blocked?'unsupported':previous?'incomplete':'offline');
+          this.observe(taskId,previous?.lastAt??now,now,previous?'unmeasurable':'excluded',snapshot.blocked?(snapshot.reasons.find(reason => reason !== 'incomplete' && reason !== 'unsupported') ?? 'unsupported'):previous?'incomplete':'offline');
         }
       });
       this.checkpoints=pending;

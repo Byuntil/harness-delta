@@ -20,7 +20,7 @@ const count = (
     reasoning_output_tokens: reasoning, cache_write_input_tokens: cacheWrite,
   } } },
 });
-const model = (name = 'synthetic') => ({ type: 'turn_context', payload: { model: name } });
+const model = (name = 'synthetic') => ({ type: 'turn_context', payload: { model: name, turn_id: 'turn1', collaboration_mode: { mode: 'default' }, multi_agent_version: 'disabled' } });
 const parse = (body: string) => parseCandidate(body, scope, codex01580Candidate);
 
 test('candidate token_count before a model advances the baseline and is not recovered', () => {
@@ -106,7 +106,7 @@ test('candidate identity and topology fail closed without retaining private valu
   expect(JSON.stringify(creators)).not.toContain('SECRET_ACCOUNT');
   expect(JSON.stringify(creators)).not.toContain('SECRET_USER');
   expect(parse(text(header, { type: 'turn_context', payload: { model: 'synthetic', turn_id: 't1', root_turn_id: 'other' } })).blocked).toBe(true);
-  expect(parse(text(header, { type: 'turn_context', payload: { model: 'synthetic', turn_id: 't1', root_turn_id: 't1' } })).blocked).toBe(false);
+  expect(parse(text(header, { type: 'turn_context', payload: { model: 'synthetic', turn_id: 't1', root_turn_id: 't1', collaboration_mode: { mode: 'default' }, multi_agent_version: 'disabled' } })).blocked).toBe(false);
   expect(parse(text(header, { type: 'turn_context', payload: { model: 'synthetic', turn_id: 't1', root_turn_id: 't1', collaboration_mode: 'code' } })).blocked).toBe(true);
   expect(parse(text(header, { type: 'turn_context', payload: { model: 'synthetic', turn_id: 't1', root_turn_id: 't1', multi_agent_version: 1 } })).blocked).toBe(true);
   const settings = parse(text(header, {

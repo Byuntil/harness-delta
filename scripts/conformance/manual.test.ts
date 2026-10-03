@@ -19,7 +19,7 @@ const inspection: CandidateInspection = {
     taskStartedTurnId: null, taskCompleteTurnId: null, turnId: null, rootTurnId: null,
     collaborationModePresent: false, multiAgentVersionPresent: false, threadSettingsApplied: 'absent',
     sessionMetaId: null, sessionMetaSessionId: null, linkedSessionId: sessionId,
-    pairs: [], turnContexts: [],
+    pairs: [], turnContexts: [], collaborationModes: [], multiAgentVersions: [], childActivity: false,
   },
   traversal: traverseCatalog([], admissionCatalog),
 };

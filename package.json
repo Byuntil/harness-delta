@@ -30,7 +30,9 @@
     "check": "npm run check:privacy && npm run lint && npm run typecheck && npm test && npm run build",
     "prepack": "npm run build",
     "analysis:validate": "node scripts/analysis-validation-command.mjs",
-    "analysis:validate:confidence": "node scripts/confidence-validation-command.mjs"
+    "analysis:validate:confidence": "node scripts/confidence-validation-command.mjs",
+    "conformance": "node scripts/conformance-command.mjs runner",
+    "profile:admit": "node scripts/conformance-command.mjs register"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",

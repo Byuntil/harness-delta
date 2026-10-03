@@ -1,3 +1,4 @@
+import { checkpointAllowed, childActivity, collaborationMode, multiAgentAllowed, multiAgentVersion } from './codex-rollout-policy.js';
 import { SourceFailure } from './source-errors.js';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -48,7 +49,7 @@ export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
   return parseClaude(text, scope, profile);
 }
 
-function parseCodex(text: string, scope: SourceScope, profile: CodexRegisteredProfile): Snapshot {
+export function parseCodex(text: string, scope: SourceScope, profile: CodexRegisteredProfile): Snapshot {
   if (profile.counterMode !== 'cumulative_total') throw new Error('unsupported');
   const result: Snapshot = {continuityKey:null,records:[],counters:null,counterAt:null,model:null,reasons:['incomplete'],blocked:false};
   const records = new Map<string, SourceRecord>();
@@ -56,6 +57,8 @@ function parseCodex(text: string, scope: SourceScope, profile: CodexRegisteredPr
   let turnStartedAt: string | null = null;
   let currentTurnId: string | null = null;
   let turnOpen = false;
+  let checkpointModel: string | null = null;
+  let pendingContextTurnId: unknown = undefined;
   for (const line of linesOf(text)) {
     let row: ObjectValue;
     try { row = object(JSON.parse(line)); } catch { throw new SourceFailure('invalid_json'); }
@@ -70,12 +73,44 @@ function parseCodex(text: string, scope: SourceScope, profile: CodexRegisteredPr
     if (row.type === 'session_meta' && (payload.id !== scope.sessionId || payload.cli_version !== scope.version || typeof payload.cwd !== 'string' || canonicalPath(payload.cwd) !== canonicalPath(scope.projectRoot) || !listed(profile.allowedSources, payload.source))) throw new Error('scope_mismatch');
     if (exactName(profile.blockingTypes, row.type) || exactName(profile.blockingPayloadTypes, payload.type) || payload.type === 'token_count' && object(payload.info).total_token_usage === null ||
         payload.forked_from_id || (row.type === 'event_msg' && profile.blockingPayloadPrefixes.some(prefix => String(payload.type).startsWith(prefix)))) result.blocked = true;
+    if (profile.boundaryMode === 'settings_checkpoint') {
+      if (childActivity(row.type, payload)) { result.blocked = true; result.reasons.push('child_activity'); }
+      if (row.type === 'session_meta' && payload.session_id !== undefined && payload.session_id !== payload.id) result.blocked = true;
+      if (row.type === 'event_msg' && payload.type === 'thread_settings_applied') {
+        if (!checkpointAllowed(payload, scope.sessionId, scope.projectRoot, result.model)) {
+          result.blocked = true; result.reasons.push('settings_conflict');
+        }
+        const nextModel = object(payload.thread_settings).model;
+        if (typeof nextModel === 'string') {
+          if (checkpointModel !== null && checkpointModel !== nextModel) result.blocked = true;
+          checkpointModel = nextModel;
+        }
+      }
+      if (row.type === 'event_msg' && payload.type === 'task_started' && payload.root_turn_id !== undefined && payload.root_turn_id !== payload.turn_id) {
+        result.blocked = true; result.reasons.push('turn_topology_or_model');
+      }
+      if (row.type === 'turn_context') {
+        if (!turnOpen) pendingContextTurnId = payload.turn_id;
+        const mode = collaborationMode(payload.collaboration_mode);
+        if (mode !== 'default' && mode !== 'plan' || !multiAgentAllowed(multiAgentVersion(payload.multi_agent_version))) {
+          result.blocked = true; result.reasons.push('settings_unsupported');
+        }
+        if (payload.root_turn_id !== undefined && payload.root_turn_id !== payload.turn_id ||
+            !IdSchema.safeParse(payload.turn_id).success ||
+            turnOpen && currentTurnId !== null && payload.turn_id !== currentTurnId ||
+            checkpointModel !== null && payload.model !== checkpointModel) { result.blocked = true; result.reasons.push('turn_topology_or_model'); }
+      }
+    }
     if (row.type === 'event_msg' && payload.type === 'task_started') {
       if (turnOpen) result.blocked = true;
+      if (profile.boundaryMode === 'settings_checkpoint' && pendingContextTurnId !== undefined && pendingContextTurnId !== payload.turn_id) {
+        result.blocked = true; result.reasons.push('turn_topology_or_model');
+      }
+      pendingContextTurnId = undefined;
       currentTurnId = id(payload.turn_id); turnOpen = true; turnStartedAt = timestamp(row.timestamp);
     }
     if (row.type === 'event_msg' && payload.type === 'task_complete') {
-      if (payload.turn_id !== currentTurnId) result.blocked = true; turnOpen = false;
+      if (payload.turn_id !== currentTurnId || profile.boundaryMode === 'settings_checkpoint' && !turnOpen) result.blocked = true; turnOpen = false;
     }
     if (row.type === 'turn_context') {
       if (typeof payload.cwd === 'string' && canonicalPath(payload.cwd) !== canonicalPath(scope.projectRoot)) throw new Error('scope_mismatch');
@@ -86,6 +121,7 @@ function parseCodex(text: string, scope: SourceScope, profile: CodexRegisteredPr
     if (row.type === 'event_msg' && payload.type === 'token_count' && payload.info !== null) {
       const usage = object(object(payload.info).total_token_usage);
       const counters = profile.counterFields.map(field => count(usage[field]));
+      if (profile.boundaryMode === 'settings_checkpoint' && count(usage.cache_write_input_tokens) > counters[0]!) throw new Error('unsupported');
       if (result.counters && counters.some((value, index) => value < result.counters![index]!)) result.blocked = true;
       const previous = result.counters ?? [0, 0, 0, 0];
       // A first explicit vector is evidence even at zero. Subsequent equal
@@ -97,7 +133,7 @@ function parseCodex(text: string, scope: SourceScope, profile: CodexRegisteredPr
       }
       result.counters = counters; result.counterAt = timestamp(row.timestamp);
     }
-    if (row.type === 'event_msg' && payload.type === 'item_completed') {
+    if (profile.commandDiagnostics && row.type === 'event_msg' && payload.type === 'item_completed') {
       const item = object(payload.item);
       if (item.type === 'CommandExecution') {
         const callId = id(item.id);

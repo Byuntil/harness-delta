@@ -7,6 +7,7 @@ export const admissionCatalog = [
   'session_meta.creator_account_id',
   'session_meta.creator_user_id',
   'event_msg.task_started.turn_id',
+  'event_msg.task_started.root_turn_id',
   'event_msg.task_complete.turn_id',
   'event_msg.thread_settings_applied',
   'event_msg.token_count.total_token_usage.input_tokens',
@@ -24,6 +25,11 @@ export const admissionCatalog = [
   'turn_context.turn_id',
   'turn_context.root_turn_id',
   'turn_context.collaboration_mode',
+  'turn_context.collaboration_mode.mode',
+  'event_msg.thread_settings_applied.thread_id',
+  'event_msg.thread_settings_applied.thread_settings.cwd',
+  'event_msg.item_completed.item.type',
+  'event_msg.sub_agent_activity',
   'turn_context.multi_agent_version',
   'turn_context.model',
   'token_usage_record',
@@ -32,7 +38,7 @@ export const admissionCatalog = [
 export type CatalogPath = typeof admissionCatalog[number];
 
 const recordTypes = new Set(['session_meta', 'event_msg', 'turn_context', 'token_usage_record', 'response_item', 'world_state', 'compacted']);
-const eventTypes = new Set(['task_started', 'task_complete', 'thread_settings_applied', 'token_count']);
+const eventTypes = new Set(['task_started', 'task_complete', 'thread_settings_applied', 'token_count', 'item_completed', 'sub_agent_activity']);
 
 export interface CatalogTraversal {
   readonly matchedPaths: readonly string[];
@@ -97,6 +103,7 @@ export function traverseCatalog(
       for (const key of Object.keys(payload)) walkValue(payload[key], `${type}.${key}`, 1);
       return;
     }
+    if (type === 'turn_context' && Object.hasOwn(objectValue(payload.collaboration_mode), 'mode')) note('turn_context.collaboration_mode.mode');
     if (type === 'session_meta' || type === 'turn_context') {
       for (const key of Object.keys(payload)) {
         if (state.limitExceeded) return;
@@ -108,9 +115,16 @@ export function traverseCatalog(
       const event = typeof payload.type === 'string' ? payload.type : '';
       if (!eventTypes.has(event)) { state.unknownNameCount += 1; return; }
       count(state.eventCounts, event);
-      if (event === 'thread_settings_applied') note(`event_msg.${event}`);
+      if (event === 'thread_settings_applied') {
+        note(`event_msg.${event}`);
+        if (Object.hasOwn(payload, 'thread_id')) note(`event_msg.${event}.thread_id`);
+        if (Object.hasOwn(objectValue(payload.thread_settings), 'cwd')) note(`event_msg.${event}.thread_settings.cwd`);
+      }
+      if (event === 'item_completed' && Object.hasOwn(objectValue(payload.item), 'type')) note('event_msg.item_completed.item.type');
+      if (event === 'sub_agent_activity') note('event_msg.sub_agent_activity');
       if (event === 'task_started' || event === 'task_complete') {
         if (Object.hasOwn(payload, 'turn_id')) note(`event_msg.${event}.turn_id`);
+        if (event === 'task_started' && Object.hasOwn(payload, 'root_turn_id')) note('event_msg.task_started.root_turn_id');
       }
       if (event === 'token_count') {
         const info = objectValue(payload.info);

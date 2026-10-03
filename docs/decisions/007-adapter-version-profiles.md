@@ -1,10 +1,62 @@
 # Versioned file adapter profiles
 
-Status: accepted 2026-09-29; not yet implemented.
+Status: implemented; M2 partial-scope amendment accepted 2026-09-29. Live admission remains per-version.
 
 Requirements: [R01, R02, R04, R05](../requirements.md); operating policy supports R09.
 Accepting this design authorizes no live probe or support expansion; each needs
 its own approval.
+
+## M2 partial-scope amendment (2026-09-29)
+
+This amendment supersedes the original presence-based topology rule and the
+historical 0.158.0-unregistered milestone below. The user approved M2 after source
+review showed that a multi-agent capability setting is not evidence of a child.
+0.158.0 was registered after fresh initial/resume evidence passed on 2026-09-29
+(observed mode `default`, multi-agent capability `v2`). Only exact entries with
+fresh passing evidence are registered; see the
+[admission and measurement runbook](../runbooks/codex-version-admission.md).
+
+- Read `turn_context.collaboration_mode.mode` as `default|plan` and
+  `multi_agent_version` as `disabled|v1|v2`. Missing, malformed or unknown enums
+  block. Never traverse `collaboration_mode.settings` or instruction fields.
+- Inspect root attribution in both `task_started.root_turn_id` and
+  `turn_context.root_turn_id`; either inherited root blocks. Bind a pre-start
+  context to its matching start. Keep session, cwd and model boundaries. Block persisted
+  `event_msg.sub_agent_activity`, completed `SubAgentActivity` or
+  `CollabAgentToolCall` items, `collab_*`, compaction and unknown top-level records.
+  Do not aggregate children. Capability metadata alone does not block.
+- Treat `thread_settings_applied` as a checkpoint, never usage. An absent/null
+  or matching thread ID is allowed; cwd must match the registered project.
+  Check the model when present against the observed model and subsequent turn.
+  Other snapshot fields are neither retained nor reported.
+- The candidate and production use the same `settings_checkpoint` parser variant.
+  Legacy 0.156.1 and Claude variants keep their prior behavior.
+- New evidence requires exact initial/resume versions, paired turn IDs, root
+  topology, enum checks, no observed child activity, counter equalities/subset
+  checks and a newly observed same-thread resume checkpoint (an initial checkpoint
+  replayed from history is insufficient). Source-backed closed
+  enums and check outcomes may be reported, never arbitrary field values.
+- Nonzero reasoning/cache-write examples, warmup accounting, command diagnostics,
+  interactive linkage and complete coverage remain limitations, not blockers for
+  this partial scope. `complete_tokens` stays null; failed required checks cannot
+  be waived by optional ones.
+- Reports now include policy revision, pinned source ref, prior registered version
+  and a digest of this application's relevant implementation. Registration
+  compares these against current sources and requires an explicit `--register`.
+  The digest never includes measured session content or user configuration.
+  Source data in `src/codex-admissions.json` records the reviewed evidence identity;
+  production never loads the candidate registry or live reports.
+
+Source-backed allowlist: [turn context](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/core/src/session/turn_context.rs),
+[protocol and checkpoint](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/protocol/src/protocol.rs),
+[TurnItem tags](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/protocol/src/items.rs),
+[rollout persistence](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/rollout/src/policy.rs),
+[feature defaults](https://github.com/openai/codex/blob/rust-v0.158.0/codex-rs/features/src/lib.rs).
+The prior live exec hook check observed delivery, matching session/path/cwd and
+startup/resume sources; interactive hook-only linkage is still unsupported.
+
+The remaining sections retain the original design and acceptance history where
+not superseded above. Current admission status is the exact source registry.
 
 ## Scope and profile model
 
@@ -217,9 +269,13 @@ deviation/missingness policy without relinking, backfilling or rerandomizing. Th
 checklist does not enable R09 or waive R10 gates. Detailed commands belong in the
 later runbook update.
 
-## Acceptance and rollout
+## Historical acceptance and rollout plan
 
-All implementation/live evidence below is pending. Fixtures are synthetic and
+The pending states below record the original pre-implementation plan, not the
+current completion status. The M2 amendment above records the historical narrow
+admission. The [offline readiness assessment](../validation/codex-01580-offline-readiness.md)
+distinguishes integrated synthetic behavior, stale current-source admission
+evidence and remaining whole-task gates. Fixtures are synthetic and
 version-specific; products are never offline test dependencies.
 
 | Criterion | Public reference | Planned evidence | Status |

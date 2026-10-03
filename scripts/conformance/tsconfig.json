@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "rootDir": "../..", "outDir": "../../.harness-delta/conformance-build" },
+  "include": ["../../src/**/*.ts", "./**/*.ts"],
+  "exclude": ["./**/*.test.ts", "./vitest.config.ts"]
+}

@@ -127,6 +127,33 @@ test('an unconfirmed plan starts no product process', async () => {
   }
 });
 
+test('a JSON-wrapped model rejection keeps a fixed reason and stops before source lookup or automatic resume', async () => {
+  const { deps, calls, outDir } = fakeDeps('ok');
+  const spawnProduct = deps.spawnProduct.bind(deps);
+  deps.spawnProduct = (args, options) => {
+    if (args[0] !== 'exec') return spawnProduct(args, options);
+    calls.push([...args]);
+    const message = JSON.stringify({ type: 'error', status: 400, error: {
+      message: "The 'synthetic-model' model is not supported when using Codex with a ChatGPT account.",
+    }, secret: 'SECRET_BODY' });
+    return Promise.resolve({ code: 1, timedOut: false, spawnError: false, startedAt: Date.now(), exitedAt: Date.now(),
+      stdout: [
+        { type: 'thread.started', thread_id: sessionId },
+        { type: 'error', message },
+        { type: 'turn.failed', error: { message } },
+      ].map(row => JSON.stringify(row)).join('\n') });
+  };
+  const report = await runLive(deps, outDir);
+  expect(report.stop).toBe('nonzero_exit');
+  expect(report.stages).toHaveLength(1);
+  expect(report.stages[0]).toMatchObject({ rolloutMatch: 'not_checked', conformance: null,
+    exec: { turnCompleted: 0, failureReasons: ['chatgpt_account_model_not_supported'] } });
+  expect(calls.map(args => args[0])).toEqual(['--version', 'exec', '--version']);
+  const written = readFileSync(join(outDir, 'conformance-live-report.json'), 'utf8');
+  expect(written).not.toMatch(/SECRET|synthetic-model/);
+  expect(written).not.toContain(sessionId);
+});
+
 test('a confirmed synthetic run links both stages through the hook and reports enums only', async () => {
   const { deps, calls, printed, outDir } = fakeDeps('ok');
   const report = await runLive(deps, outDir);
@@ -148,9 +175,9 @@ test('a confirmed synthetic run links both stages through the hook and reports e
   expect(resume?.hook).toMatchObject({ received: 1, source: 'resume', sessionMatchesThread: true, transcriptMatchesRollout: true });
   expect(resume?.sameRolloutAsInitial).toBe(true);
   expect(resume?.conformance?.checks).toMatchObject({
-    exec_equals_rollout_total: 'pass', resume_total_equals_prior_plus_last: 'pass', thread_settings_applied: 'fail',
+    exec_equals_rollout_total: 'pass', resume_total_equals_prior_plus_last: 'pass', thread_settings_applied: 'pass',
   });
-  expect(resume?.conformance?.blocked).toBe(true);
+  expect(resume?.conformance?.blocked).toBe(false);
   const path = join(outDir, 'conformance-live-report.json');
   expect(statSync(path).mode & 0o777).toBe(0o600);
   const written = readFileSync(path, 'utf8');
@@ -216,3 +243,12 @@ test('suffixed versions, anomalous hooks and changed threads stop the run', asyn
   expect(moved.stop).toBe('thread_changed');
   expect(moved.stages).toHaveLength(2);
 }, 60_000);
+
+
+test('an old checkpoint in the initial history cannot satisfy the resumed-stage checkpoint gate', async () => {
+  const { deps, outDir } = fakeDeps('initial-checkpoint-only');
+  const report = await runLive(deps, outDir);
+  expect(report.stop).toBeNull();
+  expect(report.stages[0]?.conformance?.checks.thread_settings_applied).toBe('pass');
+  expect(report.stages[1]?.conformance?.checks.thread_settings_applied).toBe('not_observed');
+});

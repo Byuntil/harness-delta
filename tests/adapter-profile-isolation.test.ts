@@ -23,7 +23,7 @@ test('production sources cannot see the conformance candidate', () => {
   expect(readFileSync('src/otel-journal.ts', 'utf8')).not.toContain('adapter-profiles');
   expect(readFileSync('src/otel-projection.ts', 'utf8')).not.toContain('adapter-profiles');
   expect(readFileSync('src/otel-receiver.ts', 'utf8')).not.toContain('adapter-profiles');
-  expect(lookupFileProfile('codex', codex01580Candidate.version)).toBe('unsupported');
+  expect(lookupFileProfile('codex', codex01580Candidate.version)).toMatchObject({ kind: 'registered', boundaryMode: 'settings_checkpoint', commandDiagnostics: false });
   expect(codex01580Candidate).toMatchObject({
     kind: 'conformance_candidate', product: 'codex', version: '0.158.0', admitted: false,
     productionUsageField: 'total_token_usage', inspectedUsageField: 'last_token_usage',
@@ -31,6 +31,6 @@ test('production sources cannot see the conformance candidate', () => {
   });
   expect(parseSnapshot.length).toBe(2);
   expect(() => parseSnapshot('', {
-    sessionId: 's1', projectRoot: '/synthetic', product: 'codex', version: '0.158.0',
+    sessionId: 's1', projectRoot: '/synthetic', product: 'codex', version: '0.159.0',
   })).toThrow(/^unsupported$/);
 });

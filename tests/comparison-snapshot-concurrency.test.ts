@@ -23,7 +23,8 @@ for (const first of ['snapshot', 'deletion']) {
         const output = transpileModule(readFileSync(new URL(`../src/${name}`, import.meta.url), 'utf8'), { compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2023 } }).outputText;
         mkdirSync(dirname(join(compiled, name)), { recursive: true }); writeFileSync(join(compiled, name.replace(/\.ts$/, '.js')), output);
       }
-      cpSync(new URL('../src/migrations/', import.meta.url), join(compiled, 'migrations'), { recursive: true });
+      cpSync(new URL('../src/codex-admissions.json', import.meta.url), join(compiled, 'codex-admissions.json'));
+    cpSync(new URL('../src/migrations/', import.meta.url), join(compiled, 'migrations'), { recursive: true });
       const barrier = new SharedArrayBuffer(8); const flags = new Int32Array(barrier);
       worker = new Worker(`const { parentPort, workerData: d } = require('node:worker_threads');
         (async () => {

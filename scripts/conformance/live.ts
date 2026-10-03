@@ -1,6 +1,7 @@
+import type { EvidenceIdentity } from './admission.js';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { codex01580Candidate } from './candidate.js';
+import { codex01580Candidate, compareCandidate, type ConformanceCandidate } from './candidate.js';
 import type { CounterVector } from './checks.js';
 import { confirmationPlan, readConfirmation, renderConfirmation, type ConfirmationPlan } from './confirm.js';
 import { reduceExecStream, type ExecStreamSummary } from './exec-stream.js';
@@ -79,8 +80,8 @@ export interface StageReport {
   readonly conformance: ConformanceReport | null;
 }
 
-export interface LiveReport {
-  readonly version: typeof expectedVersion;
+export interface LiveReport extends Partial<EvidenceIdentity> {
+  readonly version: string;
   readonly scenario: 'exec_initial_resume';
   readonly confirmed: boolean;
   readonly productVersionBefore: 'match' | 'mismatch' | 'not_run';
@@ -100,9 +101,9 @@ export function execArguments(stage: 'initial' | 'resume', hookArgs: readonly st
   return args;
 }
 
-export function livePlanLines(productLabel: string): readonly string[] {
+export function livePlanLines(productLabel: string, version = expectedVersion): readonly string[] {
   return [
-    `product: ${productLabel}; expected version ${expectedVersion}; version probe before and after`,
+    `product: ${productLabel}; expected version ${version}; version probe before and after`,
     'working directory: new empty private directory under the system temporary directory, outside Git',
     'run 1: exec --json --skip-git-repo-check --sandbox read-only -c model_reasoning_effort="low" <hook overrides> <prompt 1>',
     'run 2: exec --json --skip-git-repo-check -c sandbox_mode="read-only" -c model_reasoning_effort="low" <hook overrides> resume <run 1 thread id> <prompt 2>',
@@ -117,7 +118,7 @@ export function livePlanLines(productLabel: string): readonly string[] {
     'environment: CLAUDE*, OTEL_*, CODEX_* (including CODEX_HOME), BETA_TRACING* and ENABLE_* are removed; ~/.codex is used',
     'exec usage is the thread cumulative total; Codex reports zeros when it observed no usage, so an exec mismatch can mean either',
     'product-created files: one rollout file with prompts, replies and instructions is left in place; product logs may change',
-    'report stores: version match flags, event/record counts, key names from the catalog, hook enums and check outcomes; no values',
+    'report stores: implementation/policy identity, version flags, event/record counts, catalog paths, allowlisted mode/hook enums and check outcomes; no token/content/identity values',
   ];
 }
 
@@ -188,8 +189,9 @@ const hookConflict = (hook: HookObservation, expected: HookSource): boolean =>
 interface StageOutcome { report: StageReport; stop: StopReason | null; threadId: string | null; rolloutPath: string | null; total: CounterVector | null }
 
 async function runStage(input: {
+  candidate: ConformanceCandidate;
   stage: 'initial' | 'resume'; deps: LiveDeps; hooks: HookListener; hookArgs: readonly string[]; cwd: string;
-  plan: ConfirmationPlan; threadId: string | null; initialRollout: string | null; priorTotal: CounterVector | null;
+  plan: ConfirmationPlan; threadId: string | null; initialRollout: string | null; priorTotal: CounterVector | null; priorCheckpointCount: number;
 }): Promise<StageOutcome> {
   const { deps, hooks, stage } = input;
   const rejectedBefore = hooks.rejected();
@@ -217,21 +219,27 @@ async function runStage(input: {
     return { report: partial, stop: 'hook_conflict', threadId: reduced.threadId, rolloutPath, total: null };
   }
   if (sameRolloutAsInitial === false) return { report: partial, stop: 'rollout_changed', threadId: reduced.threadId, rolloutPath, total: null };
-  let inspection: CandidateInspection;
-  try {
-    inspection = parseCandidate(readFileSync(rolloutPath, 'utf8'), {
-      sessionId: reduced.threadId, projectRoot: input.cwd, product: 'codex', version: expectedVersion,
-    }, codex01580Candidate);
-  } catch (error) {
-    return { report: { ...partial, parseError: parseErrorCode(error) }, stop: 'parse_error', threadId: reduced.threadId, rolloutPath, total: null };
-  }
   const mapping = createInvestigation({
     projectId: 'conformance', taskId: 'conformance', processId: stage, sessionId: reduced.threadId,
     sourcePath: rolloutPath, product: 'codex',
   });
+  let inspection: CandidateInspection;
+  try {
+    inspection = parseCandidate(readFileSync(rolloutPath, 'utf8'), {
+      sessionId: reduced.threadId, projectRoot: input.cwd, product: 'codex', version: input.candidate.version,
+    }, input.candidate);
+  } catch (error) {
+    return { report: { ...partial, parseError: parseErrorCode(error) }, stop: 'parse_error', threadId: reduced.threadId, rolloutPath, total: null };
+  }
+  // Resume inspections replay the whole file. An earlier checkpoint is not
+  // evidence that the resumed invocation wrote a same-thread settings checkpoint.
+  const checkpointCount = inspection.traversal.eventCounts.thread_settings_applied ?? 0;
+  const stageInspection: CandidateInspection = stage === 'resume' && checkpointCount <= input.priorCheckpointCount
+    ? { ...inspection, topology: { ...inspection.topology, threadSettingsApplied: 'absent' } }
+    : inspection;
   const investigated = runInvestigation({
-    mapping, plan: input.plan, names: [basename(rolloutPath)],
-    channel: { start: () => ({ ...inspection, vectors: { ...inspection.vectors, exec: reduced.usage, priorTotal: input.priorTotal } }) },
+    version: input.candidate.version, mapping, plan: input.plan, names: [basename(rolloutPath)],
+    channel: { start: () => ({ ...stageInspection, vectors: { ...inspection.vectors, exec: reduced.usage, priorTotal: input.priorTotal } }) },
   });
   return {
     report: { ...partial, conformance: investigated.status === 'report' ? investigated.report : null },
@@ -240,10 +248,10 @@ async function runStage(input: {
   };
 }
 
-async function probeVersion(deps: LiveDeps, cwd: string): Promise<'match' | 'mismatch'> {
+async function probeVersion(deps: LiveDeps, cwd: string, version: string): Promise<'match' | 'mismatch'> {
   const result = await deps.spawnProduct(['--version'], { cwd, timeoutMs: versionLimitMs });
   const lines = result.stdout.split('\n').map(line => line.trim()).filter(Boolean);
-  const exact = lines.length === 1 && /^codex-cli 0\.158\.0$/.test(lines[0] ?? '');
+  const exact = lines.length === 1 && lines[0] === `codex-cli ${version}`;
   return result.code === 0 && exact ? 'match' : 'mismatch';
 }
 
@@ -251,12 +259,16 @@ async function probeVersion(deps: LiveDeps, cwd: string): Promise<'match' | 'mis
  * Manual Codex 0.158.0 exec conformance run. Prints the plan and requires a typed
  * `confirm` before any product command, including the version probe.
  */
-export async function runLive(deps: LiveDeps, outDir: string): Promise<LiveReport> {
-  const plan = confirmationPlan(livePlanLines(deps.productLabel));
+export async function runLive(deps: LiveDeps, outDir: string, candidate = codex01580Candidate as ConformanceCandidate, identity?: EvidenceIdentity): Promise<LiveReport> {
+  const plan = confirmationPlan([...livePlanLines(deps.productLabel, candidate.version),
+    `declared differences: ${JSON.stringify(compareCandidate(candidate))}`,
+    `policy: ${identity?.policyRevision ?? 'synthetic'}; source: ${candidate.sourceRef}; previous profile: ${candidate.previousVersion}`,
+    `application implementation digest: ${identity?.implementationDigest ?? 'synthetic'}`,
+  ]);
   deps.print(renderConfirmation(plan));
   const answer = await deps.readConfirmationLine();
   const notRun = {
-    version: expectedVersion, scenario: 'exec_initial_resume', productVersionBefore: 'not_run',
+    ...identity, version: candidate.version, scenario: 'exec_initial_resume', productVersionBefore: 'not_run',
     productVersionAfter: 'not_run', configMetadataUnchanged: null, stages: [],
   } as const;
   if (readConfirmation(plan, { readLine: () => answer }, null) !== 'confirmed') {
@@ -284,22 +296,24 @@ export async function runLive(deps: LiveDeps, outDir: string): Promise<LiveRepor
       hooks = await startHookListener(socketPath, { now: () => deps.now(), exists: existsSync });
       const hookArgs = hookTrustArguments({ command: wrapper, trustedHash: sessionStartTrustedHash(wrapper) });
       const configBefore = deps.configMetadata();
-      before = await probeVersion(deps, realCwd);
+      before = await probeVersion(deps, realCwd, candidate.version);
       if (before !== 'match') stop = 'version_mismatch';
       let threadId: string | null = null;
       let initialRollout: string | null = null;
       let priorTotal: CounterVector | null = null;
+      let priorCheckpointCount = 0;
       for (const stage of ['initial', 'resume'] as const) {
         if (stop !== null) break;
-        const outcome = await runStage({ stage, deps, hooks, hookArgs, cwd: realCwd, plan, threadId, initialRollout, priorTotal });
+        const outcome = await runStage({ candidate, stage, deps, hooks, hookArgs, cwd: realCwd, plan, threadId, initialRollout, priorTotal, priorCheckpointCount });
         stages.push(outcome.report);
         stop = outcome.stop;
         threadId = outcome.threadId;
         initialRollout ??= outcome.rolloutPath;
         priorTotal = outcome.total;
+        priorCheckpointCount = outcome.report.conformance?.eventCounts.thread_settings_applied ?? 0;
       }
       if (before === 'match') {
-        after = await probeVersion(deps, realCwd);
+        after = await probeVersion(deps, realCwd, candidate.version);
         if (after !== 'match') stop ??= 'version_changed';
       }
       configUnchanged = deps.configMetadata() === configBefore;

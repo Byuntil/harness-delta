@@ -1,5 +1,8 @@
 # Local measurement
 
+See the [Codex exact-version admission and partial measurement workflow](codex-version-admission.md) for 0.158.0 and subsequent candidate versions.
+
+
 [한국어](local-measurement.ko.md)
 
 Requires Node.js 24. Build with `npm ci && npm run build`; use `node dist/cli.js`
@@ -90,7 +93,7 @@ the generated report if you need a historical snapshot after deletion or new dat
 
 ## Versions, conformance, and update controls
 
-Registered file adapters are partial. They currently accept Codex CLI 0.156.1 and Claude Code 2.1.283 only. An unregistered version, range, or suffix is rejected before the file is read and is not stored. Codex 0.158.0 is not registered. See [ADR 007](../decisions/007-adapter-version-profiles.md).
+Registered file adapters are partial. They currently accept Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283 only. An unregistered version, range, or suffix is rejected before the file is read and is not stored. Codex 0.158.0 is registered for sequential partial usage under the M2 boundaries. See [ADR 007](../decisions/007-adapter-version-profiles.md).
 
 The repository runner at `scripts/conformance/` is manual. Installation, collection, hooks, and CI do not invoke it. CI runs offline synthetic unit tests of the report projector, the candidate parser, the confirmation and hook-trust helpers, and the exec-stream reducer. CI never runs the runner. Design approval is not live-run approval.
 
@@ -121,7 +124,7 @@ snapshot per poll; this is not an unbounded production log tailer.
 
 Run `npm run check` for synthetic acceptance tests, including the CLI flow, privacy
 sentinel, rollback, pause/restart and reports. Actual evidence currently covers
-macOS arm64, Codex CLI 0.156.1 and Claude Code 2.1.283 only. App sessions,
+macOS arm64, Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283 only. App sessions,
 parent/child complete accounting, nonzero reasoning semantics, other versions and
 other platforms need separate validation. Do not use this preview for a real
 experiment or inferential adoption decision.

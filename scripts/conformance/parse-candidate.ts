@@ -1,6 +1,8 @@
+import { codexCheckpointSemantics } from '../../src/adapter-profiles.js';
+import { checkpointAllowed, childActivity, collaborationMode, multiAgentVersion, type CollaborationMode, type MultiAgentVersion } from '../../src/codex-rollout-policy.js';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { metadataKey, usagePayload, type Snapshot, type SourceRecord, type SourceScope } from '../../src/adapters.js';
+import { parseCodex, type Snapshot, type SourceScope } from '../../src/adapters.js';
 import { IdSchema, ModelSchema, TimestampSchema, TokenSchema } from '../../src/contracts.js';
 import { SourceFailure } from '../../src/source-errors.js';
 import { admissionCatalog, traverseCatalog, type CatalogTraversal } from './catalog.js';
@@ -14,7 +16,10 @@ export interface InspectionTopology {
   readonly rootTurnId: string | null;
   readonly collaborationModePresent: boolean;
   readonly multiAgentVersionPresent: boolean;
-  readonly threadSettingsApplied: 'absent' | 'ambiguous';
+  readonly threadSettingsApplied: 'absent' | 'same_thread' | 'ambiguous';
+  readonly collaborationModes: readonly CollaborationMode[];
+  readonly multiAgentVersions: readonly MultiAgentVersion[];
+  readonly childActivity: boolean;
   readonly sessionMetaId: string | null;
   readonly sessionMetaSessionId: string | null;
   readonly linkedSessionId: string | null;
@@ -77,14 +82,13 @@ function optionalVector(usage: ObjectValue): CounterVector {
 export function parseCandidate(text: string, scope: SourceScope, candidate: ConformanceCandidate): CandidateInspection {
   const version: string = candidate.version;
   const admitted: boolean = candidate.admitted;
-  if (version !== '0.158.0' || admitted !== false || scope.product !== candidate.product || scope.version !== version) {
+  if (admitted !== false || scope.product !== candidate.product || scope.version !== version) {
     throw new Error('unsupported');
   }
   if (candidate.counterMode !== 'cumulative_total') throw new Error('unsupported');
   const result: Snapshot = { continuityKey: null, records: [], counters: null, counterAt: null, model: null, reasons: ['incomplete'], blocked: false };
-  const records = new Map<string, SourceRecord>();
+  const runtime = parseCodex(text, scope, { ...codexCheckpointSemantics, version });
   let identified = false;
-  let turnStartedAt: string | null = null;
   let currentTurnId: string | null = null;
   let turnOpen = false;
   let latestTotal: CounterVector | null = null;
@@ -95,7 +99,10 @@ export function parseCandidate(text: string, scope: SourceScope, candidate: Conf
   let rootTurnId: string | null = null;
   let collaborationModePresent = false;
   let multiAgentVersionPresent = false;
-  let threadSettingsApplied: 'absent' | 'ambiguous' = 'absent';
+  let threadSettingsApplied: 'absent' | 'same_thread' | 'ambiguous' = 'absent';
+  const collaborationModes: CollaborationMode[] = [];
+  const multiAgentVersions: MultiAgentVersion[] = [];
+  let hasChildActivity = false;
   let sessionMetaId: string | null = null;
   let sessionMetaSessionId: string | null = null;
   const pairs: TurnPair[] = [];
@@ -124,14 +131,19 @@ export function parseCandidate(text: string, scope: SourceScope, candidate: Conf
     if (exactName(candidate.blockingTypes, row.type) || payload.type === 'context_compacted' || payload.type === 'token_count' && object(payload.info).total_token_usage === null ||
         payload.forked_from_id || (row.type === 'event_msg' && String(payload.type).startsWith('collab_'))) result.blocked = true;
     if (row.type === 'event_msg' && payload.type === 'thread_settings_applied') {
-      result.blocked = true;
-      threadSettingsApplied = 'ambiguous';
+      if (threadSettingsApplied !== 'ambiguous') threadSettingsApplied = checkpointAllowed(payload, scope.sessionId, scope.projectRoot, result.model) ? 'same_thread' : 'ambiguous';
     }
+    hasChildActivity ||= childActivity(row.type, payload);
     if (listed(candidate.excludedTypes, row.type)) continue;
     if (row.type === 'event_msg' && payload.type === 'task_started') {
       if (turnOpen) result.blocked = true;
-      currentTurnId = id(payload.turn_id); turnOpen = true; turnStartedAt = timestamp(row.timestamp);
+      currentTurnId = id(payload.turn_id); turnOpen = true;
       taskStartedTurnId = currentTurnId;
+      turnContexts.push({
+        turnId: currentTurnId, rootTurnId: textOrNull(payload.root_turn_id),
+        rootTurnIdNonString: Object.hasOwn(payload, 'root_turn_id') && typeof payload.root_turn_id !== 'string',
+        collaborationModePresent: false, multiAgentVersionPresent: false,
+      });
       if (openPair) pairs.push(openPair);
       openPair = { started: currentTurnId, complete: null };
     }
@@ -146,8 +158,10 @@ export function parseCandidate(text: string, scope: SourceScope, candidate: Conf
     if (row.type === 'turn_context') {
       if (typeof payload.cwd === 'string' && canonicalPath(payload.cwd) !== canonicalPath(scope.projectRoot)) throw new Error('scope_mismatch');
       if (payload.root_turn_id !== undefined && payload.root_turn_id !== payload.turn_id) result.blocked = true;
-      if (payload.collaboration_mode !== undefined) { collaborationModePresent = true; result.blocked = true; }
-      if (payload.multi_agent_version !== undefined) { multiAgentVersionPresent = true; result.blocked = true; }
+      if (payload.collaboration_mode !== undefined) { collaborationModePresent = true; }
+      if (payload.multi_agent_version !== undefined) { multiAgentVersionPresent = true; }
+      collaborationModes.push(collaborationMode(payload.collaboration_mode));
+      multiAgentVersions.push(multiAgentVersion(payload.multi_agent_version));
       turnId = textOrNull(payload.turn_id);
       const rootTurnIdNonString = Object.hasOwn(payload, 'root_turn_id') && typeof payload.root_turn_id !== 'string';
       rootTurnId = rootTurnIdNonString ? null : Object.hasOwn(payload, 'root_turn_id') ? textOrNull(payload.root_turn_id) : null;
@@ -168,35 +182,21 @@ export function parseCandidate(text: string, scope: SourceScope, candidate: Conf
       if (total.input === null || total.cached === null || total.output === null || total.reasoning === null) throw new Error('unsupported');
       const counters = [total.input, total.cached, total.output, total.reasoning];
       if (result.counters && counters.some((value, index) => value < result.counters![index]!)) result.blocked = true;
-      const previous = result.counters ?? [0, 0, 0, 0];
-      if (!result.blocked && result.model && (!result.counters || counters.some((value, index) => value !== previous[index]))) {
-        const deltas = counters.map((value, index) => value - (previous[index] ?? 0));
-        const currentModel = result.model;
-        if (!currentModel) throw new Error('unsupported');
-        const key = metadataKey(scope.sessionId, 'usage', ...counters.map(String));
-        const record: SourceRecord = {
-          key, at: timestamp(row.timestamp), turnStartedAt,
-          payload: usagePayload(scope, deltas, currentModel, 'sequential'),
-        };
-        const previousRecord = records.get(key);
-        if (previousRecord && JSON.stringify(previousRecord) !== JSON.stringify(record)) throw new SourceFailure('record_conflict');
-        records.set(key, record);
-      }
       result.counters = counters; result.counterAt = timestamp(row.timestamp);
     }
   }
   if (openPair) pairs.push(openPair);
   if (!identified) throw new Error('scope_mismatch');
-  result.records = [...records.values()];
+
   if (result.blocked) result.reasons.push('unsupported');
   return {
-    ...result,
+    ...runtime,
     vectors: { total: latestTotal, last: latestLast, exec: null, priorTotal: null },
     topology: {
       taskStartedTurnId, taskCompleteTurnId, turnId, rootTurnId,
       collaborationModePresent, multiAgentVersionPresent, threadSettingsApplied,
       sessionMetaId, sessionMetaSessionId, linkedSessionId: scope.sessionId,
-      pairs, turnContexts,
+      pairs, turnContexts, collaborationModes, multiAgentVersions, childActivity: hasChildActivity,
     },
     traversal: traverseCatalog(parsedRows, admissionCatalog),
   };

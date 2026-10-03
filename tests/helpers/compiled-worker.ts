@@ -10,5 +10,6 @@ export function compiledWorker(root: string): string {
     const output=transpileModule(readFileSync(new URL(`../../src/${name}`,import.meta.url),'utf8'),{compilerOptions:{module:ModuleKind.ESNext,target:ScriptTarget.ES2023}}).outputText;
     mkdirSync(dirname(join(compiled,name)),{recursive:true});writeFileSync(join(compiled,name.replace(/\.ts$/,'.js')),output);
   }
+  cpSync(new URL('../../src/codex-admissions.json',import.meta.url),join(compiled,'codex-admissions.json'));
   cpSync(new URL('../../src/migrations/',import.meta.url),join(compiled,'migrations'),{recursive:true});return compiled;
 }
