@@ -8,6 +8,8 @@ import { Store } from './store.js';
 import { Lifecycle, type Outcome } from './lifecycle.js';
 import { Deletion } from './deletion.js';
 import { Collector } from './collection.js';
+import { aggregateFlexibleTaskReport } from './reports/flexible-comparison.js';
+import { parseTaskMetadata } from './flexible-contracts.js';
 import { aggregateTask } from './metrics.js';
 import { freezePeriod,periodReport } from './reports/period.js';
 import { renderReport } from './reports/render.js';
@@ -71,7 +73,9 @@ export async function main(argv: string[]): Promise<number> {
   });
   const report=program.command('report');
   report.command('task <id>').requiredOption('--cutoff <UTC>').option('--format <json|markdown>','output format','json')
-    .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(aggregateTask(db(),id,options.cutoff),options.format));});
+    .action((id:string,options:{cutoff:string;format:string})=>{const row=life().task(id);const metadata=parseTaskMetadata(JSON.parse(row.metadata??'null') as unknown);
+      if('schema_version' in metadata){const value=aggregateFlexibleTaskReport(db(),id,options.cutoff);if(options.format==='json')process.stdout.write(JSON.stringify(value,null,2)+'\n');else if(options.format==='markdown')process.stdout.write('# Standardized estimated cost\n\nWhole task cost unconfirmed. Elapsed time is not human labor.\n\n```json\n'+JSON.stringify(value,null,2)+'\n```\n');else throw new Error('invalid_format');}
+      else process.stdout.write(renderReport(aggregateTask(db(),id,options.cutoff),options.format));});
   report.command('period <id>').requiredOption('--cutoff <UTC>').option('--format <json|markdown>','output format','json')
     .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(periodReport(db(),id,options.cutoff),options.format));});
   registerComparisonCommands(program, db, print);

@@ -1,3 +1,8 @@
+import { registerPriceTable,readPriceTable } from './pricing.js';
+import { PriceTableSchema,parseTaskMetadata } from './flexible-contracts.js';
+import { parseComparison } from './comparison-contracts.js';
+import { readRuntimeHistory } from './runtime-history.js';
+import { comparisonReadiness } from './readiness-store.js';
 import { readFileSync } from 'node:fs';
 import { createComparisonSnapshot, readComparisonSnapshot } from './reports/comparison-snapshot.js';
 import { renderComparisonReport } from './reports/comparison-render.js';
@@ -12,6 +17,9 @@ import type { Store } from './store.js';
 const readConfig = (path: string): unknown => JSON.parse(readFileSync(path, 'utf8')) as unknown;
 
 export function registerComparisonCommands(program: Command, store: () => Store, print: (value: unknown) => void): void {
+  const prices=program.command('price-table').description('Immutable explicit standardized cost prices; not actual billing');
+  prices.command('register').requiredOption('--config <file>').action((o:{config:string})=>{registerPriceTable(store(),parseComparison(PriceTableSchema,readConfig(o.config),'invalid_price_table'));});
+  prices.command('show <id>').action((id:string)=>{print(readPriceTable(store(),id));});
   const variant = program.command('variant').description('Register immutable harness configurations');
   variant.command('register').requiredOption('--config <file>').action((options: { config: string }) => { registerVariant(store(), readConfig(options.config)); });
   variant.command('show <id>').action((id: string) => { print(showVariant(store(), id)); });
@@ -19,6 +27,7 @@ export function registerComparisonCommands(program: Command, store: () => Store,
   comparison.command('register').requiredOption('--config <file>').action((options: { config: string }) => { registerProtocol(store(), readConfig(options.config)); });
   comparison.command('freeze <id>').action((id: string) => { freezeProtocol(store(), id, new Date().toISOString()); });
   comparison.command('show <id>').action((id: string) => { print(showProtocol(store(), id)); });
+  comparison.command('readiness <id>').description('Independent real allocation, whole-cost and inference evidence gates').action((id:string)=>{print(comparisonReadiness(store(),id));});
   comparison.command('assign').requiredOption('--config <file>').action((options: { config: string }) => { print(assignTask(store(), readConfig(options.config), { discloseReports: ids => { print({ invalidating_reports: ids }); } })); });
   comparison.command('snapshot').command('create <protocol-id>')
     .requiredOption('--id <report-id>').requiredOption('--cutoff <UTC>').requiredOption('--reason <reason>')
@@ -40,5 +49,7 @@ export function registerComparisonCommands(program: Command, store: () => Store,
       });
       confirmConfiguration(store(), readConfig(options.config), new Date().toISOString(), artifacts);
     });
-  task.command('config-history <id>').action((id: string) => { print(configurationHistory(store(), id)); });
+  task.command('config-history <id>').action((id: string) => { const db=store();const row=db.get<{metadata:string|null}>('SELECT metadata FROM tasks WHERE id=?',[id]);
+    if(!row)throw new Error('unknown_task');const metadata=parseTaskMetadata(JSON.parse(row.metadata??'null') as unknown);
+    const history=configurationHistory(db,id);print('schema_version' in metadata?{...history,runtime:readRuntimeHistory(db,id,new Date().toISOString())}:history); });
 }

@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { paired, receivedAt } from './helpers/exchange-import-fixture.js';
 import { importExchangePackage } from '../src/exchange/import.js';
-import { createTeamSnapshot, readTeamSnapshot } from '../src/reports/team-snapshot.js';
+import { createTeamSnapshot, readTeamSnapshot } from './helpers/legacy-exchange.js';
 import { deleteImportedTask } from '../src/exchange/retention.js';
 import { renderTeamReport } from '../src/reports/team-render.js';
 const now = '2026-01-06T00:00:00.000Z';
