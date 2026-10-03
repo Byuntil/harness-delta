@@ -34,7 +34,7 @@ export class Deletion {
       deleteMappedProject(this.store, projectId, TimestampSchema.parse(this.clock()));
       recordSourceProjectDeletion(this.store, projectId, TimestampSchema.parse(this.clock()));
       for (const protocol of this.store.all<{ id: string }>('SELECT id FROM comparison_protocols WHERE project_id=?', [projectId])) {
-        const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocol.id]).map(row => row.report_id);
+        const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? UNION ALL SELECT report_id FROM flexible_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocol.id,protocol.id]).map(row => row.report_id);
         if (ids.length) this.discloseReports(ids);
         invalidateComparisonSnapshots(this.store, protocol.id, 'deletion', TimestampSchema.parse(this.clock()));
       }
@@ -72,7 +72,7 @@ export class Deletion {
     }
     for (const protocolId of affectedComparisonProtocols(this.store, taskId)) {
       this.store.execute("UPDATE comparison_protocols SET status = 'invalidated_by_deletion', invalidated_reason = 'deletion', data_revision = data_revision + 1 WHERE id = ?", [protocolId]);
-      const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocolId]).map(row => row.report_id);
+      const ids = this.store.all<{ report_id: string }>('SELECT report_id FROM comparison_report_snapshots WHERE protocol_id=? UNION ALL SELECT report_id FROM flexible_report_snapshots WHERE protocol_id=? ORDER BY report_id', [protocolId,protocolId]).map(row => row.report_id);
       if (ids.length) this.discloseReports(ids);
       invalidateComparisonSnapshots(this.store, protocolId, 'deletion', now);
       // Purge private shuffled queues and replay positions for the entire affected experiment.

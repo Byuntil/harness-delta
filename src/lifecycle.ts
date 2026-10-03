@@ -1,10 +1,11 @@
+import { parseTaskMetadata } from './flexible-contracts.js';
 import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { requireConfigurationConfirmation, bindConfigurationToSession } from './config-confirmation.js';
 import { lookupFileProfile } from './adapter-profiles.js';
-import { IdSchema, ProductVersionSchema, TaskMetadataSchema, TimestampSchema } from './contracts.js';
+import { IdSchema, ProductVersionSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
 import { interruptManagedRuns } from './managed-journal.js';
 import { revokeOtelProcesses } from './otel-journal.js';
@@ -35,7 +36,7 @@ export class Lifecycle {
 
   createTask(projectId: string, taskId: string, input: unknown): void {
     IdSchema.parse(projectId); IdSchema.parse(taskId);
-    const metadata = TaskMetadataSchema.parse(input);
+    const metadata = parseTaskMetadata(input);
     const now = this.now();
     this.store.transaction(() => {
       this.rejectDeleted('task', taskId); this.rejectDeleted('project', projectId);
@@ -62,7 +63,7 @@ export class Lifecycle {
     this.store.transaction(() => {
       const task = this.task(taskId);
       if (task.state !== from) throw new Error('invalid_transition');
-      TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
+      parseTaskMetadata(JSON.parse(task.metadata) as unknown);
       const now = this.now(task);
       if (to === 'active') requireConfigurationConfirmation(this.store, taskId, now);
       this.store.execute('UPDATE tasks SET state = ?, started_at = COALESCE(started_at, ?), generation = generation + 1, last_transition_at = ? WHERE id = ?',
@@ -117,7 +118,7 @@ export class Lifecycle {
     this.store.transaction(() => {
       const task = this.task(taskId);
       if (task.state !== 'active' && task.state !== 'paused') throw new Error('invalid_transition');
-      const metadata = TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
+      const metadata = parseTaskMetadata(JSON.parse(task.metadata) as unknown);
       if (criteriaMet.some(id => !metadata.criterion_ids.includes(id)) ||
           (outcome === 'success' && criteriaMet.length !== metadata.criterion_ids.length)) throw new Error('invalid_criteria');
       const now = this.now(task);
@@ -143,7 +144,7 @@ export class Lifecycle {
       const task = this.task(taskId);
       if (task.state === 'finalized') throw new Error('invalid_transition');
       this.rejectDeleted('session', sessionId);
-      const metadata = TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
+      const metadata = parseTaskMetadata(JSON.parse(task.metadata) as unknown);
       if (metadata.product !== product) throw new Error('product_mismatch');
       if (this.store.get('SELECT id FROM comparison_assignments WHERE task_id = ?', [taskId]) && !confirmationId) throw new Error('configuration_confirmation_required');
       // OTel and file adapter observations must never be summed in one task report.

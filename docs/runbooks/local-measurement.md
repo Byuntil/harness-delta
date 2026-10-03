@@ -128,3 +128,7 @@ macOS arm64, Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283 only. App session
 parent/child complete accounting, nonzero reasoning semantics, other versions and
 other platforms need separate validation. Do not use this preview for a real
 experiment or inferential adoption decision.
+
+For the additive v2 flexible model workflow, explicit prices and independent
+readiness gates, see [flexible comparison](flexible-comparison.md). Production
+flexible collection, complete cost and inference remain unavailable.

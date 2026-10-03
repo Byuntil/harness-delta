@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { teamFixture } from './helpers/team-fixture.js';
 import { importExchangePackage } from '../src/exchange/import.js';
-import { createTeamSnapshot } from '../src/reports/team-snapshot.js';
+import { createTeamSnapshot } from './helpers/legacy-exchange.js';
 const now='2026-01-06T00:00:00.000Z';
 test('eight original assignments produce independently calculated partial descriptive results',()=>{
   const f=teamFixture();try{
@@ -54,7 +54,7 @@ test('different source cutoffs cannot be merged or silently trimmed',()=>{
 });
 
 test('later imported evidence appears only in a new frozen report',async()=>{
- const {createComparisonSnapshot}=await import('../src/reports/comparison-snapshot.js');const {buildExchangePackage}=await import('../src/exchange/source.js');const {readTeamSnapshot}=await import('../src/reports/team-snapshot.js');
+ const {createComparisonSnapshot}=await import('../src/reports/comparison-snapshot.js');const {buildExchangePackage}=await import('../src/exchange/source.js');const {readTeamSnapshot}=await import('./helpers/legacy-exchange.js');
  const f=teamFixture();try{
   for(const p of f.packages)importExchangePackage(f.dest,p,'destination',()=>f.request.as_of);
   const old=createTeamSnapshot(f.dest,f.request,()=>now);const source=f.sources[0]!;

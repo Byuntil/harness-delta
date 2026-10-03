@@ -1,11 +1,11 @@
 import { expect, test } from 'vitest';
 import { teamFixture } from './helpers/team-fixture.js';
 import { importExchangePackage } from '../src/exchange/import.js';
-import { createTeamSnapshot, readTeamSnapshot } from '../src/reports/team-snapshot.js';
+import { createTeamSnapshot, readTeamSnapshot } from './helpers/legacy-exchange.js';
 import { deleteImportedTask } from '../src/exchange/retention.js';
 import { renderTeamReport } from '../src/reports/team-render.js';
 import { renderComparisonReport } from '../src/reports/comparison-render.js';
-import { createComparisonSnapshot } from '../src/reports/comparison-snapshot.js';
+import { createComparisonSnapshot } from './helpers/legacy-snapshot.js';
 import { reportStore, request, evaluation } from './helpers/comparison-report-fixture.js';
 const now = '2026-01-06T00:00:00.000Z';
 

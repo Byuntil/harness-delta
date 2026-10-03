@@ -201,3 +201,21 @@ prove an adoption decision. See [the observation contract](decisions/003-local-o
 Statistical packages, actual experiment inputs, publication name/channel, and remote
 deployment are not established by this document. The repository's existing MIT
 license applies. Completing scaffolding does not complete any product gate.
+
+## Flexible runtime comparison (version 2)
+
+A registered logical task retains its original randomized harness assignment when
+models, reasoning effort, retries, or linked sessions change. Version 1 fixed
+configuration protocols and report serialization remain supported. Version 2
+requires an immutable single-currency price table, observation followup, sample
+planning basis, minimum effect and quality margin as explicit protocol inputs.
+Strata identify one responsible assignee; realized model is descriptive metadata,
+not an adjustment variable for the policy effect.
+
+Runtime evidence records nullable model/effort and its source and boundary.
+Unknown attribution, missing components and unpriced models produce unavailable
+cost, never observed zero. Measurement excludes prompt, response and source text.
+Standardized estimated cost is distinct from bills, subscriptions and labor.
+Synthetic candidate parsing does not admit a production source, prove complete
+coverage or enable inference. Real allocation, complete cost and inference require
+separate validated evidence and remain closed without it.

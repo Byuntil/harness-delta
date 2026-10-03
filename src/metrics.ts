@@ -1,3 +1,7 @@
+import { CostCoverageEvidenceSchema, CostFactsSchema, PriceTableSchema, type UsageEvent, type PriceTable, type CostCoverageEvidence, type TaskCost, parseTaskMetadata } from './flexible-contracts.js';
+import { evaluateCostCoverage, syntheticCostProfileId } from './cost-coverage.js';
+import { parseComparison } from './comparison-contracts.js';
+import { priceUsage, sumAmounts } from './pricing.js';
 import { addTokens, EventSchema, TaskMetadataSchema, TimestampSchema } from './contracts.js';
 import { Lifecycle, type Outcome } from './lifecycle.js';
 import { Store } from './store.js';
@@ -13,6 +17,7 @@ export function changeRate(before:number,after:number):number|null {
 export function aggregateTask(store:Store,taskId:string,cutoff:string){
  return store.transaction(()=>{
   const end=new Date(TimestampSchema.parse(cutoff)).toISOString();const task=new Lifecycle(store).task(taskId);
+  if('schema_version' in parseTaskMetadata(JSON.parse(task.metadata) as unknown))throw new Error('unsupported_report_mode');
   const metadata=TaskMetadataSchema.parse(JSON.parse(task.metadata) as unknown);
   const cutoffMs=Date.parse(end);const start=task.started_at && Date.parse(task.started_at)<=cutoffMs?task.started_at:null;
   const finalized=task.finalized_at && Date.parse(task.finalized_at)<=cutoffMs?task.finalized_at:null;
@@ -70,3 +75,33 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
  });
 }
 export type TaskReport=ReturnType<typeof aggregateTask>;
+
+/** Cost coverage is separate from the permanently partial legacy token report. */
+export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence): TaskCost {
+  const evidence = parseComparison(CostCoverageEvidenceSchema, inputEvidence, 'invalid_cost_coverage');
+  const table = parseComparison(PriceTableSchema, inputTable, 'invalid_price_table');
+  const unique = new Map<string, UsageEvent>();
+  for (const input of events) {
+    const event = parseComparison(EventSchema, input, 'invalid_event');
+    if (event.payload.kind !== 'usage') throw new Error('invalid_event');
+    if (event.task_id !== evidence.task_id) throw new Error('scope_mismatch');
+    if (Date.parse(event.occurred_at) < Date.parse(evidence.window_start) || Date.parse(event.occurred_at) >= Date.parse(evidence.window_end)) continue;
+    const previous = unique.get(event.source_key);
+    if (previous && JSON.stringify({ ...previous, id: event.id }) !== JSON.stringify(event)) throw new Error('event_conflict');
+    if (!previous) unique.set(event.source_key, event as UsageEvent);
+  }
+  const rows = [...unique.values()];
+  const decision = evaluateCostCoverage({ ...evidence, has_observed_value: evidence.has_observed_value && rows.length > 0 });
+  const priced = rows.map(e => priceUsage(e, table));
+  const partial = priced.flatMap(e => e.partial_amount === null ? [] : [e.partial_amount]);
+  const synthetic = evidence.profile_id === syntheticCostProfileId && rows.every(e => e.payload.product === 'synthetic');
+  const usageComplete = synthetic && rows.length > 0 && evidence.has_observed_value && CostFactsSchema.keyof().options
+    .filter(fact => fact !== 'price_coverage').every(fact => evidence.facts[fact] === 'verified') &&
+    rows.every(e => e.payload.input_total.status === 'observed' && e.payload.output_total.status === 'observed' &&
+      'schema_version' in e.payload && e.payload.attribution === 'verified');
+  const priceComplete = rows.length > 0 && evidence.facts.price_coverage === 'verified' && priced.every(e => e.amount !== null);
+  const reasons: TaskCost['reasons'] = [...new Set([...decision.reasons, ...priced.flatMap(e => e.reasons), ...(!synthetic ? ['unsupported_profile' as const] : [])])].sort();
+  const total = partial.length > 0 ? sumAmounts(partial) : null;
+  return { currency: table.currency, price_table_id: table.id, complete_amount: decision.eligible && usageComplete && priceComplete ? total : null,
+    partial_amount: total, usage_complete: usageComplete, price_complete: priceComplete, reasons };
+}

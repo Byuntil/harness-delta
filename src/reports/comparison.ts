@@ -14,7 +14,7 @@ export function projectComparison(input: ComparisonSnapshotInput) {
   const summaries = summarizeComparisonTasks(tasks,protocol);
   const registrations = data.registrations.filter(row => ms(row.registered_at) >= ms(protocol.recruitment_start) && ms(row.registered_at) < Math.min(ms(data.cutoff), ms(protocol.recruitment_end)));
   const assignedRegistrations = registrations.filter(row => row.assignment_at !== null && ms(row.assignment_at) < ms(data.cutoff));
-  return { schema_version: 1, descriptive_version: data.descriptive_version, report_id: data.report_id, mode: 'randomized_task', purpose: 'synthetic_validation',
+  return { schema_version: 1 as const, descriptive_version: data.descriptive_version, report_id: data.report_id, mode: 'randomized_task', purpose: 'synthetic_validation',
     protocol_id: protocol.id, settings: protocol, variants: data.variants, cutoff: data.cutoff, evaluated_at: data.evaluated_at,
     data_revision: data.data_revision, snapshot_sequence: data.snapshot_sequence, revision_reason: data.revision_reason, supersedes_report_id: data.supersedes_report_id,
     validity_status: 'valid', provisional: ms(data.cutoff) < ms(protocol.recruitment_end) || tasks.some(row => row.deadline_status === 'pending_followup'),

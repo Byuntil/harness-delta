@@ -4,7 +4,8 @@ import { registerVariant, registerProtocol, freezeProtocol } from '../../src/com
 import { assignTask } from '../../src/allocation.js';
 import { confirmConfiguration, bindConfigurationToSession } from '../../src/config-confirmation.js';
 import { createComparisonSnapshot } from '../../src/reports/comparison-snapshot.js';
-import { registerExchangeSource, buildExchangePackage } from '../../src/exchange/source.js';
+import { buildExchangePackage } from './legacy-exchange.js';
+import { registerExchangeSource } from '../../src/exchange/source.js';
 import { registerExchangeMapping } from '../../src/exchange/mapping.js';
 import { protocolDigest } from '../../src/exchange/contracts.js';
 import { protocol,variantA,variantB,assignmentInput,beforeRecruitment } from './comparison-fixture.js';

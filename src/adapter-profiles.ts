@@ -99,3 +99,6 @@ export const registeredFileProfiles: readonly RegisteredFileProfile[] = [codex01
 export function lookupFileProfile(product: string, version: string): RegisteredFileProfile | 'unsupported' {
   return registeredFileProfiles.find(profile => profile.product === product && profile.version === version) ?? 'unsupported';
 }
+
+/** Flexible semantics are candidate-only until exact source evidence is admitted. */
+export const flexibleProductionProfiles: readonly {product:string;version:string;profile_id:string}[] = Object.freeze([]);

@@ -1,3 +1,4 @@
+import { registerPriceTable } from '../pricing.js';
 import type { Store } from '../store.js';
 import { type Clock, utcNow } from '../lifecycle.js';
 import { canonicalJson } from '../reports/comparison-snapshot.js';
@@ -39,6 +40,14 @@ export function importExchangePackage(store: Store, input: unknown, localProject
       const old = store.get<ImportRevision>('SELECT revision,cutoff,evaluated_at,snapshot_sequence FROM exchange_import_revisions WHERE namespace_id=?', [pkg.namespace_id]);
       const highest = store.get<{ value: number | null }>('SELECT MAX(revision) AS value FROM exchange_import_receipts WHERE namespace_id=?', [pkg.namespace_id])?.value ?? 0;
       if (pkg.export_revision <= highest || (old && (Date.parse(pkg.cutoff) < Date.parse(old.cutoff) || Date.parse(pkg.source_evaluated_at) < Date.parse(old.evaluated_at) || pkg.source_snapshot_sequence < old.snapshot_sequence))) throw new Error('stale_revision');
+      if (pkg.schema_version === 2) {
+        const price = store.get<{payload:string}>('SELECT payload FROM price_tables WHERE id=?',[pkg.price_table.id]);
+        if (price && canonicalJson(JSON.parse(price.payload) as unknown) !== canonicalJson(pkg.price_table)) {
+          invalidateExchangeProtocol(store,pkg.shared_project_id,pkg.protocol_id,'identity_conflict',now);
+          return {status:'conflict_recorded',reason:'price_table_conflict'};
+        }
+        registerPriceTable(store,pkg.price_table);
+      }
       const conflict = existingConflict(store,pkg);
       if (conflict) {
         for (const id of conflict.protocols) invalidateExchangeProtocol(store,pkg.shared_project_id,id,'identity_conflict',now);
