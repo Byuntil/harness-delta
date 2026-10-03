@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, test } from 'vitest';
-import { createComparisonSnapshot, readComparisonSnapshot } from '../src/reports/comparison-snapshot.js';
+import { createComparisonSnapshot, readComparisonSnapshot } from './helpers/legacy-snapshot.js';
 import { Store } from '../src/store.js';
 import { reportStore, request, evaluation, syntheticUsage, unassigned } from './helpers/comparison-report-fixture.js';
 

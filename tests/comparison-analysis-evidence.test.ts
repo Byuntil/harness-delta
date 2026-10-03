@@ -131,3 +131,5 @@ test('case-specific classification and calibration registry detects swaps hidden
 test('provenance includes fixed design and case fingerprints',()=>{
   expect(provenance().design_sha256).toMatch(/^[a-f0-9]{64}$/);expect(provenance().cases_sha256).toMatch(/^[a-f0-9]{64}$/);
 });
+
+test('bounded study rejects standardized cost and realized model adjustment',()=>{expect(assessStudyCase({primary_metric:'standardized_cost',grouping:'realized_model'})).toEqual({status:'rejected',reasonCodes:['unsupported_cost_analysis']});});

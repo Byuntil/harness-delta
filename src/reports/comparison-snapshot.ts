@@ -1,3 +1,5 @@
+import { captureFlexibleInput, FlexibleSnapshotInputSchema, projectFlexibleComparison, type FlexibleComparisonReport } from './flexible-comparison.js';
+import { parseProtocol } from '../flexible-contracts.js';
 import { createHash } from 'node:crypto';
 import { EventSchema, IdSchema, TaskMetadataSchema } from '../contracts.js';
 import { comparisonTimestamp, ConfigurationRecordSchema, parseComparison } from '../comparison-contracts.js';
@@ -26,8 +28,15 @@ function invalidated(reportId: string, reason: Tombstone['reason_code']): Invali
   return { schema_version: 1, report_id: reportId, validity_status: 'invalidated', reason,
     original_cohort: reason === 'deletion' ? 'unavailable_due_to_deletion' : 'unavailable_due_to_identity_conflict', adoption: { status: 'inconclusive', reason } };
 }
-function storedReport(row: SnapshotRow): ComparisonReport {
+function storedReport(row: SnapshotRow): ComparisonReport | FlexibleComparisonReport {
   try {
+    const raw: unknown = JSON.parse(row.input_json);
+    if (FlexibleSnapshotInputSchema.safeParse(raw).success) {
+      const input = parseComparison(FlexibleSnapshotInputSchema,raw,'invalid_snapshot');
+      const report = projectFlexibleComparison(input);
+      if(report.snapshot_hash !== row.snapshot_hash || canonicalJson(report) !== row.report_json)throw new Error('invalid_snapshot');
+      return report;
+    }
     const input = parseComparison(ComparisonSnapshotInputSchema, JSON.parse(row.input_json) as unknown, 'invalid_snapshot');
     const hash = createHash('sha256').update(canonicalJson(input)).digest('hex');
     const report = { ...projectComparison(input), snapshot_hash: hash };
@@ -35,12 +44,12 @@ function storedReport(row: SnapshotRow): ComparisonReport {
     return report;
   } catch { throw new Error('invalid_snapshot'); }
 }
-export function readComparisonSnapshot(store: Store, reportId: string): ComparisonReport | InvalidatedReport {
+export function readComparisonSnapshot(store: Store, reportId: string): ComparisonReport | FlexibleComparisonReport | InvalidatedReport {
   parseComparison(IdSchema, reportId, 'invalid_report_id');
   return store.transaction(() => {
     const tombstone = store.get<Tombstone>('SELECT reason_code FROM comparison_report_tombstones WHERE report_id=?', [reportId]);
     if (tombstone) return invalidated(reportId, tombstone.reason_code);
-    const row = store.get<SnapshotRow>('SELECT report_id,protocol_id,input_json,report_json,snapshot_hash FROM comparison_report_snapshots WHERE report_id=?', [reportId]);
+    const row = store.get<SnapshotRow>('SELECT report_id,protocol_id,input_json,report_json,snapshot_hash FROM comparison_report_snapshots WHERE report_id=? UNION ALL SELECT report_id,protocol_id,input_json,report_json,snapshot_hash FROM flexible_report_snapshots WHERE report_id=?', [reportId,reportId]);
     if (!row) throw new Error('unknown_report');
     const protocol = protocolRow(store, row.protocol_id);
     if (protocol.status === 'invalidated_by_deletion' || protocol.status === 'identity_conflict') return invalidated(reportId, protocol.status === 'identity_conflict' ? 'identity_conflict' : 'deletion');
@@ -83,11 +92,14 @@ function captureAssignment(store: Store, assignment: AssignmentRow, cutoff: stri
     deviations: store.all<SnapshotAssignment['deviations'][number]>('SELECT id,occurred_at,recorded_at,reason_code FROM comparison_deviations WHERE task_id=? ORDER BY occurred_at,id', [task.id]).filter(row => eligible(row.occurred_at) && Date.parse(row.recorded_at) <= Date.parse(evaluatedAt)),
   }, 'invalid_snapshot_input');
 }
-export function createComparisonSnapshot(store: Store, request: ComparisonSnapshotRequest, clock: Clock = utcNow): ComparisonReport {
+export function createComparisonSnapshot(store: Store, request: ComparisonSnapshotRequest, clock: Clock = utcNow): ComparisonReport | FlexibleComparisonReport {
   const config = parseComparison(SnapshotRequestSchema, request, 'invalid_snapshot_request');
   return store.immediateTransaction(() => {
     if (store.get('SELECT report_id FROM comparison_report_tombstones WHERE report_id=?', [config.reportId])) throw new Error('invalidated_report');
-    const row = protocolRow(store, config.protocolId); const protocol = frozenProtocol(store, row);
+    const row = protocolRow(store, config.protocolId);
+    if(parseProtocol(JSON.parse(row.settings) as unknown).schema_version===2)return createFlexibleSnapshot(store,config,clock);
+    if(store.get('SELECT report_id FROM flexible_report_snapshots WHERE report_id=?',[config.reportId]))throw new Error('report_conflict');
+    const protocol = frozenProtocol(store, row);
     if (protocol.purpose !== 'synthetic_validation') throw new Error('real_experiment_disabled');
     if (!store.get('SELECT singleton FROM comparison_workspace_scope')) throw new Error('synthetic_store_required');
     const current = store.get<SnapshotRow>('SELECT report_id,protocol_id,input_json,report_json,snapshot_hash FROM comparison_report_snapshots WHERE report_id=?', [config.reportId]);
@@ -127,4 +139,28 @@ export function createComparisonSnapshot(store: Store, request: ComparisonSnapsh
     store.execute('INSERT INTO comparison_report_sequences(protocol_id,last_sequence) VALUES (?,?) ON CONFLICT(protocol_id) DO UPDATE SET last_sequence=excluded.last_sequence', [protocol.id, last + 1]);
     return report;
   });
+}
+
+function createFlexibleSnapshot(store:Store,request:ComparisonSnapshotRequest,clock:Clock):FlexibleComparisonReport {
+  const config=parseComparison(SnapshotRequestSchema,request,'invalid_snapshot_request');
+  const row=protocolRow(store,config.protocolId);
+  if(row.status!=='frozen')throw new Error('protocol_not_active');
+  const current=store.get<SnapshotRow>('SELECT report_id,protocol_id,input_json,report_json,snapshot_hash FROM flexible_report_snapshots WHERE report_id=?',[config.reportId]);
+  if(store.get('SELECT report_id FROM comparison_report_snapshots WHERE report_id=?',[config.reportId]))throw new Error('report_conflict');
+  if(current){const prior=storedReport(current);if(prior.schema_version!==2 || prior.protocol_id!==config.protocolId || prior.cutoff!==config.cutoff || prior.revision_reason!==config.revisionReason || prior.supersedes_report_id!==(config.supersedesReportId??null))throw new Error('report_conflict');return prior;}
+  const now=comparisonTimestamp(clock());
+  if(Date.parse(config.cutoff)>Date.parse(now) || row.frozen_at===null || Date.parse(config.cutoff)<Date.parse(row.frozen_at))throw new Error('invalid_cutoff');
+  if(config.revisionReason==='initial'){if(config.supersedesReportId)throw new Error('invalid_revision');}
+  else {if(!config.supersedesReportId)throw new Error('invalid_revision');const parent=readComparisonSnapshot(store,config.supersedesReportId);
+    if(parent.validity_status!=='valid'||parent.schema_version!==2||parent.protocol_id!==config.protocolId||Date.parse(now)<Date.parse(parent.evaluated_at))throw new Error('invalid_revision');
+    if(config.revisionReason==='cutoff_advanced'?Date.parse(config.cutoff)<=Date.parse(parent.cutoff):config.cutoff!==parent.cutoff)throw new Error('invalid_revision');}
+  const sequence=(store.get<{last_sequence:number}>('SELECT last_sequence FROM comparison_report_sequences WHERE protocol_id=?',[config.protocolId])?.last_sequence??0)+1;
+  if(!Number.isSafeInteger(sequence))throw new Error('revision_overflow');
+  const input=captureFlexibleInput(store,config.protocolId,config.reportId,config.cutoff,now,sequence,config.revisionReason,config.supersedesReportId??null);
+  const report=projectFlexibleComparison(input);
+  store.execute('INSERT INTO flexible_report_snapshots(report_id,protocol_id,cutoff,evaluated_at,data_revision,snapshot_sequence,schema_version,descriptive_version,revision_reason,supersedes_report_id,input_json,report_json,snapshot_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [report.report_id,report.protocol_id,report.cutoff,report.evaluated_at,report.data_revision,report.snapshot_sequence,2,report.descriptive_version,report.revision_reason,report.supersedes_report_id,canonicalJson(input),canonicalJson(report),report.snapshot_hash]);
+  for(const task of input.assignments)store.execute('INSERT INTO flexible_report_dependencies(report_id,task_id) VALUES (?,?)',[report.report_id,task.task_id]);
+  store.execute('INSERT INTO comparison_report_sequences(protocol_id,last_sequence) VALUES (?,?) ON CONFLICT(protocol_id) DO UPDATE SET last_sequence=excluded.last_sequence',[report.protocol_id,sequence]);
+  return report;
 }

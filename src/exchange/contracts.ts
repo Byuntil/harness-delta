@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { IdSchema, TaskMetadataSchema, TimestampSchema, TokenSchema, ReasonSchema, addTokens } from '../contracts.js';
 import { ProtocolSchema, VariantSchema, parseComparison } from '../comparison-contracts.js';
+import { FlexibleProtocolSchema, FlexibleVariantSchema, FlexibleTaskMetadataSchema, PriceTableSchema } from '../flexible-contracts.js';
+import { FlexibleTaskReportSchema } from '../reports/flexible-comparison.js';
+import { costFormulaVersion } from '../pricing.js';
 import { codePointOrder } from '../reports/comparison-task.js';
 import { canonicalJson } from '../reports/comparison-snapshot.js';
 
@@ -62,13 +65,32 @@ export const DataPackageSchema = z.strictObject({ ...envelope, kind: z.literal('
 export const DeletionPackageSchema = z.strictObject({ ...envelope, kind: z.literal('deletion_metadata'), tombstones: z.array(NoticeSchema).min(1).max(2) });
 export const ExchangePackageSchema = z.discriminatedUnion('kind', [DataPackageSchema, DeletionPackageSchema]);
 export type DataPackage = z.infer<typeof DataPackageSchema>;
-export type ExchangePackage = z.infer<typeof ExchangePackageSchema>;
+const { project_id: flexibleLocal, ...flexibleProtocolFields } = FlexibleProtocolSchema.shape;
+void flexibleLocal;
+export const FlexibleSharedProtocolSchema = z.strictObject({ ...flexibleProtocolFields, shared_project_id: uuid })
+  .refine(p => Date.parse(p.recruitment_start) < Date.parse(p.recruitment_end) && p.planning_basis_id === p.sample_plan.planning_basis_id && p.strata.every(s => s.assignees.length === 1));
+export const FlexibleEvidenceSchema = z.strictObject({ ...EvidenceSchema.omit({ usage: true, actual_configuration: true }).shape,
+  cost: FlexibleTaskReportSchema.shape.cost, runtime_summary: FlexibleTaskReportSchema.shape.runtime_summary,
+  cost_provenance: z.strictObject({ price_table_id: IdSchema, price_table_hash: z.string().regex(/^[a-f0-9]{64}$/), formula_version: z.literal(costFormulaVersion), source_snapshot_hash: z.string().regex(/^[a-f0-9]{64}$/) }),
+});
+export const FlexibleSharedAssignmentSchema = z.strictObject({ ...SharedAssignmentSchema.omit({ metadata: true, evidence: true }).shape,
+  metadata: FlexibleTaskMetadataSchema, evidence: FlexibleEvidenceSchema });
+export const FlexibleDataPackageSchema = z.strictObject({ ...DataPackageSchema.omit({ schema_version: true, protocol: true, variants: true, assignments: true }).shape,
+  schema_version: z.literal(2), protocol: z.strictObject({ settings: FlexibleSharedProtocolSchema, frozen_at: time }),
+  variants: z.tuple([FlexibleVariantSchema, FlexibleVariantSchema]), assignments: z.array(FlexibleSharedAssignmentSchema).max(10000),
+  price_table: PriceTableSchema, price_table_hash: z.string().regex(/^[a-f0-9]{64}$/), formula_version: z.literal(costFormulaVersion),
+}).refine(p => p.price_table.id === p.protocol.settings.price_table_id && digest(p.price_table) === p.price_table_hash && p.assignments.every(a =>
+  a.evidence.cost.currency === p.price_table.currency && a.evidence.cost.price_table_id === p.price_table.id && a.evidence.cost_provenance.price_table_id === p.price_table.id && a.evidence.cost_provenance.price_table_hash === p.price_table_hash));
+export type FlexibleDataPackage = z.infer<typeof FlexibleDataPackageSchema>;
+export type AnyDataPackage = DataPackage | FlexibleDataPackage;
+export type AnySharedAssignment = SharedAssignment | z.infer<typeof FlexibleSharedAssignmentSchema>;
+export type ExchangePackage = z.infer<typeof ExchangePackageSchema> | FlexibleDataPackage;
 export function parseExchange<T>(schema: z.ZodType<T>, input: unknown): T {
   try { return parseComparison(schema, input, 'invalid_exchange_package'); } catch { throw new Error('invalid_exchange_package'); }
 }
 export function parseExchangePackage(input: unknown): ExchangePackage {
-  if (input && typeof input === 'object' && 'schema_version' in input && input.schema_version !== 1) throw new Error('unsupported_exchange_version');
-  const pkg = parseExchange(ExchangePackageSchema, input);
+  if (input && typeof input === 'object' && 'schema_version' in input && input.schema_version !== 1 && input.schema_version !== 2) throw new Error('unsupported_exchange_version');
+  const pkg = input && typeof input === 'object' && 'schema_version' in input && input.schema_version === 2 ? parseExchange(FlexibleDataPackageSchema, input) : parseExchange(ExchangePackageSchema, input);
   if (pkg.kind === 'assignment_metadata') {
     if (pkg.variants[0].id === pkg.variants[1].id) throw new Error('invalid_exchange_package');
     const keys = new Set<string>();
@@ -91,7 +113,8 @@ export function parseExchangePackage(input: unknown): ExchangePackage {
     pkg.authority.sort((a,b) => codePointOrder(a.stratum_id,b.stratum_id));
     pkg.assignments.sort((a,b) => codePointOrder(a.task_id,b.task_id));
     for (const a of pkg.assignments) {
-      for (const ids of [a.alias_ids,a.metadata.criterion_ids,a.evidence.criteria_met,a.evidence.actual_configuration.known_variant_ids]) ids.sort(codePointOrder);
+      for (const ids of [a.alias_ids,a.metadata.criterion_ids,a.evidence.criteria_met]) ids.sort(codePointOrder);
+      if ('actual_configuration' in a.evidence) a.evidence.actual_configuration.known_variant_ids.sort(codePointOrder);
       a.evidence.deviations.sort((a,b) => codePointOrder(canonicalJson(a),canonicalJson(b)));
       a.evidence.observations.sort((a,b) => codePointOrder(canonicalJson(a),canonicalJson(b)));
     }
@@ -100,4 +123,4 @@ export function parseExchangePackage(input: unknown): ExchangePackage {
   return pkg;
 }
 export function digest(value: unknown): string { return createHash('sha256').update(canonicalJson(value)).digest('hex'); }
-export function protocolDigest(pkg: DataPackage): string { return digest({ protocol: pkg.protocol, variants: pkg.variants }); }
+export function protocolDigest(pkg: AnyDataPackage): string { return digest({ protocol: pkg.protocol, variants: pkg.variants }); }

@@ -1,3 +1,6 @@
+import { parseTaskMetadata } from './flexible-contracts.js';
+import { parseFlexibleSnapshot, type FlexibleSourceScope } from './adapters-flexible.js';
+import { putUsageWithEvidence, recordObservationGap, requireActiveScope } from './runtime-history.js';
 import { SourceFailure, sourceCategory, type SourceDiagnosticCategory } from './source-errors.js';
 import { constants, closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -30,7 +33,7 @@ export interface CollectionDiagnostic { session_id: string; at: string; category
 
 export class Collector {
   private checkpoints=new Map<string,MemoryCheckpoint>();
-  constructor(private readonly store:Store,private readonly clock:Clock=utcNow,private readonly read:SourceReader=readSource){}
+  constructor(private readonly store:Store,private readonly clock:Clock=utcNow,private readonly read:SourceReader=readSource,private readonly resolveFlexible:(product:string,version:string)=>typeof parseFlexibleSnapshot|null=()=>null){}
   tick(taskId:string):CollectionDiagnostic[] {
     const diagnostics:CollectionDiagnostic[]=[];
     const pending=new Map(this.checkpoints);
@@ -52,6 +55,12 @@ export class Collector {
           if(previous && previous.generation!==link.generation)previous=undefined;
           let stage:SourceDiagnosticCategory='read_failed';
           try {
+            const taskMetadata = parseTaskMetadata(JSON.parse(link.metadata) as unknown);
+            if ('schema_version' in taskMetadata && taskMetadata.schema_version === 2) {
+              const checkpoint = this.collectFlexible(link, now, previous);
+              if (checkpoint) pending.set(link.id, checkpoint); else pending.delete(link.id);
+              continue;
+            }
             if (lookupFileProfile(link.product, link.product_version) === 'unsupported') throw new Error('unsupported');
             bytes=this.read(link.source_path);
             if(previous && bytes.identity!==previous.identity)throw new SourceFailure('identity_changed');
@@ -106,6 +115,44 @@ export class Collector {
       this.checkpoints=pending;
       return diagnostics;
     }catch{throw new Error('collection_error');}
+  }
+  private collectFlexible(link:LinkedSource,now:string,previous:MemoryCheckpoint|undefined):MemoryCheckpoint|null {
+    requireActiveScope(this.store,link.task_id,link.id);
+    const parser=this.resolveFlexible(link.product,link.product_version);
+    if(!parser)throw new SourceFailure('unsupported_source','unsupported');
+    if(this.store.get('SELECT id FROM otel_processes WHERE task_id=?',[link.task_id]))throw new SourceFailure('unsupported_source','unsupported');
+    const metadata=parseTaskMetadata(JSON.parse(link.metadata) as unknown);
+    if(metadata.product!==link.product)throw new SourceFailure('scope_mismatch','scope_mismatch');
+    const bytes=this.read(link.source_path);
+    const current=this.store.get<{state:string;generation:number}>('SELECT state,generation FROM tasks WHERE id=?',[link.task_id]);
+    if(!current || current.state!=='active' || current.generation!==link.generation)return null;
+    if(previous && bytes.identity!==previous.identity)throw new SourceFailure('identity_changed');
+    if(previous && bytes.size<previous.size)throw new SourceFailure('source_truncated');
+    if(previous && now<previous.lastAt)throw new SourceFailure('clock_regressed');
+    const scope:FlexibleSourceScope={sessionId:link.id,projectRoot:link.local_root,product:link.product,version:link.product_version,taskId:link.task_id,projectId:link.project_id};
+    const snapshot=parser(bytes.text,scope,now);
+    const fingerprints=Object.fromEntries(snapshot.records.map(row=>[row.id,metadataKey(JSON.stringify(row))]));
+    if(previous && Object.entries(previous.fingerprints).some(([key,value])=>fingerprints[key]!==value))throw new SourceFailure('record_changed');
+    if(previous && bytes.size===previous.size && bytes.modified!==previous.modified && JSON.stringify(fingerprints)!==JSON.stringify(previous.fingerprints))throw new SourceFailure('same_size_modified');
+    const settledKeys=new Set(previous?.settledKeys ?? Object.keys(fingerprints));
+    if(!previous)recordObservationGap(this.store,link.task_id,link.id,now,now,'offline',now);
+    for(const gap of snapshot.gaps)recordObservationGap(this.store,link.task_id,link.id,gap.started_at,gap.ended_at,gap.reason,now);
+    if(this.store.get('SELECT id FROM sessions WHERE task_id=? AND parent_id IS NOT NULL',[link.task_id]))recordObservationGap(this.store,link.task_id,link.id,previous?.lastAt??now,null,'unknown_parent',now);
+    if(previous){
+      for(const event of snapshot.records){
+        if(settledKeys.has(event.id))continue;
+        const evidenceId='runtime_evidence_id' in event.payload ? event.payload.runtime_evidence_id : null;
+        const evidence=snapshot.runtime.find(r=>r.id===evidenceId)??null;
+        if(Date.parse(event.occurred_at)>Date.parse(now))continue;
+        // A setting boundary must originate after this process's baseline.
+        if(!evidence || evidence.boundary==='unknown' || Date.parse(evidence.occurred_at)<=Date.parse(previous.since)){settledKeys.add(event.id);continue;}
+        putUsageWithEvidence(this.store,event,evidence);settledKeys.add(event.id);
+      }
+    }
+    const checkpoint:MemoryCheckpoint={generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,size:bytes.size,modified:bytes.modified,continuityKey:metadataKey(JSON.stringify(fingerprints)),fingerprints,settledKeys:[...settledKeys]};
+    this.store.execute(`INSERT INTO cursors(session_id,checkpoint) VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET checkpoint=excluded.checkpoint`,[link.id,JSON.stringify(checkpoint)]);
+    this.observe(link.task_id,previous?.lastAt??now,now,previous?'unmeasurable':'excluded',previous?'incomplete':'offline');
+    return checkpoint;
   }
   private observe(taskId:string,start:string,end:string,status:string,reason:string):void{
     this.store.execute('INSERT INTO observations(id,task_id,started_at,ended_at,status,reason) VALUES (?,?,?,?,?,?)',[randomUUID(),taskId,start,end,status,reason]);

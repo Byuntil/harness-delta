@@ -308,3 +308,7 @@ private replay queues are removed. Known identity/alias tombstones reject reuse.
 Retained tasks may finish their normal lifecycle. Project deletion removes its
 comparison data; explicitly configured retention uses the same deletion path.
 Deletion cannot erase exported copies (export itself is not implemented here).
+
+For the additive v2 flexible model workflow, explicit prices and independent
+readiness gates, see [flexible comparison](flexible-comparison.md). Production
+flexible collection, complete cost and inference remain unavailable.

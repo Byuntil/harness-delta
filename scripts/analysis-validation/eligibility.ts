@@ -1,8 +1,9 @@
 import { StudyCaseSchema } from './contracts.js';
 import { enumerateDesign, observedIds } from './design.js';
-export const rejectionCodes=['invalid_case','invalid_design','duplicate_id','non_prefix','invalid_block_order','resource_limit','operation_limit','empty_population','empty_stratum','population_alignment','incomplete_usage','incomplete_quality','unsupported_grouping','unsupported_enrollment','unsupported_history','unsupported_truncation'] as const;
+export const rejectionCodes=['invalid_case','invalid_design','duplicate_id','non_prefix','invalid_block_order','resource_limit','operation_limit','empty_population','empty_stratum','population_alignment','incomplete_usage','incomplete_quality','unsupported_grouping','unsupported_enrollment','unsupported_history','unsupported_truncation','unsupported_cost_analysis'] as const;
 export type RejectionCode=typeof rejectionCodes[number];
 export function assessStudyCase(input:unknown):{status:'eligible'}|{status:'rejected';reasonCodes:RejectionCode[]} {
+  if(input&&typeof input==='object'&&'primary_metric' in input&&input.primary_metric==='standardized_cost')return {status:'rejected',reasonCodes:['unsupported_cost_analysis']};
   const parsed=StudyCaseSchema.safeParse(input);
   if(!parsed.success)return {status:'rejected',reasonCodes:['invalid_case']};
   const c=parsed.data;

@@ -1,11 +1,11 @@
 import type { Store } from '../store.js';
 import { canonicalJson } from '../reports/comparison-snapshot.js';
-import type { DataPackage, SharedAssignment } from './contracts.js';
+import type { AnyDataPackage, AnySharedAssignment } from './contracts.js';
 import { protocolDigest } from './contracts.js';
 import type { Mapping } from './mapping.js';
 const ms = Date.parse;
 function invalid(code = 'invalid_exchange_package'): never { throw new Error(code); }
-export function validateDataAuthority(pkg: DataPackage, mapping: Mapping, now: string): void {
+export function validateDataAuthority(pkg: AnyDataPackage, mapping: Mapping, now: string): void {
   const p = pkg.protocol.settings;
   if (protocolDigest(pkg) !== mapping.protocol_digest || pkg.protocol_id !== p.id || p.shared_project_id !== pkg.shared_project_id) invalid('protocol_conflict');
   if (p.purpose !== 'synthetic_validation') invalid('real_experiment_disabled');
@@ -16,13 +16,12 @@ export function validateDataAuthority(pkg: DataPackage, mapping: Mapping, now: s
   const writers = mapping.writers.filter(w => w.namespace_id === pkg.namespace_id);
   if (writers.length !== pkg.authority.length || writers.some(w => !pkg.authority.some(a => a.stratum_id === w.stratum_id && a.allocator_id === w.allocator_id))) invalid('authority_conflict');
 }
-export function validateDataPackage(pkg: DataPackage, mapping: Mapping, now: string): void {
+export function validateDataPackage(pkg: AnyDataPackage, mapping: Mapping, now: string): void {
   validateDataAuthority(pkg,mapping,now);
   const p=pkg.protocol.settings;
   const [a,b]=pkg.variants;
-  if (a.product !== 'synthetic' || b.product !== 'synthetic') invalid('real_experiment_disabled');
-  if (a.policy_status !== 'eligible' || b.policy_status !== 'eligible' || a.product_version !== b.product_version ||
-    a.model !== b.model || a.reasoning_setting !== b.reasoning_setting || ms(pkg.protocol.frozen_at) >= ms(p.recruitment_start)) invalid('protocol_conflict');
+  if (pkg.schema_version === 1 && (pkg.variants[0].product !== 'synthetic' || pkg.variants[1].product !== 'synthetic')) invalid('real_experiment_disabled');
+  if (a.policy_status !== 'eligible' || b.policy_status !== 'eligible' || (pkg.schema_version === 1 && (pkg.variants[0].product_version !== pkg.variants[1].product_version || pkg.variants[0].model !== pkg.variants[1].model || pkg.variants[0].reasoning_setting !== pkg.variants[1].reasoning_setting)) || ms(pkg.protocol.frozen_at) >= ms(p.recruitment_start)) invalid('protocol_conflict');
   if (p.strata.some(s=>s.assignees.some(id=>!p.participants.includes(id))) || p.participants.some(id=>!p.strata.some(s=>s.assignees.includes(id)))) invalid('protocol_conflict');
   for (let i=0;i<p.strata.length;i++) for (const other of p.strata.slice(i+1)) {
     const s=p.strata[i]!;
@@ -34,7 +33,7 @@ export function validateDataPackage(pkg: DataPackage, mapping: Mapping, now: str
     if (!writers.some(w => w.stratum_id === a.stratum_id && w.allocator_id === a.allocator_id)) invalid('authority_conflict');
     const strata = p.strata.filter(s => s.assignees.includes(a.metadata.assignee) && s.types.includes(a.metadata.type) && s.sizes.includes(a.metadata.expected_size));
     if (strata.length !== 1 || strata[0]!.id !== a.stratum_id || !p.participants.includes(a.metadata.assignee) || !p.environment_ids.includes(a.environment_id)) invalid('authority_conflict');
-    if (a.protocol_id !== p.id || !p.variant_ids.includes(a.original_variant_id) || a.metadata.product !== 'synthetic' || a.metadata.model !== pkg.variants[0].model) invalid('assignment_conflict');
+    if (a.protocol_id !== p.id || !p.variant_ids.includes(a.original_variant_id) || a.metadata.product !== 'synthetic' || (pkg.schema_version === 1 && (!('model' in a.metadata) || a.metadata.model !== pkg.variants[0].model))) invalid('assignment_conflict');
     if (!(ms(a.registered_at) <= ms(a.assigned_at) && ms(pkg.protocol.frozen_at) <= ms(a.assigned_at) && ms(a.assigned_at) >= ms(p.recruitment_start) &&
       ms(a.assigned_at) < Math.min(ms(p.recruitment_end),ms(pkg.cutoff)) && ms(a.assignment_recorded_at) >= ms(a.assigned_at) && ms(a.assignment_recorded_at) <= ms(pkg.source_evaluated_at) &&
       ms(a.followup_ends_at) === ms(a.assigned_at) + p.followup_seconds * 1000)) invalid();
@@ -55,9 +54,9 @@ export function validateDataPackage(pkg: DataPackage, mapping: Mapping, now: str
     if (e.started ? e.time.active_ms === null || e.time.elapsed_ms === null || e.time.active_ms > e.time.elapsed_ms || e.time.elapsed_ms > end-ms(a.assigned_at) : e.time.active_ms !== null || e.time.elapsed_ms !== null) invalid();
   }
 }
-export function assignmentIdentity(a: SharedAssignment): string { const { evidence, ...identity } = a; void evidence; return canonicalJson(identity); }
+export function assignmentIdentity(a: AnySharedAssignment): string { const { evidence, ...identity } = a; void evidence; return canonicalJson(identity); }
 export interface ExistingTask { shared_project_id: string; protocol_id: string; namespace_id: string; task_id: string; assignment_json: string; }
-export function existingConflict(store: Store, pkg: DataPackage): { reason: 'identity_conflict'|'assignment_conflict'; protocols: string[] } | undefined {
+export function existingConflict(store: Store, pkg: AnyDataPackage): { reason: 'identity_conflict'|'assignment_conflict'; protocols: string[] } | undefined {
   for (const a of pkg.assignments) {
     if ([a.task_id,a.logical_task_id,...a.alias_ids].some(k => store.get('SELECT key_id FROM exchange_tombstones WHERE shared_project_id=? AND key_id=?', [pkg.shared_project_id,k]))) invalid('deleted_identifier');
     for (const key of new Set([a.task_id,a.logical_task_id,...a.alias_ids])) {
@@ -66,10 +65,10 @@ export function existingConflict(store: Store, pkg: DataPackage): { reason: 'ide
     }
     const old = store.get<ExistingTask>('SELECT * FROM exchange_tasks WHERE shared_project_id=? AND (task_id=? OR assignment_id=? OR (protocol_id=? AND stratum_id=? AND allocation_index=?))',
       [pkg.shared_project_id,a.task_id,a.assignment_id,pkg.protocol_id,a.stratum_id,a.allocation_index]);
-    if (old && (old.namespace_id !== pkg.namespace_id || old.protocol_id !== pkg.protocol_id || assignmentIdentity(JSON.parse(old.assignment_json) as SharedAssignment) !== assignmentIdentity(a)))
+    if (old && (old.namespace_id !== pkg.namespace_id || old.protocol_id !== pkg.protocol_id || assignmentIdentity(JSON.parse(old.assignment_json) as AnySharedAssignment) !== assignmentIdentity(a)))
       return { reason: 'assignment_conflict', protocols: [...new Set([old.protocol_id,pkg.protocol_id])] };
     if (old) {
-      const previous = (JSON.parse(old.assignment_json) as SharedAssignment).evidence;
+      const previous = (JSON.parse(old.assignment_json) as AnySharedAssignment).evidence;
       if (previous.current_outcome !== null && canonicalJson([previous.current_outcome,previous.criteria_met,previous.outcome_assessed_at,previous.finalized_at]) !== canonicalJson([a.evidence.current_outcome,a.evidence.criteria_met,a.evidence.outcome_assessed_at,a.evidence.finalized_at])) invalid('evidence_conflict');
       if (previous.first_assessed_at !== null && canonicalJson([previous.first_assessed_at,previous.first_success,previous.first_completed_at]) !== canonicalJson([a.evidence.first_assessed_at,a.evidence.first_success,a.evidence.first_completed_at])) invalid('evidence_conflict');
     }

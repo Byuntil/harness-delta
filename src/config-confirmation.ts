@@ -1,7 +1,8 @@
+import { parseProtocol, RuntimeEvidenceSchema, type RuntimeEvidence } from './flexible-contracts.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
-import { comparisonTimestamp, ConfirmationInputSchema, ConfigurationRecordSchema, parseComparison, ProtocolSchema } from './comparison-contracts.js';
-import { protocolRow, variantConfiguration } from './comparison.js';
+import { comparisonTimestamp, ConfirmationInputSchema, ConfigurationRecordSchema, parseComparison } from './comparison-contracts.js';
+import { protocolRow, comparisonVariant } from './comparison.js';
 import { IdSchema } from './contracts.js';
 import { Lifecycle } from './lifecycle.js';
 import type { AssignmentRow } from './allocation.js';
@@ -35,7 +36,7 @@ function selectedManifest(artifacts: readonly SelectedArtifact[] | undefined): s
 
 function policyStops(store: Store, assignment: AssignmentRow, record: z.infer<typeof ConfigurationRecordSchema>): boolean {
   const row = protocolRow(store, assignment.protocol_id);
-  const config = parseComparison(ProtocolSchema, JSON.parse(row.settings) as unknown);
+  const config = parseProtocol(JSON.parse(row.settings) as unknown);
   if (record.deviation_codes.includes('version_drift')) return true;
   return (record.deviation_codes.includes('unknown') && config.deviation_policy.unknown === 'stop') ||
     (record.deviation_codes.some(code => code === 'mismatch' || code === 'crossover') && config.deviation_policy.mismatch === 'stop');
@@ -62,17 +63,24 @@ export function confirmConfiguration(store: Store, input: unknown, timestamp: st
   store.immediateTransaction(() => {
     const assignment = assignedTask(store, config.task_id);
     if (Date.parse(occurredAt) < Date.parse(assignment.assigned_at) || Date.parse(occurredAt) > Date.parse(now)) throw new Error('invalid_confirmation_time');
-    const assigned = variantConfiguration(store, assignment.variant_id);
-    if (config.actual_variant_id !== null) variantConfiguration(store, config.actual_variant_id);
+    const assigned = comparisonVariant(store, assignment.variant_id);
+    if (config.actual_variant_id !== null) comparisonVariant(store, config.actual_variant_id);
     const preregistration = store.get<{ environment_id: string }>('SELECT environment_id FROM comparison_preregistrations WHERE task_id = ?', [config.task_id]);
     if (!preregistration) throw new Error('preregistration_conflict');
     const codes: z.infer<typeof ConfigurationRecordSchema>['deviation_codes'] = [];
-    if ([config.actual_variant_id, config.product, config.product_version, config.model, config.reasoning_setting, config.environment_id].includes(null)) codes.push('unknown');
+    const protocol = parseProtocol(JSON.parse(protocolRow(store, assignment.protocol_id).settings) as unknown);
+    if (config.actual_variant_id === null || config.environment_id === null) codes.push('unknown');
     if (config.actual_variant_id !== null && config.actual_variant_id !== assignment.variant_id) codes.push('crossover');
-    if ((config.product !== null && config.product !== assigned.product) ||
-        (config.product_version !== null && config.product_version !== assigned.product_version) ||
-        (config.model !== null && config.model !== assigned.model) ||
-        (config.reasoning_setting !== null && config.reasoning_setting !== assigned.reasoning_setting)) codes.push('version_drift');
+    if (assigned.schema_version === 1) {
+      if ([config.product, config.product_version, config.model, config.reasoning_setting].includes(null) && !codes.includes('unknown')) codes.push('unknown');
+      if ((config.product !== null && config.product !== assigned.product) ||
+          (config.product_version !== null && config.product_version !== assigned.product_version) ||
+          (config.model !== null && config.model !== assigned.model) ||
+          (config.reasoning_setting !== null && config.reasoning_setting !== assigned.reasoning_setting)) codes.push('version_drift');
+    } else if (protocol.schema_version === 2) {
+      if (config.product === null || config.product_version === null) { if (!codes.includes('unknown')) codes.push('unknown'); }
+      else if (!protocol.source_profiles.some(p => p.product === config.product && p.product_version === config.product_version)) codes.push('version_drift');
+    }
     if ((hash !== null && hash !== assigned.instruction_manifest_hash) ||
         (config.environment_id !== null && config.environment_id !== preregistration.environment_id)) codes.push('mismatch');
     const status = codes.some(code => code !== 'unknown') ? 'mismatch' : codes.length ? 'unknown' : 'confirmed';
@@ -117,4 +125,13 @@ export function configurationHistory(store: Store, taskId: string) {
     deviations: store.all<{ reason_code: string; occurred_at: string; recorded_at: string }>('SELECT reason_code,occurred_at,recorded_at FROM comparison_deviations WHERE task_id = ? ORDER BY rowid', [taskId]),
     limitations: ['configuration_evidence_does_not_verify_global_isolation', 'self_attestation_does_not_verify_behavior'],
   };
+}
+
+export function classifyFlexibleConfirmation(assignedVariantId: string, input: RuntimeEvidence, previous: RuntimeEvidence | null, actualVariantId: string | null): { runtime_change: boolean; harness_deviation: 'none' | 'unknown' | 'crossover' } {
+  parseComparison(IdSchema, assignedVariantId); if (actualVariantId !== null) parseComparison(IdSchema, actualVariantId);
+  const runtime = parseComparison(RuntimeEvidenceSchema, input, 'invalid_runtime');
+  const before = previous === null ? null : parseComparison(RuntimeEvidenceSchema, previous, 'invalid_runtime');
+  if (before && before.task_id !== runtime.task_id) throw new Error('scope_mismatch');
+  return { runtime_change: before !== null && (before.model !== runtime.model || before.effort !== runtime.effort),
+    harness_deviation: actualVariantId === null ? 'unknown' : actualVariantId === assignedVariantId ? 'none' : 'crossover' };
 }
