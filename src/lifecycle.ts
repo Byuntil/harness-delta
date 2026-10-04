@@ -8,6 +8,7 @@ import { lookupFileProfile } from './adapter-profiles.js';
 import { IdSchema, ProductVersionSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
 import { interruptManagedRuns } from './managed-journal.js';
+import { authorizeCandidateScope } from './nested-candidate.js';
 import { revokeOtelProcesses } from './otel-journal.js';
 
 export type TaskState = 'registered' | 'active' | 'paused' | 'finalized';
@@ -152,6 +153,38 @@ export class Lifecycle {
       this.store.execute('INSERT INTO sessions(id,project_id,task_id,source_path,product,product_version) VALUES (?,?,?,?,?,?)',
         [sessionId, task.project_id, taskId, path, product, version]);
       if (confirmationId) bindConfigurationToSession(this.store, confirmationId, sessionId);
+    });
+  }
+
+  /** Explicit candidate-only registration. Does not admit a production profile,
+   * comparison assignment, native experiment or ordinary CLI collection. The
+   * caller must authorize the exact fresh source before invoking this method. */
+  linkCodexCandidateSession(taskId: string, projectId: string, sessionId: string, sourcePath: string,
+    version: string, parentId: string | null): void {
+    IdSchema.parse(sessionId); IdSchema.parse(projectId);
+    if (version !== '0.160.0' || !sourcePath.startsWith('/') || resolve(sourcePath) !== sourcePath) throw new Error('candidate_scope_mismatch');
+    if (parentId !== null) IdSchema.parse(parentId);
+    this.store.immediateTransaction(() => {
+      const task = this.task(taskId);
+      if (task.state !== 'active' || task.project_id !== projectId) throw new Error('candidate_inactive_scope');
+      for (const [kind, id] of [['project', projectId], ['task', taskId], ['session', sessionId]] as const) this.rejectDeleted(kind, id);
+      const metadata = parseTaskMetadata(JSON.parse(task.metadata) as unknown);
+      if (metadata.product !== 'codex' || ('schema_version' in metadata && metadata.schema_version === 2)) throw new Error('candidate_scope_mismatch');
+      if (this.store.get(`SELECT 1 FROM comparison_assignments WHERE task_id=? UNION ALL SELECT 1 FROM otel_processes WHERE task_id=? UNION ALL SELECT 1 FROM observation_runs WHERE task_id=? UNION ALL SELECT 1 FROM events WHERE task_id=? AND json_extract(payload,'$.kind')!='usage' LIMIT 1`, [taskId, taskId, taskId, taskId])) throw new Error('candidate_mixed_sources');
+      const links = this.store.all<{ id: string; parent_id: string | null; product: string; product_version: string }>('SELECT id,parent_id,product,product_version FROM sessions WHERE task_id=?', [taskId]);
+      if (links.some(link => link.product !== 'codex' || link.product_version !== version) ||
+        (parentId === null ? links.length !== 0 : links.length !== 1 || links[0]!.id !== parentId || links[0]!.parent_id !== null) ||
+        this.store.get('SELECT 1 FROM sessions WHERE source_path=?', [sourcePath])) throw new Error('candidate_scope_mismatch');
+      if (parentId === null && this.store.get('SELECT 1 FROM events WHERE task_id=?', [taskId])) throw new Error('candidate_mixed_sources');
+      if (parentId !== null) {
+        this.rejectDeleted('session', parentId);
+        authorizeCandidateScope(this.store, { projectId, taskId, allowedRootTurnIds: ['candidate-registration'], sessions: links.map(link => ({
+          sessionId: link.id, rootSessionId: parentId, parentSessionId: link.parent_id, sourceId: link.id,
+          product: 'codex', nativeSessionId: link.id, processId: null, agentId: null,
+        })) });
+      }
+      this.store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,source_path,product,product_version) VALUES (?,?,?,?,?,?,?)',
+        [sessionId, projectId, taskId, parentId, sourcePath, 'codex', version]);
     });
   }
 
