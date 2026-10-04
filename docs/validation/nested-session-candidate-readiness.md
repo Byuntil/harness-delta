@@ -1,0 +1,105 @@
+# Nested-session candidate readiness
+
+This internal candidate covers explicitly mapped parent/child request metadata.
+It implements bounded preparation and observation for a pinned Codex CLI 0.160.0
+root with one direct child. It is absent from the public CLI, package exports,
+production adapter allowlist and real comparison workflows. It does not admit a
+new production profile or prove general descendant collection.
+
+The applicable public requirements are [R01–R05, R07 and R11](../requirements.md):
+authorize scope before source access, minimize retained data, preserve usage and
+replay integrity, distinguish incomplete observations, respect deletion, and
+report safe diagnostics. Existing [capability limits](../decisions/001-adapter-capabilities.md)
+and [exact-version admission](../decisions/007-adapter-version-profiles.md) remain.
+
+## Projection and collection boundary
+
+`src/nested-candidate.ts` validates explicit local/native session mappings and
+projects only request usage and runtime metadata. The Codex projection pins
+`SessionMeta`, `TurnContextItem` and `TokenUsageRecord` semantics from
+[openai/codex a956835d](https://github.com/openai/codex/blob/a956835d020762cb2b570053af06f643a11c0ecc/codex-rs/protocol/src/protocol.rs).
+Each completed response belongs to its native thread and authorized root turn.
+Ancestor copies and cumulative token_count mirrors are excluded. Paginated child
+history requires explicit ordinal and parent-history boundaries; unsupported
+history remains unavailable.
+
+Usage keys identify the product/version/provider request independently of local
+source or session aliases. Replay is idempotent; conflicting identity, runtime or
+usage fails closed. Input components are disjoint ordinary input, cache read and
+cache write. Cached input is already included in input; reasoning is already
+included in output. Missing metadata is not zero.
+
+The candidate collector requires the entire exact linked set in an active task
+and registered project before reading any source, and rechecks authorization
+after each bounded read. It checks generation, source continuity, initial turn
+boundaries and append-only identity. The candidate-only lifecycle binder allows
+one root and one direct child, rejects mixed sources and tombstoned records, and
+does not change ordinary session linking or collection defaults.
+
+The Claude Code 2.1.288 projection is an offline candidate for explicitly mapped,
+completed request traces and correlated API metadata, based on the documented
+[monitoring fields](https://code.claude.com/docs/en/monitoring-usage).
+Agent/process identity is required; an API log alone does not establish child
+attribution. Exact native schema admission and real Claude collection are
+unverified. Synthetic tests do not establish product compatibility.
+
+## Bounded qualification lane
+
+`prepareCodexQualification` prepares an isolated caller-supplied fixture, exact
+binary identity, ledger, hook recorder and invocation arguments without executing
+a product CLI. `run` is a separate explicit model-execution boundary requiring
+authorization. The intended root/child settings are gpt-6-astra/high and
+gpt-6.1-sol/high. One-use root and child reservations survive restart and cannot
+be reset for an automatic retry.
+
+The observer verifies root/direct-child hooks, source identity and declared
+managed read-only/restricted permissions. Legacy and modern permission shapes
+are checked explicitly; missing, contradictory or changed declarations fail.
+Initial root delivery, root waiting, observed child spawn and child handoff are
+distinct stages under one absolute maximum of 180 seconds. Child handoff timing
+starts from qualified spawn progress; callbacks do not extend the total deadline.
+V1/V2 fresh-child arguments and modern activity events are handled explicitly.
+
+The process-group cutoff and delayed observation are best effort. Native hooks
+may fail open; internal requests, escaped descendants, in-flight billing and
+token/cost caps are not enforced. Declarations and local tool acceptance are not
+proof of provider backend identity or security enforcement.
+
+Stdout is discarded. Opt-in stderr diagnostics retain only fixed categories and
+codes, with bounded transient bytes, lines and signal counts. Unknown and
+truncated observations stay explicit; raw stderr, prompts, responses, source
+content, credentials and personal source paths are excluded from retained
+diagnostics and public fixtures.
+
+## Verification and current limits
+
+Run offline synthetic checks with Node 24:
+
+```sh
+npm test -- tests/nested-candidate.test.ts tests/codex-candidate-collection.test.ts tests/codex-qualification.test.ts tests/bounded-candidate-invocation.test.ts tests/codex-failure-diagnostics.test.ts
+npm run check
+git diff --cached --check
+```
+
+These commands do not invoke real Codex or Claude models. The tests cover request
+attribution, cache/output accounting, deduplication and conflicts, active/deleted
+scope, source changes, permission shapes, staged timers, durable reservations,
+fake-process teardown and bounded safe diagnostics.
+
+One separately authorized Codex 0.160.0 qualification run completed on macOS
+arm64: three parent own responses and one direct-child own response. All four
+mapped one-to-one to runtime/usage records; close/reopen replay inserted zero.
+Own-response sums matched native turn/thread cumulative and cache counters in
+that run. Parent cumulative usage excluded the child's own records. This
+observation predates integration with the preceding diagnostic PR and a final
+malformed-child identity guard repair. That repair rejects missing child identity
+before source access, reservation or registration and is verified synthetically.
+The final published lane has not had another real model run.
+
+The observation establishes only this controlled flow and its observed subset.
+It does not establish all-request completeness, product-wide nested support,
+general resumes/deeper descendants, or Claude real collection. Applicable fixed
+prices for the two actual models were unavailable, so observed partial and full
+costs remain null, not zero. Fictional test prices cannot be applied to real
+models. Complete usage/billing coverage, production cost profiles, actual bills,
+savings claims and inferential comparison remain unavailable.

@@ -3,7 +3,10 @@ import { parseFlexibleSnapshot, type FlexibleSourceScope } from './adapters-flex
 import { putUsageWithEvidence, recordObservationGap, requireActiveScope } from './runtime-history.js';
 import { SourceFailure, sourceCategory, type SourceDiagnosticCategory } from './source-errors.js';
 import { constants, closeSync, fstatSync, openSync, readSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { isAbsolute, resolve } from 'node:path';
+import { authorizeCandidateScope, checkedCandidateScope, type CandidateScope } from './nested-candidate.js';
+import { parseCodexCandidateRollout, type CodexCandidateSources } from './codex-candidate-rollout.js';
 import { lookupFileProfile } from './adapter-profiles.js';
 import { parseSnapshot, metadataKey, type SourceScope, type Snapshot } from './adapters.js';
 import { TimestampSchema } from './contracts.js';
@@ -31,9 +34,88 @@ interface MemoryCheckpoint {generation:number;since:string;lastAt:string;identit
 
 export interface CollectionDiagnostic { session_id: string; at: string; category: SourceDiagnosticCategory }
 
+interface CandidateCheckpoint { generation: number; since: string; lastAt: string; identity: string; size: number; modified: number; prefixHash: string; settledKeys: string[]; initialTurnId?: string }
+const prefixHash = (text: string, bytes: number) => createHash('sha256').update(Buffer.from(text).subarray(0, bytes)).digest('hex');
+
 export class Collector {
+  private candidateCheckpoints=new Map<string,CandidateCheckpoint>();
   private checkpoints=new Map<string,MemoryCheckpoint>();
   constructor(private readonly store:Store,private readonly clock:Clock=utcNow,private readonly read:SourceReader=readSource,private readonly resolveFlexible:(product:string,version:string)=>typeof parseFlexibleSnapshot|null=()=>null){}
+  /** Explicit offline candidate opt-in. Does not discover/link sessions, admit
+   * versions, or alter tick/CLI defaults. Every root/child source must be linked
+   * before access through the explicit candidate-only Lifecycle binder.
+   */
+  tickCodexCandidate(inputScope:CandidateScope,sources:CodexCandidateSources, initialTurns:Readonly<Record<string,string>>={}):CollectionDiagnostic[] {
+    const scope=checkedCandidateScope(inputScope);
+    const pending=new Map(this.candidateCheckpoints);
+    this.store.immediateTransaction(()=>{
+      const authorizeSources=():LinkedSource[]=>{
+        authorizeCandidateScope(this.store,scope);
+        if(scope.sessions.length>2 || scope.sessions.some(s=>s.product!=='codex' || s.parentSessionId!==null && s.parentSessionId!==s.rootSessionId))throw new Error('candidate_scope_mismatch');
+        const links=this.store.all<LinkedSource>(`SELECT s.*,p.local_root,t.generation,t.metadata FROM sessions s
+          JOIN tasks t ON t.id=s.task_id JOIN projects p ON p.id=s.project_id WHERE t.id=?`,[scope.taskId]);
+        if(links.length!==scope.sessions.length || !isAbsolute(sources.projectRoot) || resolve(sources.projectRoot)!==sources.projectRoot ||
+          Object.keys(sources.paths).length!==scope.sessions.length)throw new Error('candidate_scope_mismatch');
+        // Authorize the ENTIRE exact prelinked set before even the first bounded read.
+        for(const mapping of scope.sessions){
+          const link=links.find(l=>l.id===mapping.sessionId); const path=sources.paths[mapping.sourceId];
+          if(!link || link.project_id!==scope.projectId || link.local_root!==sources.projectRoot || typeof path!=='string' ||
+            !isAbsolute(path) || resolve(path)!==path || link.source_path!==path)throw new Error('candidate_scope_mismatch');
+          let metadata:unknown;
+          try {metadata=JSON.parse(link.metadata) as unknown;} catch {throw new Error('candidate_scope_mismatch');}
+          if(typeof metadata!=='object' || metadata===null || !('product' in metadata) || metadata.product!=='codex')throw new Error('candidate_scope_mismatch');
+        }
+        return links;
+      };
+      authorizeSources();
+      const tickAt=new Date(TimestampSchema.parse(this.clock())).toISOString();
+      for(const mapping of scope.sessions){
+        const link=authorizeSources().find(l=>l.id===mapping.sessionId)!;
+        let previous=pending.get(mapping.sessionId);
+        if(previous?.generation!==link.generation)previous=undefined;
+        let bytes:SourceBytes;
+        try {bytes=this.read(link.source_path);} catch {throw new Error('candidate_source_error');}
+        const after=authorizeSources().find(l=>l.id===mapping.sessionId)!;
+        if(after.generation!==link.generation)throw new Error('candidate_inactive_scope');
+        // A native response can arrive during the synchronous bounded read.
+        // Its observation timestamp must follow the bytes actually observed.
+        const now=new Date(TimestampSchema.parse(this.clock())).toISOString();
+        if(Date.parse(now)<Date.parse(tickAt))throw new Error('candidate_clock_regressed');
+        // Stable append, including ignored/native content and partial trailing bytes.
+        // Raw-prefix hash is memory-only, never persisted or exported.
+        if(Buffer.byteLength(bytes.text)!==bytes.size || bytes.size>MAX_SOURCE_BYTES)throw new Error('candidate_source_error');
+        if(previous && (bytes.identity!==previous.identity || bytes.size<previous.size ||
+          prefixHash(bytes.text,previous.size)!==previous.prefixHash ||
+          bytes.size===previous.size && bytes.modified!==previous.modified))throw new Error('candidate_source_changed');
+        if(previous && Date.parse(now)<Date.parse(previous.lastAt))throw new Error('candidate_clock_regressed');
+        const snapshot=parseCodexCandidateRollout(bytes.text,scope,mapping.sourceId,sources.projectRoot,now);
+        const initialTurnId=previous?.initialTurnId??initialTurns[mapping.sourceId];
+        if(initialTurns[mapping.sourceId]!==undefined && (previous!==undefined || snapshot.records.length!==0 || !scope.allowedRootTurnIds.length))throw new Error('candidate_late_handshake');
+        const settled=new Set(previous?.settledKeys??snapshot.records.map(r=>r.projection.event.id));
+        if(previous){
+          for(const {projection,contextAt} of snapshot.records){
+            if(settled.has(projection.event.id))continue;
+            if(Date.parse(contextAt)<=Date.parse(previous.since) && projection.runtime.turn_id!==previous.initialTurnId){settled.add(projection.event.id);continue;}
+            if(Date.parse(projection.event.occurred_at)>Date.parse(now))continue;
+            let failure:string|null=null;
+            try {putUsageWithEvidence(this.store,projection.event,projection.runtime);} catch(error){
+              failure=error instanceof Error && ['runtime_conflict','event_conflict'].includes(error.message)?'candidate_conflict':'candidate_storage_error';
+            }
+            if(failure)throw new Error(failure);
+            settled.add(projection.event.id);
+          }
+        }
+        // Best-effort rollouts never establish complete request/child coverage.
+        recordObservationGap(this.store,scope.taskId,mapping.sessionId,previous?.lastAt??now,now,previous?'incomplete':'offline',now);
+        if(snapshot.hasGap)recordObservationGap(this.store,scope.taskId,mapping.sessionId,previous?.lastAt??now,now,'not_available',now);
+        pending.set(mapping.sessionId,{generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,
+          size:bytes.size,modified:bytes.modified,prefixHash:prefixHash(bytes.text,bytes.size),settledKeys:[...settled],...(initialTurnId===undefined?{}:{initialTurnId})});
+      }
+      authorizeCandidateScope(this.store,scope);
+    });
+    this.candidateCheckpoints=pending;
+    return [];
+  }
   tick(taskId:string):CollectionDiagnostic[] {
     const diagnostics:CollectionDiagnostic[]=[];
     const pending=new Map(this.checkpoints);
