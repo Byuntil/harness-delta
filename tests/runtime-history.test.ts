@@ -83,7 +83,7 @@ test('migration_preserves_v1_snapshot_bytes', async () => {
     const { createComparisonSnapshot, readComparisonSnapshot } = await import('../src/reports/comparison-snapshot.js');
     const legacy = reportStore(file); const report = createComparisonSnapshot(legacy, request, () => evaluation);
     const bytes = legacy.get('SELECT input_json,report_json,snapshot_hash FROM comparison_report_snapshots'); legacy.close();
-    const db = new Database(file); db.exec('DROP TABLE runtime_evidence; DROP TABLE price_tables; DROP TABLE observation_gaps; DROP TRIGGER separate_synthetic_workspace; DROP TRIGGER flexible_real_task_insert; DROP TRIGGER flexible_real_task_update; DROP TRIGGER preserve_synthetic_workspace; DROP TABLE flexible_report_dependencies; DROP TABLE flexible_report_snapshots; DROP TABLE flexible_workspace_scope; PRAGMA user_version=10;'); db.close();
+    const db = new Database(file); db.exec('DROP TRIGGER prevent_trace_log_owner; DROP TRIGGER prevent_trace_managed_owner; DROP TRIGGER prevent_trace_file_owner_insert; DROP TRIGGER prevent_trace_file_owner_update; DROP TABLE claude_workflow_runs; DROP TABLE codex_workflow_children; DROP TABLE codex_workflow_runs; DROP TABLE runtime_evidence; DROP TABLE price_tables; DROP TABLE observation_gaps; DROP TRIGGER separate_synthetic_workspace; DROP TRIGGER flexible_real_task_insert; DROP TRIGGER flexible_real_task_update; DROP TRIGGER preserve_synthetic_workspace; DROP TABLE flexible_report_dependencies; DROP TABLE flexible_report_snapshots; DROP TABLE flexible_workspace_scope; PRAGMA user_version=10;'); db.close();
     const upgraded = new Store(file);
     try {
       expect(upgraded.get('SELECT input_json,report_json,snapshot_hash FROM comparison_report_snapshots')).toEqual(bytes);

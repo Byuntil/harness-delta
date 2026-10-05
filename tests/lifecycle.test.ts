@@ -9,6 +9,24 @@ import { join } from 'node:path';
 const metadata = { type: 'feature', expected_size: 'small', assignee: 'u1',
   product: 'synthetic', model: 'synthetic-model', criterion_ids: ['c1'] };
 
+test('lifecycle reserves the writer before state reads so collector writes cannot invalidate its snapshot', () => {
+  const root = mkdtempSync(join(tmpdir(), 'lifecycle-writer-')); const path = join(root, 'local.db');
+  const store = new Store(path); const other = new Store(path); other.execute('PRAGMA busy_timeout=0', []);
+  let armed = false; let blocked = false;
+  const life = new Lifecycle(store, () => {
+    if (armed) {
+      try { other.execute('BEGIN IMMEDIATE', []); }
+      catch (error) { blocked = error instanceof Error && error.message.includes('locked'); }
+    }
+    return '2026-01-01T00:00:00Z';
+  });
+  try {
+    store.execute("INSERT INTO projects(id) VALUES ('p1')", []); life.createTask('p1', 't1', metadata); life.start('t1'); life.declareFirst('t1');
+    armed = true; expect(() => life.assessFirst('t1', false)).not.toThrow(); expect(blocked).toBe(true);
+    expect(life.task('t1').first_success).toBe(0);
+  } finally { try { other.execute('ROLLBACK', []); } catch { /* No reservation acquired. */ } other.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('task transitions preserve first assessment, rework and immutable final outcome', () => {
   const store = new Store(':memory:'); const lifecycle = new Lifecycle(store);
   try {

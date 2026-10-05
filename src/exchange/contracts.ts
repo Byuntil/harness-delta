@@ -67,7 +67,8 @@ export const ExchangePackageSchema = z.discriminatedUnion('kind', [DataPackageSc
 export type DataPackage = z.infer<typeof DataPackageSchema>;
 const { project_id: flexibleLocal, ...flexibleProtocolFields } = FlexibleProtocolSchema.shape;
 void flexibleLocal;
-export const FlexibleSharedProtocolSchema = z.strictObject({ ...flexibleProtocolFields, shared_project_id: uuid })
+export const FlexibleSharedProtocolSchema = z.strictObject({ ...flexibleProtocolFields, purpose: protocolFields.purpose, minimum_effect: protocolFields.minimum_effect,
+  quality_margin: protocolFields.quality_margin, confidence_level: protocolFields.confidence_level, shared_project_id: uuid })
   .refine(p => Date.parse(p.recruitment_start) < Date.parse(p.recruitment_end) && p.planning_basis_id === p.sample_plan.planning_basis_id && p.strata.every(s => s.assignees.length === 1));
 export const FlexibleEvidenceSchema = z.strictObject({ ...EvidenceSchema.omit({ usage: true, actual_configuration: true }).shape,
   cost: FlexibleTaskReportSchema.shape.cost, runtime_summary: FlexibleTaskReportSchema.shape.runtime_summary,

@@ -13,7 +13,10 @@ export const FlexibleTaskMetadataSchema = TaskMetadataSchema.omit({ model: true 
   schema_version: z.literal(2), initial_model: ModelSchema.nullable(),
 });
 export const FlexibleProtocolSchema = z.strictObject({
-  ...protocolFields, schema_version: z.literal(2), primary_metric: z.literal('standardized_cost'),
+  ...protocolFields, schema_version: z.literal(2),
+  purpose: z.enum(['synthetic_validation', 'real_experiment', 'functional_pilot']),
+  minimum_effect: protocolFields.minimum_effect.optional(), quality_margin: protocolFields.quality_margin.optional(),
+  confidence_level: protocolFields.confidence_level.optional(), primary_metric: z.literal('standardized_cost'),
   price_table_id: IdSchema, estimand: z.literal('registered_task_mean'), runtime_policy: z.literal('flexible'),
   source_profiles: z.array(z.strictObject({ product: productSchema, product_version: ProductVersionSchema, profile_id: IdSchema })).min(1).max(256)
     .refine(rows => new Set(rows.map(r => `${r.product}:${r.product_version}`)).size === rows.length),
@@ -22,9 +25,19 @@ export const FlexibleProtocolSchema = z.strictObject({
     .refine(rows => new Set(rows.map(r => r.id)).size === rows.length),
 }).refine(value => Date.parse(value.recruitment_start) < Date.parse(value.recruitment_end))
   .refine(value => value.planning_basis_id === value.sample_plan.planning_basis_id)
-  .refine(value => value.strata.every(s => value.participants.includes(s.assignees[0])));
+  .refine(value => value.strata.every(s => value.participants.includes(s.assignees[0])))
+  .superRefine((value, context) => {
+    for (const key of ['minimum_effect', 'quality_margin', 'confidence_level'] as const) {
+      if (value.purpose === 'functional_pilot' ? value[key] !== undefined : value[key] === undefined)
+        context.addIssue({ code: 'custom', path: [key], message: value.purpose === 'functional_pilot' ? 'effect_input_not_allowed' : 'effect_input_required' });
+    }
+  });
 export const FlexibleProtocolDraftSchema = z.strictObject(FlexibleProtocolSchema.shape).partial().required({
   schema_version: true, id: true, project_id: true, mode: true, purpose: true,
+}).superRefine((value, context) => {
+  if (value.purpose === 'functional_pilot') for (const key of ['minimum_effect', 'quality_margin', 'confidence_level'] as const) {
+    if (value[key] !== undefined) context.addIssue({ code: 'custom', path: [key], message: 'effect_input_not_allowed' });
+  }
 });
 export const RuntimeEvidenceSchema = z.strictObject({
   id: IdSchema, task_id: IdSchema, session_id: IdSchema, turn_id: IdSchema.nullable(), request_id: IdSchema.nullable(),

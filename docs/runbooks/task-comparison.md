@@ -4,7 +4,9 @@
 
 Contributors can exercise configuration registration, durable allocation, manual
 application evidence, human outcomes and assignment reports using synthetic tasks.
-**Real randomized experiment allocation is disabled.** The complete team workflow,
+**V1 real randomized experiment allocation is disabled.** V2 supports the limited
+[Codex 0.160.0 root workflow](task-native-workflow.md) with explicit user inputs and
+partial usage only. Complete cost and inference remain unavailable. The complete team workflow,
 file exchange, method validation and validated inference are later gates. Existing
 local measurement continues under its own [runbook](local-measurement.md).
 See [ADR 008](../decisions/008-task-comparison-workflow.md) and
@@ -115,7 +117,7 @@ node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison sho
 
 Missing inputs cannot freeze. Invalid/overlapping strata, unavailable participants,
 ineligible variants and unmatched runtime settings fail. `real_experiment` drafts
-may be recorded/frozen for review, but allocation always rejects them; no readiness
+may be recorded/frozen for review, but v1 allocation always rejects them; no readiness
 flag overrides R10. These operations do not validate analysis or start collection.
 
 ## Preregister a task and reveal its persistent assignment
@@ -296,7 +298,7 @@ provided. See ADR 008 for the full time, revision and deletion contracts.
 Existing task reports continue to show missing/partial usage, never a full randomized
 endpoint or adoption result. A synthetic task without injected observations has
 missing usage, not zero. Synthetic assignment reports are available as described below. Team exchange,
-network transmission, validated inference and real allocation remain unavailable.
+network transmission, validated inference and v1 real allocation remain unavailable.
 
 ```sh
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite delete task task-1
@@ -311,4 +313,5 @@ Deletion cannot erase exported copies (export itself is not implemented here).
 
 For the additive v2 flexible model workflow, explicit prices and independent
 readiness gates, see [flexible comparison](flexible-comparison.md). Production
-flexible collection, complete cost and inference remain unavailable.
+flexible collection is admitted only for the exact Codex 0.160.0 root workflow;
+complete cost and inference remain unavailable.

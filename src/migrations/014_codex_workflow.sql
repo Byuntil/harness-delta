@@ -1,0 +1,31 @@
+-- Content-free durable invocation control. No native argv/instructions/prompts.
+CREATE TABLE codex_workflow_runs (
+  id TEXT PRIMARY KEY NOT NULL,
+  task_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  session_id TEXT,
+  source_path TEXT,
+  source_identity TEXT,
+  source_size INTEGER,
+  source_prefix_hash TEXT,
+  confirmation_id TEXT REFERENCES comparison_confirmations(id),
+  purpose TEXT NOT NULL DEFAULT 'development' CHECK(purpose IN ('development','qualification')),
+  generation INTEGER NOT NULL,
+  operation TEXT NOT NULL CHECK(operation IN ('launch','resume','link','collect')),
+  state TEXT NOT NULL CHECK(state IN ('running','completed','failed','stopped')),
+  stop_requested INTEGER NOT NULL DEFAULT 0 CHECK(stop_requested IN (0,1)),
+  instruction_manifest_hash TEXT NOT NULL,
+  application TEXT NOT NULL CHECK(application IN ('pending','invocation_settings_verified','external_unverified')),
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  reason TEXT,
+  diagnostic_stage TEXT,
+  diagnostic_code TEXT,
+  scope_verified INTEGER NOT NULL DEFAULT 0 CHECK(scope_verified IN (0,1)),
+  identity_verified INTEGER NOT NULL DEFAULT 0 CHECK(identity_verified IN (0,1)),
+  observed_requests INTEGER NOT NULL DEFAULT 0,
+  CHECK((purpose='development' AND confirmation_id IS NOT NULL) OR (purpose='qualification' AND confirmation_id IS NULL)),
+  FOREIGN KEY(task_id,project_id) REFERENCES tasks(id,project_id) ON DELETE CASCADE,
+  FOREIGN KEY(session_id,task_id,project_id) REFERENCES sessions(id,task_id,project_id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX one_running_codex_workflow ON codex_workflow_runs(task_id) WHERE state='running';

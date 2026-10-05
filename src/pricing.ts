@@ -23,16 +23,28 @@ export function readPriceTable(store: Store, id: string): PriceTable {
   if (!row) throw new Error('unknown_price_table');
   return parseComparison(PriceTableSchema, JSON.parse(row.payload) as unknown, 'invalid_price_table');
 }
-export function priceUsage(input: UsageEvent, inputTable: PriceTable): PricedUsage {
+export type LegacyInputBasis = 'output-only-v1' | 'cache-read-remainder-ordinary-v1';
+export function priceUsage(input: UsageEvent, inputTable: PriceTable, legacyInputBasis: LegacyInputBasis = 'output-only-v1'): PricedUsage {
+  if (!['output-only-v1', 'cache-read-remainder-ordinary-v1'].includes(legacyInputBasis)) throw new Error('invalid_input_basis');
   const event = parseComparison(EventSchema, input, 'invalid_event');
   if (event.payload.kind !== 'usage') throw new Error('invalid_event');
   const table = parseComparison(PriceTableSchema, inputTable, 'invalid_price_table');
   const u = event.payload; const reasons: PricedUsage['reasons'] = [];
   if (u.model === null) reasons.push('unknown_model');
   if ('schema_version' in u && u.attribution !== 'verified') reasons.push('unknown_attribution');
-  // V1 lacks provenance for cache-write and request accounting. Price only an
-  // observed output component; do not manufacture a complete input breakdown.
+  // V1 lacks provenance for cache-write and request accounting. By default price
+  // observed output only; an explicit basis below never certifies completeness.
   const components: BillingComponent[] = 'schema_version' in u ? u.billing_components : [{ kind: 'output', reading: u.output_total }];
+  if (!('schema_version' in u) && legacyInputBasis === 'cache-read-remainder-ordinary-v1') {
+    // Explicit descriptive assumption only: unknown cache writes are not evidence
+    // of zero. Preserve unknown_components even when all arithmetic is available.
+    reasons.push('unknown_components');
+    if (u.input_total.status === 'observed' && u.cached_input.status === 'observed') {
+      if (u.cached_input.value > u.input_total.value) throw new Error('invalid_usage_components');
+      components.push({ kind: 'ordinary_input', reading: { status: 'observed', value: u.input_total.value - u.cached_input.value, reason: null } },
+        { kind: 'cache_read', reading: u.cached_input });
+    }
+  }
   const inputs = components.filter(c => c.kind !== 'output');
   const output = components.find(c => c.kind === 'output');
   const inputsKnown = inputs.length > 0 && inputs.every(c => c.reading.status === 'observed');

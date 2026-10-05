@@ -1,3 +1,4 @@
+import { checkedCodexContinuation, authorizeCodexContinuation, type CodexContinuationFamily } from './codex-continuation.js';
 import { parseTaskMetadata } from './flexible-contracts.js';
 import { parseFlexibleSnapshot, type FlexibleSourceScope } from './adapters-flexible.js';
 import { putUsageWithEvidence, recordObservationGap, requireActiveScope } from './runtime-history.js';
@@ -18,7 +19,7 @@ export type SourceReader = (path: string) => SourceBytes;
 const MAX_SOURCE_BYTES=16*1024*1024;
 /** A bounded, transient read of one previously authorized source. */
 export const readSource: SourceReader = path => {
-  const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
+  const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
   try {
     const before=fstatSync(fd);
     if (!before.isFile() || before.size > MAX_SOURCE_BYTES) throw new SourceFailure('unsupported_source','unsupported');
@@ -46,14 +47,51 @@ export class Collector {
    * before access through the explicit candidate-only Lifecycle binder.
    */
   tickCodexCandidate(inputScope:CandidateScope,sources:CodexCandidateSources, initialTurns:Readonly<Record<string,string>>={}):CollectionDiagnostic[] {
+    return this.collectCodexCandidateFamily(inputScope,sources,initialTurns);
+  }
+  /** Explicit bounded continuation: two independently authorized root families.
+   * Sources lost in one family cannot prevent fresh observations in the other.
+   * Each family commits atomically; prior successful families remain partial if
+   * a later family fails. Native assignment and production defaults stay closed.
+   */
+  tickCodexContinuation(input:readonly CodexContinuationFamily[]):CollectionDiagnostic[] {
+    const families=checkedCodexContinuation(input);
+    const authorize=()=>authorizeCodexContinuation(this.store,families);
+    authorize();
+    const diagnostics:CollectionDiagnostic[]=[];
+    for(const family of families){
+      authorize();
+      try {this.collectCodexCandidateFamily(family.scope,family.sources,{},authorize);}
+      catch(error){
+        const code=error instanceof Error?error.message:'';
+        if(!['candidate_source_error','candidate_source_changed'].includes(code))throw error;
+        authorize();
+        const now=new Date(TimestampSchema.parse(this.clock())).toISOString();
+        this.store.immediateTransaction(()=>{
+          authorize();
+          for(const session of family.scope.sessions){
+            recordObservationGap(this.store,family.scope.taskId,session.sessionId,this.candidateCheckpoints.get(session.sessionId)?.lastAt??now,now,'source_error',now);
+          }
+        });
+        for(const session of family.scope.sessions)this.candidateCheckpoints.delete(session.sessionId);
+        const root=family.scope.sessions.find(session=>session.parentSessionId===null)!;
+        diagnostics.push({session_id:root.sessionId,at:now,category:code==='candidate_source_error'?'read_failed':'record_changed'});
+      }
+    }
+    return diagnostics;
+  }
+  private collectCodexCandidateFamily(inputScope:CandidateScope,sources:CodexCandidateSources,initialTurns:Readonly<Record<string,string>>,
+    authorizeManifest?:()=>void):CollectionDiagnostic[] {
     const scope=checkedCandidateScope(inputScope);
     const pending=new Map(this.candidateCheckpoints);
     this.store.immediateTransaction(()=>{
       const authorizeSources=():LinkedSource[]=>{
+        authorizeManifest?.();
         authorizeCandidateScope(this.store,scope);
         if(scope.sessions.length>2 || scope.sessions.some(s=>s.product!=='codex' || s.parentSessionId!==null && s.parentSessionId!==s.rootSessionId))throw new Error('candidate_scope_mismatch');
-        const links=this.store.all<LinkedSource>(`SELECT s.*,p.local_root,t.generation,t.metadata FROM sessions s
+        const taskLinks=this.store.all<LinkedSource>(`SELECT s.*,p.local_root,t.generation,t.metadata FROM sessions s
           JOIN tasks t ON t.id=s.task_id JOIN projects p ON p.id=s.project_id WHERE t.id=?`,[scope.taskId]);
+        const links=authorizeManifest?taskLinks.filter(link=>scope.sessions.some(session=>session.sessionId===link.id)):taskLinks;
         if(links.length!==scope.sessions.length || !isAbsolute(sources.projectRoot) || resolve(sources.projectRoot)!==sources.projectRoot ||
           Object.keys(sources.paths).length!==scope.sessions.length)throw new Error('candidate_scope_mismatch');
         // Authorize the ENTIRE exact prelinked set before even the first bounded read.
@@ -111,7 +149,7 @@ export class Collector {
         pending.set(mapping.sessionId,{generation:link.generation,since:previous?.since??now,lastAt:now,identity:bytes.identity,
           size:bytes.size,modified:bytes.modified,prefixHash:prefixHash(bytes.text,bytes.size),settledKeys:[...settled],...(initialTurnId===undefined?{}:{initialTurnId})});
       }
-      authorizeCandidateScope(this.store,scope);
+      authorizeSources();
     });
     this.candidateCheckpoints=pending;
     return [];
@@ -137,6 +175,7 @@ export class Collector {
           if(previous && previous.generation!==link.generation)previous=undefined;
           let stage:SourceDiagnosticCategory='read_failed';
           try {
+            if(this.store.get('SELECT 1 FROM claude_workflow_runs WHERE task_id=?',[taskId]))throw new SourceFailure('unsupported_source','unsupported');
             const taskMetadata = parseTaskMetadata(JSON.parse(link.metadata) as unknown);
             if ('schema_version' in taskMetadata && taskMetadata.schema_version === 2) {
               const checkpoint = this.collectFlexible(link, now, previous);

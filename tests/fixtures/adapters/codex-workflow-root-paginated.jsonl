@@ -1,0 +1,8 @@
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","ordinal":0,"payload":{"id":"00000000-0000-4000-8000-000000000001","session_id":"00000000-0000-4000-8000-000000000001","cwd":"/synthetic/qualification","cli_version":"0.160.0","source":"exec","history_mode":"paginated","parent_thread_id":null,"forked_from_id":null,"forked_from_ordinal_exclusive":null,"history_base":null,"subagent_history_start_ordinal":null}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"event_msg","ordinal":1,"payload":{"type":"task_started","turn_id":"00000000-0000-4000-8000-000000000002"}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","ordinal":2,"payload":{"type":"message","role":"developer"}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","ordinal":3,"payload":{"type":"message","role":"user"}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"world_state","ordinal":4,"payload":{}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"turn_context","ordinal":5,"payload":{"cwd":"/synthetic/qualification","turn_id":"00000000-0000-4000-8000-000000000002","root_turn_id":null,"model":"gpt-6-astra","effort":"high","multi_agent_version":"disabled","sandbox_policy":{"type":"read-only"},"approval_policy":"on-request","approvals_reviewer":"auto_review"}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"response_item","ordinal":6,"payload":{"type":"message","role":"user"}}
+{"timestamp":"2026-01-01T00:00:00.000Z","type":"event_msg","ordinal":7,"payload":{"type":"unknown","turn_id":"00000000-0000-4000-8000-000000000002"}}

@@ -6,6 +6,20 @@ root with one direct child. It is absent from the public CLI, package exports,
 production adapter allowlist and real comparison workflows. It does not admit a
 new production profile or prove general descendant collection.
 
+An offline assigned-workflow connection now accepts an explicit `direct_child`
+mapping for `link`/`collect` in the synthetic test adapter. It binds the root and
+one direct child to the same task assignment and configuration confirmation,
+collects their future own responses atomically, and persists child inode/prefix
+checkpoints across database reopen. Child request identity collisions roll back
+the whole tick; previous partial usage remains. Root and child models/effort come
+from their own request metadata. The family path rejects fork/history-base,
+compaction and deeper-child evidence, and never follows inherited source paths.
+The separate `codex-workflow-direct-child-v1` profile is absent from the production
+registry, so production family input fails before selected instructions or source
+contents are accessed. Launch/resume remains root-only. This is an implemented
+offline connection, not admitted native child support; historical qualification
+of the candidate is not qualification of this new workflow connection.
+
 The applicable public requirements are [R01–R05, R07 and R11](../requirements.md):
 authorize scope before source access, minimize retained data, preserve usage and
 replay integrity, distinguish incomplete observations, respect deletion, and
@@ -51,6 +65,16 @@ a product CLI. `run` is a separate explicit model-execution boundary requiring
 authorization. The intended root/child settings are gpt-6-astra/high and
 gpt-6.1-sol/high. One-use root and child reservations survive restart and cannot
 be reset for an automatic retry.
+
+An explicit `reuseExistingHome: true` option allows the native process to reuse
+an already authenticated home without requiring an empty sessions directory.
+The default still requires an empty directory. This opt-in does not inspect or
+copy credentials, read prior transcript contents, clear sessions or reset old
+reservations. Each run still needs a new empty fixture, active task, private
+ledger and specific actual-call approval. Only exact fresh native hook paths
+with birth times after this launch are linked and read; an old exact callback
+source fails before content access. This is qualification access only, not a
+comparison assignment or production workflow adapter.
 
 The observer verifies root/direct-child hooks, source identity and declared
 managed read-only/restricted permissions. Legacy and modern permission shapes
@@ -103,3 +127,22 @@ prices for the two actual models were unavailable, so observed partial and full
 costs remain null, not zero. Fictional test prices cannot be applied to real
 models. Complete usage/billing coverage, production cost profiles, actual bills,
 savings claims and inferential comparison remain unavailable.
+
+## Assigned native child connection followup
+
+The workflow adapter now connects its launch/resume metadata hooks to the explicit
+family collector under one task/configuration confirmation, rather than requiring
+manual child paths after execution. Read-only `child_runtime`, transient agents
+settings, fresh direct-child source/initial-context guards, shared own-request
+collection and durable child checkpoints are implemented in the shared engine.
+The actual CLI root-to-child resume/replay route and a separately intent-bound
+one-shot family qualification entry are verified with synthetic processes. See
+[the workflow contract and manual qualification boundary](../runbooks/task-native-workflow.md#direct-child-adapter-connection-offline-verified-not-admitted).
+
+This is implemented adapter/CLI wiring with offline evidence. It is not new native
+qualification or production admission. Historical parent/child observations belong
+to the preceding candidate lane and cannot qualify this changed engine. The child
+profile is still absent from the production registry; root qualification consent
+cannot be reused for it. A new directly approved family run must verify the actual
+hook/source sequence and observed usage before any admission decision. Claude
+native collection and whole-task cost coverage remain separate blockers.

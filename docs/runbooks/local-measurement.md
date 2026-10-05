@@ -38,6 +38,9 @@ In another terminal, use `task pause task1` and `task resume task1`. Resuming st
 a new baseline at the next poll. Stopping/restarting never backfills offline work.
 Finalize only after the last source events have arrived and been collected.
 
+For explicit new sessions, collector restarts and missing original sources, see
+[continuing one task across sessions](session-continuation.md).
+
 ## Assess, report and delete
 
 ```sh
@@ -123,12 +126,15 @@ recovery establishes a new baseline and does not import earlier work. Sources ov
 snapshot per poll; this is not an unbounded production log tailer.
 
 Run `npm run check` for synthetic acceptance tests, including the CLI flow, privacy
-sentinel, rollback, pause/restart and reports. Actual evidence currently covers
+sentinel, rollback, pause/restart and reports. This generic collector's evidence covers
 macOS arm64, Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283 only. App sessions,
 parent/child complete accounting, nonzero reasoning semantics, other versions and
 other platforms need separate validation. Do not use this preview for a real
 experiment or inferential adoption decision.
 
 For the additive v2 flexible model workflow, explicit prices and independent
-readiness gates, see [flexible comparison](flexible-comparison.md). Production
-flexible collection, complete cost and inference remain unavailable.
+readiness gates, see [flexible comparison](flexible-comparison.md). The separate
+[assigned Codex 0.160.0 root workflow](task-native-workflow.md) admits partial
+own-response collection under a complete frozen v2 protocol. It does not change
+this generic collector's version allowlist. Complete cost and inference remain
+unavailable.

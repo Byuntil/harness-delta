@@ -29,7 +29,7 @@ export class Lifecycle {
     IdSchema.parse(id);
     const localRoot = realpathSync(root);
     if (!statSync(localRoot).isDirectory()) throw new Error('invalid_project_root');
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       this.rejectDeleted('project', id);
       this.store.execute('INSERT INTO projects(id,local_root) VALUES (?,?)', [id, localRoot]);
     });
@@ -39,7 +39,7 @@ export class Lifecycle {
     IdSchema.parse(projectId); IdSchema.parse(taskId);
     const metadata = parseTaskMetadata(input);
     const now = this.now();
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       this.rejectDeleted('task', taskId); this.rejectDeleted('project', projectId);
       if (!this.store.get('SELECT id FROM projects WHERE id = ?', [projectId])) throw new Error('unknown_project');
       this.store.execute('INSERT OR IGNORE INTO users(id) VALUES (?)', [metadata.assignee]);
@@ -61,7 +61,7 @@ export class Lifecycle {
   resume(taskId: string): void { this.transition(taskId, 'paused', 'active'); }
 
   private transition(taskId: string, from: TaskState, to: TaskState): void {
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       const task = this.task(taskId);
       if (task.state !== from) throw new Error('invalid_transition');
       parseTaskMetadata(JSON.parse(task.metadata) as unknown);
@@ -83,7 +83,7 @@ export class Lifecycle {
   }
 
   declareFirst(taskId: string): void {
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       const task = this.task(taskId);
       if (task.state !== 'active' || task.first_completed_at) throw new Error('invalid_transition');
       const now = this.now(task);
@@ -94,7 +94,7 @@ export class Lifecycle {
 
   assessFirst(taskId: string, successful: boolean): void {
     z.boolean().parse(successful);
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       const task = this.task(taskId);
       if (task.state === 'finalized' || !task.first_completed_at || task.first_success !== null) throw new Error('invalid_transition');
       const now = this.now(task);
@@ -103,7 +103,7 @@ export class Lifecycle {
   }
 
   rework(taskId: string): void {
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       const task = this.task(taskId);
       if (task.state !== 'active' || !task.first_completed_at) throw new Error('invalid_transition');
       const now = this.now(task);
@@ -116,7 +116,7 @@ export class Lifecycle {
   finalize(taskId: string, outcome: Outcome, criteriaMet: string[]): void {
     z.enum(['success', 'failed', 'aborted']).parse(outcome);
     z.array(IdSchema).refine(ids => new Set(ids).size === ids.length).parse(criteriaMet);
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       const task = this.task(taskId);
       if (task.state !== 'active' && task.state !== 'paused') throw new Error('invalid_transition');
       const metadata = parseTaskMetadata(JSON.parse(task.metadata) as unknown);
@@ -141,7 +141,7 @@ export class Lifecycle {
     IdSchema.parse(sessionId); z.enum(['codex', 'claude_code']).parse(product); ProductVersionSchema.parse(version);
     if (lookupFileProfile(product, version) === 'unsupported') throw new Error('unsupported');
     const path = resolve(sourcePath);
-    this.store.transaction(() => {
+    this.store.immediateTransaction(() => {
       const task = this.task(taskId);
       if (task.state === 'finalized') throw new Error('invalid_transition');
       this.rejectDeleted('session', sessionId);
@@ -172,17 +172,18 @@ export class Lifecycle {
       if (metadata.product !== 'codex' || ('schema_version' in metadata && metadata.schema_version === 2)) throw new Error('candidate_scope_mismatch');
       if (this.store.get(`SELECT 1 FROM comparison_assignments WHERE task_id=? UNION ALL SELECT 1 FROM otel_processes WHERE task_id=? UNION ALL SELECT 1 FROM observation_runs WHERE task_id=? UNION ALL SELECT 1 FROM events WHERE task_id=? AND json_extract(payload,'$.kind')!='usage' LIMIT 1`, [taskId, taskId, taskId, taskId])) throw new Error('candidate_mixed_sources');
       const links = this.store.all<{ id: string; parent_id: string | null; product: string; product_version: string }>('SELECT id,parent_id,product,product_version FROM sessions WHERE task_id=?', [taskId]);
-      if (links.some(link => link.product !== 'codex' || link.product_version !== version) ||
-        (parentId === null ? links.length !== 0 : links.length !== 1 || links[0]!.id !== parentId || links[0]!.parent_id !== null) ||
+      const roots = links.filter(link => link.parent_id === null);
+      const parent = links.find(link => link.id === parentId);
+      // Offline continuation is bounded to two independent roots, each with at
+      // most one direct child. Existing single-family qualification is unchanged.
+      if (links.some(link => link.product !== 'codex' || link.product_version !== version) || links.length >= 4 ||
+        (parentId === null ? roots.length >= 2 : !parent || parent.parent_id !== null || links.some(link => link.parent_id === parentId)) ||
         this.store.get('SELECT 1 FROM sessions WHERE source_path=?', [sourcePath])) throw new Error('candidate_scope_mismatch');
-      if (parentId === null && this.store.get('SELECT 1 FROM events WHERE task_id=?', [taskId])) throw new Error('candidate_mixed_sources');
-      if (parentId !== null) {
-        this.rejectDeleted('session', parentId);
-        authorizeCandidateScope(this.store, { projectId, taskId, allowedRootTurnIds: ['candidate-registration'], sessions: links.map(link => ({
-          sessionId: link.id, rootSessionId: parentId, parentSessionId: link.parent_id, sourceId: link.id,
-          product: 'codex', nativeSessionId: link.id, processId: null, agentId: null,
-        })) });
-      }
+      if (parentId !== null) this.rejectDeleted('session', parentId);
+      authorizeCandidateScope(this.store, { projectId, taskId, allowedRootTurnIds: ['candidate-registration'], sessions: links.map(link => ({
+        sessionId: link.id, rootSessionId: link.parent_id ?? link.id, parentSessionId: link.parent_id, sourceId: link.id,
+        product: 'codex', nativeSessionId: link.id, processId: null, agentId: null,
+      })) });
       this.store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,source_path,product,product_version) VALUES (?,?,?,?,?,?,?)',
         [sessionId, projectId, taskId, parentId, sourcePath, 'codex', version]);
     });

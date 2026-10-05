@@ -41,19 +41,23 @@ export const FlexibleTaskReportSchema = z.strictObject({ task_id: IdSchema, assi
   runtime_summary: z.strictObject({ models: z.array(ModelSchema.nullable()).max(10000), efforts: z.array(IdSchema.nullable()).max(10000), changes: z.number().int().nonnegative(), unknown_count: z.number().int().nonnegative() }),
 });
 export const FlexibleComparisonReportSchema = z.strictObject({ schema_version: z.literal(2), descriptive_version: z.literal('flexible-cost-descriptive-1'),
+  purpose: z.literal('functional_pilot').optional(), evaluation_status: z.literal('functional_only').optional(),
   report_id: IdSchema, protocol_id: IdSchema, cutoff: TimestampSchema, evaluated_at: TimestampSchema, validity_status: z.literal('valid'),
   data_revision: z.number().int().nonnegative(), snapshot_sequence: z.number().int().positive(), revision_reason: RevisionReasonSchema,
   supersedes_report_id: IdSchema.nullable(), snapshot_hash: z.string(), price_table_hash: z.string(), price_table: PriceTableSchema, formula_version: z.literal(costFormulaVersion),
   tasks: z.array(FlexibleTaskReportSchema), arms: z.array(z.strictObject({ variant_id: IdSchema, assigned_count: z.number().int().nonnegative(), complete_count: z.number().int().nonnegative(),
     partial_count: z.number().int().nonnegative(), missing_count: z.number().int().nonnegative(), complete_mean: amount, partial_mean: amount,
     deadline_success_rate: z.number().min(0).max(1).nullable() })), relative_change: z.string().nullable(),
-  adoption: z.strictObject({ status: z.literal('inconclusive'), reasons: z.array(z.enum(['analysis_unverified', 'incomplete', 'followup_pending', 'quality_missing'])) }), limitations: z.array(z.string()),
-});
+  adoption: z.strictObject({ status: z.enum(['inconclusive', 'not_applicable']), reasons: z.array(z.enum(['analysis_unverified', 'incomplete', 'followup_pending', 'quality_missing', 'functional_pilot_only'])) }), limitations: z.array(z.string()),
+}).refine(value => value.purpose === 'functional_pilot'
+  ? value.evaluation_status === 'functional_only' && value.adoption.status === 'not_applicable' && value.adoption.reasons.includes('functional_pilot_only') && value.relative_change === null && value.arms.every(arm => arm.complete_mean === null)
+  : value.evaluation_status === undefined && value.adoption.status === 'inconclusive' && !value.adoption.reasons.includes('functional_pilot_only'));
 export type FlexibleComparisonReport = z.infer<typeof FlexibleComparisonReportSchema>;
 export type FlexibleTaskReport = z.infer<typeof FlexibleTaskReportSchema>;
 const Money = Decimal.clone({ precision: 160, rounding: Decimal.ROUND_HALF_EVEN, toExpNeg: -1000, toExpPos: 1000 });
 export function projectFlexibleComparison(input: FlexibleSnapshotInput): FlexibleComparisonReport {
   const config = parseComparison(FlexibleSnapshotInputSchema, input, 'invalid_snapshot_input');
+  const functional = config.protocol.purpose === 'functional_pilot';
   const evaluation = Date.parse(config.evaluated_at);
   if (Date.parse(config.cutoff) > evaluation) throw new Error('invalid_cutoff');
   const tasks = config.assignments.filter(a => Date.parse(a.assigned_at) < Date.parse(config.cutoff) && Date.parse(a.recorded_at) <= evaluation).map(a => {
@@ -91,19 +95,20 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
     const rows = tasks.filter(t=>t.original_variant_id===variant_id); const complete = rows.filter(t=>t.cost.complete_amount!==null);
     const partial = rows.filter(t=>t.cost.complete_amount===null&&t.cost.partial_amount!==null);
     return { variant_id, assigned_count: rows.length, complete_count: complete.length, partial_count: partial.length, missing_count: rows.length-complete.length-partial.length,
-      complete_mean: allComplete ? mean(rows.map(t=>t.cost.complete_amount!)) : null,
+      complete_mean: allComplete && !functional ? mean(rows.map(t=>t.cost.complete_amount!)) : null,
       partial_mean: mean(rows.flatMap(t=>t.cost.partial_amount===null?[]:[t.cost.partial_amount])),
       deadline_success_rate: rows.length && rows.every(t=>!['followup_pending','outcome_missing'].includes(t.deadline_status)) ? rows.filter(t=>t.deadline_status==='success').length/rows.length : null };
   });
   const a=arms[0]!.complete_mean; const b=arms[1]!.complete_mean;
   const relative = a!==null&&b!==null&&!new Money(a).isZero() ? new Money(b).minus(a).div(a).toFixed() : null;
-  const reasons: FlexibleComparisonReport['adoption']['reasons']=['analysis_unverified'];
+  const reasons: FlexibleComparisonReport['adoption']['reasons']=functional?['functional_pilot_only']:['analysis_unverified'];
   if(!allComplete)reasons.push('incomplete'); if(tasks.some(t=>t.deadline_status==='followup_pending'))reasons.push('followup_pending');
   if(tasks.some(t=>t.quality.outcome===null))reasons.push('quality_missing');
   return parseComparison(FlexibleComparisonReportSchema, { schema_version:2,descriptive_version:'flexible-cost-descriptive-1', report_id:config.report_id,protocol_id:config.protocol.id,
     cutoff:config.cutoff,evaluated_at:config.evaluated_at,validity_status:'valid',data_revision:config.data_revision,snapshot_sequence:config.snapshot_sequence,revision_reason:config.revision_reason,supersedes_report_id:config.supersedes_report_id,
     snapshot_hash:createHash('sha256').update(canonicalJson(config)).digest('hex'),price_table_hash:createHash('sha256').update(canonicalJson(config.price_table)).digest('hex'),price_table:config.price_table,formula_version:config.formula_version,
-    tasks,arms,relative_change:relative,adoption:{status:'inconclusive',reasons},limitations:['standardized_estimated_cost_is_not_actual_billing','whole_task_cost_unconfirmed_without_coverage','elapsed_is_not_human_labor','realized_model_is_descriptive_only'] }, 'invalid_snapshot');
+    ...(functional ? { purpose: 'functional_pilot', evaluation_status: 'functional_only' } : {}),
+    tasks,arms,relative_change:relative,adoption:{status:functional?'not_applicable':'inconclusive',reasons},limitations:['standardized_estimated_cost_is_not_actual_billing','whole_task_cost_unconfirmed_without_coverage','elapsed_is_not_human_labor','realized_model_is_descriptive_only'] }, 'invalid_snapshot');
 }
 export function captureFlexibleInput(store: Store, protocolId: string, reportId: string, cutoff: string, evaluatedAt: string, sequence: number, reason: FlexibleSnapshotInput['revision_reason'], supersedes: string|null): FlexibleSnapshotInput {
   const row=protocolRow(store,protocolId); const protocol=comparisonProtocol(store,row); if(protocol.schema_version!==2)throw new Error('unsupported_report_mode');

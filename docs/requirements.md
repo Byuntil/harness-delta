@@ -145,6 +145,17 @@ primary and quality metrics, margins, sample plan, follow-up, stopping rules,
 missingness policy, confidence level, and analysis version before starting.
 Do not fill missing real experiment inputs with invented defaults.
 
+A v2 `functional_pilot` checks assignment, collection and reporting on useful
+work without evaluating harness effectiveness. It retains the operational
+protocol settings and exact production source gates, but forbids `minimum_effect`,
+`quality_margin` and `confidence_level`. Both existing purposes retain their
+required fields. Functional reports explicitly identify `functional_only` and
+`not_applicable` adoption; they cannot produce primary arm means, relative savings
+or inferential decisions, including if future complete-cost evidence is available.
+A frozen purpose is immutable; a later effectiveness study needs its own accepted
+protocol and validated analysis. Functional protocols are not admitted to the
+current synthetic-only exchange lane.
+
 The initial allocation proposal is balanced 1:1 blocks with fixed size/strata and
 one authoritative allocator per stratum. Persist before revealing the assignment;
 keep future allocations hidden. Detect conflicting allocators and reassignment

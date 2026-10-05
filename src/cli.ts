@@ -4,6 +4,7 @@ import { Command, CommanderError } from 'commander';
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerComparisonCommands } from './comparison-cli.js';
+import { registerTaskWorkflowCommands, type WorkflowCommandDependencies } from './task-workflow-cli.js';
 import { Store } from './store.js';
 import { Lifecycle, type Outcome } from './lifecycle.js';
 import { Deletion } from './deletion.js';
@@ -15,7 +16,7 @@ import { freezePeriod,periodReport } from './reports/period.js';
 import { renderReport } from './reports/render.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function main(argv: string[]): Promise<number> {
+export async function main(argv: string[], workflowDependencies:WorkflowCommandDependencies={}): Promise<number> {
   let store: Store | undefined;
   const program = new Command().name('hm').description('Local metadata measurement').requiredOption('--db <file>', 'local SQLite database');
   program.exitOverride().configureOutput({ writeErr: () => process.stderr.write('invalid_command\n') });
@@ -79,6 +80,7 @@ export async function main(argv: string[]): Promise<number> {
   report.command('period <id>').requiredOption('--cutoff <UTC>').option('--format <json|markdown>','output format','json')
     .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(periodReport(db(),id,options.cutoff),options.format));});
   registerComparisonCommands(program, db, print);
+  registerTaskWorkflowCommands(program, db, print, workflowDependencies);
   registerExchangeCommands(program, db, print);
   try {
     await program.parseAsync(argv, { from: 'user' });
