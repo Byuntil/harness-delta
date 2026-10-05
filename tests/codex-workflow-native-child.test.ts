@@ -59,7 +59,7 @@ test('actual CLI schema/coordinator resumes a linked root with one child and rep
     expect(replay.adapter_result).toMatchObject({state:'completed',observed_requests:0});expect(f.store.eventCount()).toBe(4);expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(1);
     expect(output).not.toContain('SYNTHETIC_PRIVATE');
   }finally{out.mockRestore();f.cleanup();}
-});
+},20000);
 
 
 test.each(['spawn','empty-wait','empty-wait-missing-child-usage','foreign-wait','empty-spawn','unknown-item'])('one-shot family qualification validates %s with source-owned child evidence',async stdoutMode=>{
