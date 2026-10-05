@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { beginAssignedWorkflow, finishAssignedWorkflow, runAssignedWorkflow, workflowStatus } from '../src/task-workflow.js';
+import type { WorkflowAdapter, WorkflowAdapterResult } from '../src/task-workflow.js';
 import { Store } from '../src/store.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import { registerVariant, registerProtocol, freezeProtocol } from '../src/comparison.js';
@@ -83,6 +84,39 @@ test('native adapter cannot execute via synthetic protocol, and adapter errors a
   const f = fixture(); try {
     await expect(runAssignedWorkflow(f.store, f.input, { product: 'codex', productVersion: '0.160.0', profileId: 'any', run: () => Promise.resolve() }, runtime, f.clock)).rejects.toThrow('workflow_adapter_mismatch');
     await expect(runAssignedWorkflow(f.store, f.input, { product: 'synthetic', productVersion: '1.0.0', profileId: 'synthetic-flexible-v1', run: () => { throw new Error('PRIVATE_SECRET'); } }, runtime, f.clock)).rejects.toThrow(/^workflow_adapter_failed$/);
+    // A throwing adapter never started a native process; this invocation's activation is paused.
+    expect(new Lifecycle(f.store).state('task-1')).toBe('paused');
+    await expect(runAssignedWorkflow(f.store, { ...f.input, confirmation_id: 'confirmation-2' }, { product: 'synthetic', productVersion: '1.0.0', profileId: 'synthetic-flexible-v1', run: () => { throw new Error('binary_mismatch'); } }, runtime, f.clock)).rejects.toThrow(/^binary_mismatch$/);
+  } finally { f.cleanup(); }
+});
+
+const syntheticAdapter = (extra: Partial<WorkflowAdapter>): WorkflowAdapter => ({ product: 'synthetic', productVersion: '1.0.0', profileId: 'synthetic-flexible-v1', run: () => Promise.resolve(), ...extra });
+const failedBeforeLaunch: WorkflowAdapterResult = { run_id: 'run-1', session_id: null, state: 'failed', reason: 'binary_mismatch', observed_requests: 0, harness_application: 'unapplied', process_started: false };
+
+test('adapter preflight failure leaves no assignment, activation or open interval', async () => {
+  const f = fixture(); try {
+    let ran = false;
+    await expect(runAssignedWorkflow(f.store, f.input, syntheticAdapter({ preflight: () => { throw new Error('binary_mismatch'); }, run: () => { ran = true; return Promise.resolve(); } }), runtime, f.clock)).rejects.toThrow(/^binary_mismatch$/);
+    expect(ran).toBe(false);
+    expect(f.store.all('SELECT id FROM comparison_assignments')).toEqual([]);
+    expect(f.store.all('SELECT id FROM active_intervals')).toEqual([]);
+    expect(f.store.all("SELECT id FROM tasks WHERE state <> 'registered'")).toEqual([]);
+    await expect(runAssignedWorkflow(f.store, f.input, syntheticAdapter({ preflight: () => { throw new Error('PRIVATE_SECRET'); } }), runtime, f.clock)).rejects.toThrow(/^workflow_preflight_failed$/);
+  } finally { f.cleanup(); }
+});
+
+test('a failure before native launch pauses only an activation made by this invocation', async () => {
+  const f = fixture(); try {
+    const first = await runAssignedWorkflow(f.store, f.input, syntheticAdapter({ run: () => Promise.resolve(failedBeforeLaunch) }), runtime, f.clock);
+    expect(first).toMatchObject({ state: 'paused', activation_reverted: true, adapter_result: { state: 'failed', process_started: false } });
+    expect(f.store.all('SELECT id FROM active_intervals WHERE ended_at IS NULL')).toEqual([]);
+    f.set('2026-01-01T00:01:00Z');
+    const started = await runAssignedWorkflow(f.store, { ...f.input, confirmation_id: 'confirmation-2' }, syntheticAdapter({ run: () => Promise.resolve({ ...failedBeforeLaunch, run_id: 'run-2', process_started: true }) }), runtime, f.clock);
+    expect(started).toMatchObject({ state: 'active', activation_reverted: false });
+    f.set('2026-01-01T00:02:00Z');
+    // Already active before this invocation: a pre-launch failure leaves it active.
+    const kept = await runAssignedWorkflow(f.store, { ...f.input, confirmation_id: 'confirmation-3' }, syntheticAdapter({ run: () => Promise.resolve({ ...failedBeforeLaunch, run_id: 'run-3' }) }), runtime, f.clock);
+    expect(kept).toMatchObject({ state: 'active', activation_reverted: false });
     expect(new Lifecycle(f.store).state('task-1')).toBe('active');
   } finally { f.cleanup(); }
 });

@@ -62,6 +62,7 @@ function safeReason(error:unknown){
   }catch{return 'collection_failed';}
 }
 export const pinnedCodexWorkflowBinarySha='112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b';
+const hookRecorderSha='e20dc70b2864cead9819cbb4f6717164778121b4aef510c820e795eb19835bf0';
 export interface CodexQualificationPhase {
   intent_sha256:string;deadline:number;expectedMarker:string|null;fixtureScript?:string;onNativeSpawn?():void;
 }
@@ -107,6 +108,15 @@ function file(path:string,max:number):Buffer {
     const after=fstatSync(fd);if(after.size!==before.size||after.mtimeMs!==before.mtimeMs)throw new Error('unstable_file');return b;
   }finally{closeSync(fd);}
 }
+/** Open-file identity; any content write changes ctime, so an equal identity
+ * means the bytes hashed by preflight are the bytes about to be executed. */
+function fileIdentity(path:string):string {
+  if(realpathSync(path)!==path)throw new Error('unsafe_file');
+  const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+  try{const st=fstatSync(fd,{bigint:true});if(!st.isFile())throw new Error('unsafe_file');return [st.dev,st.ino,st.size,st.mtimeNs,st.ctimeNs].join(':');}
+  finally{closeSync(fd);}
+}
+interface VerifiedBinary {path:string;sha256:string;identity:string}
 const quote=(value:string)=>"'"+value.replaceAll("'","'\\''")+"'";
 function exactSource(path:string,home:string){
   const base=realpathSync(join(home,'sessions'));const rel=relative(base,path);
@@ -140,23 +150,52 @@ function adapter(store:Store,input:unknown,synthetic:boolean,script?:string):Wor
   // the source profile. Source content never discovers or authorizes a child.
   const storedFamily=()=>!synthetic&&typeof input==='object'&&input!==null&&'session_id' in input&&typeof input.session_id==='string'&&!!store.get(
     'SELECT 1 FROM codex_workflow_children c JOIN codex_workflow_runs r ON r.id=c.run_id WHERE r.session_id=? UNION ALL SELECT 1 FROM sessions WHERE parent_id=? LIMIT 1',[input.session_id,input.session_id]);
+  let verifiedBinary:VerifiedBinary|undefined;
+  const admitted=()=>{
+    const execution=CodexWorkflowExecutionSchema.parse(input);
+    const family=!synthetic&&(hasFamily()||storedFamily());
+    const profile=family?codexWorkflowChildProfileId:codexWorkflowProfileId;
+    if(!synthetic&&!productionSourceEvidence.some(e=>e.product==='codex'&&e.product_version==='0.160.0'&&e.profile_id===profile))throw new Error('codex_workflow_source_unqualified');
+    if(!synthetic&&execution.binary.sha256!==pinnedCodexWorkflowBinarySha)throw new Error('binary_mismatch');
+    if(synthetic&&(realpathSync(execution.binary.path)!==realpathSync(process.execPath)||!script))throw new Error('synthetic_store_required');
+    return {execution,family};
+  };
   return {product:synthetic?'synthetic':'codex',productVersion:synthetic?'1.0.0':'0.160.0',
     get profileId(){return synthetic?'synthetic-flexible-v1':hasFamily()||storedFamily()?codexWorkflowChildProfileId:codexWorkflowProfileId;},
+    preflight(){
+      let checked:ReturnType<typeof admitted>;
+      try{checked=admitted();}catch(error){throw error instanceof z.ZodError?new Error('invalid_execution'):error;}
+      const {execution:e,family}=checked;
+      if(family)nativeChildSupported(e);
+      try{if(realpathSync(e.codex_home)!==e.codex_home||!lstatSync(e.codex_home).isDirectory())throw new Error('unsafe_home');}catch{throw new Error('unsafe_home');}
+      // launch/resume spawn the binary; execute() repeats these checks right before spawn.
+      if(e.operation==='launch'||e.operation==='resume'){
+        let binary:string;let identity:string;
+        try{identity=fileIdentity(e.binary.path);binary=hash(file(e.binary.path,256*1024*1024));if(fileIdentity(e.binary.path)!==identity)throw new Error('unstable_file');}
+        catch{throw new Error('binary_unreadable');}
+        if(binary!==e.binary.sha256)throw new Error('binary_mismatch');
+        verifiedBinary={path:e.binary.path,sha256:binary,identity};
+        let recorder:string;try{recorder=hash(file(e.hook_recorder,65536));}catch{throw new Error('invalid_hook_recorder');}
+        if(recorder!==hookRecorderSha)throw new Error('invalid_hook_recorder');
+        try{const prompt=file(e.prompt_file!,1024*1024);const text=prompt.toString('utf8');if(!Buffer.from(text).equals(prompt)||text.includes('\0'))throw new Error('invalid_prompt');}
+        catch{throw new Error('invalid_prompt');}
+      }
+    },
     async run(context){
-      const execution=CodexWorkflowExecutionSchema.parse(input);
-      const family=!synthetic&&(hasFamily()||storedFamily());
-      const profile=family?codexWorkflowChildProfileId:codexWorkflowProfileId;
-      if(!synthetic&&!productionSourceEvidence.some(e=>e.product==='codex'&&e.product_version==='0.160.0'&&e.profile_id===profile))throw new Error('codex_workflow_source_unqualified');
-      if(!synthetic&&execution.binary.sha256!=='112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b')throw new Error('binary_mismatch');
-      if(synthetic){if(realpathSync(execution.binary.path)!==realpathSync(process.execPath)||!script||!store.get('SELECT 1 FROM comparison_workspace_scope'))throw new Error('synthetic_store_required');}
+      const {execution,family}=admitted();
+      // The synthetic workspace scope exists only after assignment.
+      if(synthetic&&!store.get('SELECT 1 FROM comparison_workspace_scope'))throw new Error('synthetic_store_required');
       const nativeFamily=family?nativeChildExecution(store,execution,context):undefined;
-      return execute(store,execution,context,synthetic,script,undefined,nativeFamily);
+      return execute(store,execution,context,synthetic,script,undefined,nativeFamily,verifiedBinary);
     }};
 }
 interface NativeFamily {rootTurn:string|null;childTurn:string|null;rootRuntime:WorkflowRuntime|null;childRuntime:WorkflowRuntime|null;}
-function nativeChildExecution(store:Store,e:Execution,c:WorkflowExecutionContext):NativeFamily {
+function nativeChildSupported(e:Execution):void {
   if(e.sandbox!=='read-only'||e.operation==='launch'&&(process.platform!=='darwin'||process.arch!=='arm64')||Number(process.versions.node.split('.')[0])!==24||
     (e.operation!=='launch'&&e.operation!=='collect')||e.operation==='launch'&&!e.child_runtime)throw new Error('codex_workflow_child_operation_unsupported');
+}
+function nativeChildExecution(store:Store,e:Execution,c:WorkflowExecutionContext):NativeFamily {
+  nativeChildSupported(e);
   if(e.operation==='launch')return {rootTurn:null,childTurn:null,rootRuntime:null,childRuntime:null};
   const bound=store.get<{session_id:string;source_path:string;root_path:string;task_id:string;project_id:string;generation:number}>(
     "SELECT c.session_id,c.source_path,r.source_path AS root_path,r.task_id,r.project_id,r.generation FROM codex_workflow_children c JOIN codex_workflow_runs r ON r.id=c.run_id WHERE r.session_id=? AND r.operation='launch' AND r.purpose='development' AND r.state='completed' AND r.scope_verified=1 AND r.identity_verified=1 AND c.source_identity IS NOT NULL ORDER BY r.started_at DESC,r.rowid DESC LIMIT 1",[e.session_id]);
@@ -172,7 +211,7 @@ function nativeChildExecution(store:Store,e:Execution,c:WorkflowExecutionContext
   return {rootTurn:root.turn,childTurn:child.turn,rootRuntime:root.runtime,childRuntime:child.runtime};
 }
 async function execute(store:Store,execution:Execution,c:WorkflowExecutionContext,synthetic:boolean,script?:string,
-  qualification?:{validate():void;expectedMarker:string|null;replay:boolean;onMarker():void;onSpawn():void;maxOwnResponses:number},nativeFamily?:NativeFamily):Promise<WorkflowAdapterResult>{
+  qualification?:{validate():void;expectedMarker:string|null;replay:boolean;onMarker():void;onSpawn():void;maxOwnResponses:number},nativeFamily?:NativeFamily,verifiedBinary?:VerifiedBinary):Promise<WorkflowAdapterResult>{
   const e=structuredClone(execution);
   const started=new Date().toISOString();const product=synthetic?'synthetic':'codex';const version=synthetic?'1.0.0':'0.160.0';
   let session:string|null=null;let source:string|null=null;let previous:SourceBytes|undefined;let initialTurn:string|undefined=nativeFamily?.rootTurn??undefined;
@@ -381,8 +420,10 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     }
     if(e.operation==='link'){store.execute('UPDATE codex_workflow_runs SET application=? WHERE id=?',[application,e.run_id]);}
     else if(e.operation==='launch'||e.operation==='resume'){
-      guard();if(hash(file(e.binary.path,256*1024*1024))!==e.binary.sha256)throw new Error('binary_mismatch');
-      if(hash(file(e.hook_recorder,65536))!=='e20dc70b2864cead9819cbb4f6717164778121b4aef510c820e795eb19835bf0')throw new Error('invalid_hook_recorder');
+      // Re-hash unless this exact file identity was hashed by preflight.
+      guard();const unchanged=verifiedBinary!==undefined&&verifiedBinary.path===e.binary.path&&verifiedBinary.sha256===e.binary.sha256&&verifiedBinary.identity===fileIdentity(e.binary.path);
+      if(!unchanged&&hash(file(e.binary.path,256*1024*1024))!==e.binary.sha256)throw new Error('binary_mismatch');
+      if(hash(file(e.hook_recorder,65536))!==hookRecorderSha)throw new Error('invalid_hook_recorder');
       const prompt=file(e.prompt_file!,1024*1024);const text=prompt.toString('utf8');if(!Buffer.from(text).equals(prompt)||text.includes('\0'))throw new Error('invalid_prompt');
       const instructions=c.instructions.length===1?c.instructions[0]!.content:c.instructions.map(i=>`[${i.artifact_id}]\n${i.content}`).join('\n\n');
       if(Buffer.byteLength(instructions)>32768)throw new Error('instruction_size');
@@ -512,5 +553,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
   const finalDiagnostic=CodexWorkflowDiagnosticSchema.nullable().parse(diagnostic);
   store.execute("UPDATE codex_workflow_runs SET state=?,reason=?,diagnostic_stage=?,diagnostic_code=?,ended_at=? WHERE id=? AND state='running'",[state,failure,finalDiagnostic?.stage??null,finalDiagnostic?.code??null,new Date().toISOString(),e.run_id]);
   const run=codexWorkflowRun(store,e.run_id);
-  return {run_id:e.run_id,session_id:session,state,reason:failure,diagnostic:finalDiagnostic,observed_requests:run?.observed_requests??0,harness_application:run?.application==='pending'?'unapplied':application};
+  return {run_id:e.run_id,session_id:session,state,reason:failure,diagnostic:finalDiagnostic,observed_requests:run?.observed_requests??0,harness_application:run?.application==='pending'?'unapplied':application,
+    // link/collect observe a process the adapter did not start; it may still be running.
+    ...(e.operation==='launch'||e.operation==='resume'?{process_started:child?.pid!==undefined}:{})};
 }

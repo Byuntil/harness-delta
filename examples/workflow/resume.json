@@ -1,0 +1,12 @@
+{
+  "run_id": "run-2",
+  "operation": "resume",
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "binary": { "path": "/absolute/path/to/codex", "sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b" },
+  "codex_home": "/absolute/path/to/codex-home",
+  "hook_recorder": "/absolute/path/to/harness-delta/scripts/conformance/candidate-start-recorder.mjs",
+  "prompt_file": "/absolute/path/to/private-follow-up-prompt.txt",
+  "sandbox": "workspace-write",
+  "timeout_ms": 1800000,
+  "poll_ms": 250
+}

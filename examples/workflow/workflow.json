@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "assignment": {
+    "schema_version": 2,
+    "protocol_id": "pilot-1",
+    "project_id": "project-1",
+    "logical_task_id": "issue-123",
+    "task_id": "task-1",
+    "metadata": {
+      "schema_version": 2,
+      "type": "feature",
+      "expected_size": "small",
+      "assignee": "user-1",
+      "product": "codex",
+      "initial_model": null,
+      "criterion_ids": ["criterion-1"]
+    },
+    "environment_id": "laptop-1",
+    "code_base_commit": "0000000000000000000000000000000000000000",
+    "allocator_id": "allocator-1"
+  },
+  "product_version": "0.160.0",
+  "confirmation_id": "confirmation-1",
+  "artifacts": [
+    { "variant_id": "variant-a", "selected_artifacts": [{ "artifact_id": "instructions", "path": "./variant-a.md" }] },
+    { "variant_id": "variant-b", "selected_artifacts": [{ "artifact_id": "instructions", "path": "./variant-b.md" }] }
+  ]
+}

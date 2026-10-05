@@ -49,7 +49,7 @@ test('CLI rejects an unregistered session version without a session row', async 
       'session', 'link', 's9', '--task', 't1', '--source', '/synthetic/does-not-exist-unregistered.jsonl',
       '--product', 'codex', '--version', '0.159.0',
     ])).toBe(2);
-    expect(errors.join('')).toContain('input_or_state_error');
+    expect(errors.join('')).toBe('unsupported\n');
     const store = new Store(file);
     try { expect(store.all('SELECT id FROM sessions')).toEqual([]); } finally { store.close(); }
   } finally {

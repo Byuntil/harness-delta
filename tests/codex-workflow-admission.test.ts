@@ -125,11 +125,12 @@ test('source admission cannot fill missing experiment settings or start a task w
 });
 test('production CLI launch and explicit resume reach the guarded binary check without spawning a product', async () => {
   const f = fixture(); try {
-    const launch = await f.call(f.configure('bad-launch', 'launch')); expect(launch.code).toBe(2); expect(launch.stdout).not.toBe('');
-    expect(JSON.parse(launch.stdout)).toMatchObject({ adapter_result: { state: 'failed', reason: 'binary_mismatch', harness_application: 'unapplied', observed_requests: 0 } });
+    // Preflight rejects before assignment, activation or a run journal row.
+    const launch = await f.call(f.configure('bad-launch', 'launch')); expect(launch).toMatchObject({ code: 2, stdout: '' }); expect(launch.stderr).toMatch(/^binary_mismatch\nhint: /);
+    expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(0); expect(f.store.all('SELECT id FROM codex_workflow_runs')).toHaveLength(0);
     const s = f.source(); expect((await f.call(f.configure('link-before-resume', 'link', s.id, s.path))).code).toBe(0);
-    const resumed = await f.call(f.configure('bad-resume', 'resume', s.id)); expect(resumed.code).toBe(2);
-    expect(JSON.parse(resumed.stdout)).toMatchObject({ adapter_result: { session_id: s.id, state: 'failed', reason: 'binary_mismatch', harness_application: 'unapplied' } });
+    const resumed = await f.call(f.configure('bad-resume', 'resume', s.id)); expect(resumed).toMatchObject({ code: 2, stdout: '' }); expect(resumed.stderr).toMatch(/^binary_mismatch\n/);
+    expect(f.store.all("SELECT id FROM codex_workflow_runs WHERE id='bad-resume'")).toHaveLength(0);
     expect(f.store.eventCount()).toBe(0); expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(1);
     expect(showProtocol(f.store, 'comparison-1')).toMatchObject({ real_allocation_enabled: true });
   } finally { f.cleanup(); }

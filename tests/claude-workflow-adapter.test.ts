@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { createClaudeWorkflowAdapter, createSyntheticClaudeWorkflowAdapter } from '../src/claude-workflow-adapter.js';
+import { createClaudeWorkflowAdapter, createSyntheticClaudeWorkflowAdapter, recoverClaudeWorkflow } from '../src/claude-workflow-adapter.js';
 import { registerPriceTable } from '../src/pricing.js';
 import { makeFlexibleFixture } from './helpers/flexible-fixture.js';
 import { readObservedCostReport } from '../src/observed-cost-report.js';
@@ -88,13 +88,34 @@ test('actual main CLI connects Claude assignment, launch, trace collector and du
 },20000);
 
 
-test('an already linked file channel prevents Claude trace ownership before process launch',async()=>{
+test('a Claude workspace failure before launch reports its code and pauses the task it started',async()=>{
+  const f=fixture('root');try{
+    mkdirSync(f.execution.workspace,{mode:0o755});chmodSync(f.execution.workspace,0o755);
+    const result=await runAssignedWorkflow(f.store,f.input,createSyntheticClaudeWorkflowAdapter(f.store,f.execution),{model:null,effort:null});
+    expect(result).toMatchObject({state:'paused',activation_reverted:true,adapter_result:{state:'failed',reason:'claude_workflow_private_workspace_required',process_started:false}});
+    expect(f.store.all('SELECT id FROM active_intervals WHERE ended_at IS NULL')).toEqual([]);
+  }finally{f.cleanup();}
+});
+test('a recovered Claude run keeps its abandoned state after its live process stops',async()=>{
+  const f=fixture('wait');try{
+    const launched=runAssignedWorkflow(f.store,f.input,createSyntheticClaudeWorkflowAdapter(f.store,f.execution),{model:null,effort:null});
+    const deadline=Date.now()+12000;while(f.store.eventCount()!==1&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,20));expect(f.store.eventCount()).toBe(1);
+    expect(recoverClaudeWorkflow(f.store,'claude-run')).toMatchObject({state:'failed',reason:'abandoned'});
+    await launched;
+    expect(f.store.get('SELECT state,reason FROM claude_workflow_runs WHERE id=?',['claude-run'])).toEqual({state:'failed',reason:'abandoned'});
+  }finally{f.cleanup();}
+},20000);
+
+test('an already owned collection channel prevents Claude trace ownership before process launch',async()=>{
   const f=fixture('root');try{
     const native=createSyntheticClaudeWorkflowAdapter(f.store,f.execution);
+    // A synthetic store rejects file sources outright, so a managed run is the other owner.
     await expect(runAssignedWorkflow(f.store,f.input,{...native,run:async c=>{
-      f.store.execute("INSERT INTO sessions(id,task_id,project_id,product,product_version,source_path) VALUES ('old-source',?,?,'synthetic','1.0.0','/synthetic-source')",[c.taskId,c.projectId]);
+      const at=new Date().toISOString();
+      f.store.execute("INSERT INTO sessions(id,task_id,project_id,product,product_version) VALUES ('managed-session',?,?,'synthetic','1.0.0')",[c.taskId,c.projectId]);
+      f.store.execute("INSERT INTO observation_runs(id,project_id,task_id,session_id,generation,profile_id,state,started_at,updated_at,input_facts,output_facts) VALUES ('managed-run',?,?,'managed-session',?,'synthetic-managed-v1','running',?,?,'{}','{}')",[c.projectId,c.taskId,c.generation,at,at]);
       return native.run(c);
-    }},{model:'root-model',effort:'high'})).rejects.toThrow('workflow_adapter_failed');
+    }},{model:'root-model',effort:'high'})).rejects.toThrow(/^candidate_mixed_sources$/);
     expect(f.store.all('SELECT * FROM claude_workflow_runs')).toHaveLength(0);expect(f.store.eventCount()).toBe(0);
   }finally{f.cleanup();}
 });
