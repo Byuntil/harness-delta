@@ -8,8 +8,14 @@ reports remain readable unchanged. Use Node 24 and `npm run build`.
 ## Inputs and scope
 
 Use a dedicated synthetic store. Registration and offline synthetic tests require
-no product executable or model request. The production flexible collector registry
-is empty. Candidate parsers for Codex CLI 0.158.0 and Claude Code 2.1.283 are
+no product executable or model request. The production registry admits two separate Codex 0.160.0 profiles:
+[the root workflow](../validation/codex-workflow-01600-source-readiness.md) and
+[the fresh root/single-direct-child workflow](../validation/codex-workflow-01600-direct-child-source-readiness.md).
+Both collect partial own-response usage and have no complete cost. The child
+profile requires read-only permissions and does not support family resume.
+A v2 protocol accepts one profile per product/version, so choose one Codex profile
+for that protocol. Claude general workflow remains unqualified despite its
+separately verified bounded internal synchronous probe. Candidate parsers for Codex CLI 0.158.0 and Claude Code 2.1.283 are
 synthetic test candidates, not admitted sources. The existing v1 partial adapters
 remain separate. No desktop/app support or complete usage is inferred.
 
@@ -25,14 +31,27 @@ with `schema_version: 2`, `primary_metric: standardized_cost`,
 Each source profile contains product, exact product_version and profile_id. For
 synthetic validation use synthetic / 1.0.0 / synthetic-flexible-v1. Each stratum
 contains exactly one assignee. planning_basis_id must match sample_plan.planning_basis_id.
-Participants, environments, followup, recruitment dates, minimum_effect,
-quality_margin, sample plan and sensitivity plans are required user selections.
+Participants, environments, followup, recruitment dates, missingness, sample plan
+and analysis/sensitivity labels remain required user selections. For the existing
+`synthetic_validation` and `real_experiment` purposes, `minimum_effect`,
+`quality_margin` and `confidence_level` are also required. Use v2
+`purpose: functional_pilot` for a functional check; these three effect inputs
+must be absent. Its source admission and task workflow are identical to the
+qualified native lane, but inference is always unavailable. Reports mark
+`evaluation_status: functional_only` and `adoption.status: not_applicable`, with
+null primary arm complete means and relative change. Descriptive partial means,
+counts, task costs and human criteria remain available; no superiority or
+confidence interval is calculated. Existing protocols/reports retain their shape;
+functional protocols remain outside synthetic-only file exchange.
 No price, duration, savings target or sample count is supplied by the product.
 Freeze before recruitment. Cost and coverage use [assigned_at, min(cutoff, followup_ends_at)); a delayed task start never removes earlier gaps. Active and elapsed time start at task start. Assignment and usage/evaluation endpoints are half-open.
 
 Task creation through comparison assignment uses schema_version 2 and task
 metadata schema_version 2 with initial_model nullable, replacing v1 model.
 The flag-based task register command remains v1. Null means unknown, not zero.
+
+For a first useful task, follow the [functional pilot preparation](functional-task-pilot.md).
+It reuses these contracts and keeps incomplete drafts separate from frozen inputs.
 
 ## Immutable prices and commands
 
@@ -91,16 +110,24 @@ assignment denominator remain unavailable even when all declared writers respond
 ## Preparation gates and followup
 
 Readiness reports real_allocation, complete_cost and inference independently.
-Production source/analysis registries are empty: a valid real protocol cannot
-start real allocation. Stored cost facts remain unknown until a validated producer
-exists. Synthetic data cannot be converted into a real experiment store; a future
-approved real workflow requires a separate empty store and source/operations gate.
+The exact Codex 0.160.0 `codex-workflow-own-response-v1` and separately admitted
+`codex-workflow-direct-child-v1` sources permit real local allocation and partial
+collection for a complete frozen v2 protocol, within each profile's supported
+scope. Their shared native engine has operational evidence; ordinary assigned
+CLI wiring has offline evidence. Unmatched
+profiles, mixed unqualified products and invalidated protocols remain closed.
+The analysis registry is empty. Whole-task cost facts remain unknown without a
+validated complete producer. Synthetic test inputs do not become real experiment
+inputs; create a dedicated store with the user's explicit choices and use
+[workflow codex](task-native-workflow.md), not the generic file collector.
 Complete cost also requires all metric/window facts, while inference additionally
 requires an approved method. Neither completeTotals nor causal adoption is enabled.
 See the [analysis boundary](../validation/flexible-cost-analysis-boundary.md).
 
-Further validation requires separate approval: exact source versions, model/effort
-switches, request retries, children, compaction, terminal accounting and durable
+Further validation requires separate approval: additional exact source versions,
+model/effort combinations beyond the tested start/resume pair, request retries,
+children, compaction, terminal accounting and durable
 flush; then a continuous-cost/repeated-person method and selected experiment
-inputs. This implementation does not run conformance, admit profiles, change
-authentication or execute a real experiment.
+inputs. Registration and reporting commands do not launch products, change
+authentication or invent an actual experiment. Native launch/resume require the
+separate explicit workflow execution commands and their guarded configuration.

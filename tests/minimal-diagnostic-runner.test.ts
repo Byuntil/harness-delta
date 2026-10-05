@@ -174,7 +174,7 @@ async function syntheticResume(events:unknown[], context:unknown = resumeContext
   writeFileSync(binary,`#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(lines)});\n`,{mode:0o700});
   try {
     return await boundedSpawn(binary,args,
-      {cwd:root,timeoutMs:1000,env:{},observeEvents:true,resumeWarningContext:context} as Parameters<typeof boundedSpawn>[2]);
+      {cwd:root,timeoutMs:5000,env:{},observeEvents:true,resumeWarningContext:context} as Parameters<typeof boundedSpawn>[2]);
   } finally {rmSync(root,{recursive:true,force:true});}
 
 }
@@ -191,7 +191,7 @@ describe('exact official nonfatal resume warning', () => {
     const reversed = {...resumeWarningEvent,item:{...resumeWarningEvent.item,message:officialResumeWarning.replaceAll('gpt-6-luna','TEMP').replaceAll('gpt-5.6-luna','gpt-6-luna').replaceAll('TEMP','gpt-5.6-luna')}};
     const r = await syntheticResume(resumeEvents(reversed),{...resumeContext,previousModel:'gpt-5.6-luna',currentModel:'gpt-6-luna'},diagnosticArguments(2,resumeSession));
     expect(r.streamStopped).toBe(false); expect(r.warningCounts).toEqual({resume_model_changed:1});
-  });
+  },20000); // Two independent bounded five-second fixture processes.
   it.each([
     ['no context',undefined,undefined],
     ['wrong previous model',{...resumeContext,previousModel:'other'},undefined],

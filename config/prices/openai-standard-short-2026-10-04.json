@@ -1,0 +1,20 @@
+{
+  "id": "openai-standard-short-2026-10-04",
+  "version": "openai-standard-short-v1",
+  "currency": "USD",
+  "source_id": "openai-api-pricing-2026-10-04",
+  "as_of": "2026-10-04T00:00:00Z",
+  "unit_tokens": 1000000,
+  "display_decimals": 6,
+  "rounding": "half_even",
+  "entries": [
+    { "product": "codex", "model": "gpt-6-astra", "component": "ordinary_input", "price_per_unit": "10" },
+    { "product": "codex", "model": "gpt-6-astra", "component": "cache_read", "price_per_unit": "1" },
+    { "product": "codex", "model": "gpt-6-astra", "component": "cache_write", "price_per_unit": "12.5" },
+    { "product": "codex", "model": "gpt-6-astra", "component": "output", "price_per_unit": "50" },
+    { "product": "codex", "model": "gpt-6.1-sol", "component": "ordinary_input", "price_per_unit": "2" },
+    { "product": "codex", "model": "gpt-6.1-sol", "component": "cache_read", "price_per_unit": "0.1" },
+    { "product": "codex", "model": "gpt-6.1-sol", "component": "cache_write", "price_per_unit": "2.5" },
+    { "product": "codex", "model": "gpt-6.1-sol", "component": "output", "price_per_unit": "10" }
+  ]
+}

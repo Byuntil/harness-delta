@@ -1,6 +1,6 @@
 import { parseProtocol, RuntimeEvidenceSchema, type RuntimeEvidence } from './flexible-contracts.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { comparisonTimestamp, ConfirmationInputSchema, ConfigurationRecordSchema, parseComparison } from './comparison-contracts.js';
 import { protocolRow, comparisonVariant } from './comparison.js';
 import { IdSchema } from './contracts.js';
@@ -18,19 +18,33 @@ function assignedTask(store: Store, taskId: string): AssignmentRow {
   if (!row) throw new Error('task_not_assigned');
   return row;
 }
-function selectedManifest(artifacts: readonly SelectedArtifact[] | undefined): string {
+/** Exact transient bytes for per-invocation application, never stored by the report. */
+export function selectedArtifactSnapshot(artifacts: readonly SelectedArtifact[] | undefined) {
   if (!artifacts || artifacts.length === 0 || artifacts.length > 256) throw new Error('selected_artifacts_required');
   try {
     const ids = new Set<string>();
+    let totalBytes = 0;
+    const instructions: { artifact_id: string; content: string }[] = [];
     const manifest = artifacts.map(artifact => {
       const id = parseComparison(IdSchema, artifact.artifactId);
       if (ids.has(id)) throw new Error('duplicate_artifact');
       ids.add(id);
-      const stat = statSync(artifact.path);
-      if (!stat.isFile() || stat.size > 1048576) throw new Error('invalid_artifact');
-      return { artifact_id: id, sha256: createHash('sha256').update(readFileSync(artifact.path)).digest('hex') };
+      const fd = openSync(artifact.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const before = fstatSync(fd); totalBytes += before.size;
+        if (!before.isFile() || before.size > 1048576 || totalBytes > 16 * 1048576) throw new Error('invalid_artifact');
+        const bytes = Buffer.alloc(before.size); let offset = 0;
+        while (offset < bytes.length) { const count = readSync(fd, bytes, offset, bytes.length - offset, offset); if (!count) throw new Error('invalid_artifact'); offset += count; }
+        const after = fstatSync(fd);
+        if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new Error('invalid_artifact');
+        const content = bytes.toString('utf8');
+        if (!Buffer.from(content, 'utf8').equals(bytes) || content.includes('\0')) throw new Error('invalid_artifact');
+        instructions.push({ artifact_id: id, content });
+        return { artifact_id: id, sha256: createHash('sha256').update(bytes).digest('hex') };
+      } finally { closeSync(fd); }
     }).sort((a, b) => a.artifact_id < b.artifact_id ? -1 : a.artifact_id > b.artifact_id ? 1 : 0);
-    return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+    return { hash: createHash('sha256').update(JSON.stringify(manifest)).digest('hex'),
+      instructions: instructions.sort((a, b) => a.artifact_id < b.artifact_id ? -1 : a.artifact_id > b.artifact_id ? 1 : 0) };
   } catch { throw new Error('selected_artifact_error'); }
 }
 
@@ -59,7 +73,7 @@ export function confirmConfiguration(store: Store, input: unknown, timestamp: st
   if (config.evidence_method === 'self_attested' && artifacts !== undefined) throw new Error('unexpected_selected_artifacts');
   // Mechanical file checks describe current files, not reconstructed historical configurations.
   if (config.evidence_method === 'selected_artifact_hash' && Date.parse(occurredAt) !== Date.parse(now)) throw new Error('invalid_confirmation_time');
-  const hash = config.evidence_method === 'selected_artifact_hash' ? selectedManifest(artifacts) : null;
+  const hash = config.evidence_method === 'selected_artifact_hash' ? selectedArtifactSnapshot(artifacts).hash : null;
   store.immediateTransaction(() => {
     const assignment = assignedTask(store, config.task_id);
     if (Date.parse(occurredAt) < Date.parse(assignment.assigned_at) || Date.parse(occurredAt) > Date.parse(now)) throw new Error('invalid_confirmation_time');

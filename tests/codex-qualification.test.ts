@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, openSync, closeSync, unlinkSync, mkdtempSync, realpathSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { appendFileSync, openSync, closeSync, unlinkSync, mkdtempSync, realpathSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import { expect, test, vi } from 'vitest';
@@ -9,6 +10,10 @@ import * as collection from '../src/collection.js';
 import { checkCandidatePermissions } from '../src/codex-candidate-permissions.js';
 import { prepareCodexQualification, type CodexQualificationOptions } from '../src/codex-qualification.js';
 
+vi.mock('node:child_process',async importOriginal=>{
+  const actual=await importOriginal<typeof import('node:child_process')>();
+  return {...actual,spawn:vi.fn(actual.spawn)};
+});
 const readSyntheticSource=collection.readSource;
 function fixture(mode = 'success') {
   const dir = realpathSync(mkdtempSync('/tmp/hdcq-'));
@@ -22,8 +27,14 @@ function fixture(mode = 'success') {
   writeFileSync(script, `
 import {writeFileSync,appendFileSync,openSync,closeSync,unlinkSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
+const trace=${JSON.stringify(join(dir,'synthetic-timing.jsonl'))};
+const mark=(phase,extra={})=>appendFileSync(trace,JSON.stringify({phase,at:Date.now(),...extra})+'\\n');mark('node_ready');
 const mode=${JSON.stringify(mode)}, dir=${JSON.stringify(sessionsRoot)}, cwd=${JSON.stringify(cwd)};
-const args=process.argv.slice(2); const setting=args.find(s=>s.startsWith('hooks.SessionStart='));
+let args=process.argv.slice(2);
+if(process.send){await new Promise(resolve=>setTimeout(resolve,Number(process.env.HD_SYNTHETIC_SETUP_DELAY_MS??0)));process.send({ready:true});const launch=await new Promise(resolve=>process.once('message',resolve));args=launch.args;
+// Preserve the native fresh-source contract: never create in the launch millisecond.
+while(Date.now()<launch.startedAt+2)await new Promise(resolve=>setTimeout(resolve,1));}
+const setting=args.find(s=>s.startsWith('hooks.SessionStart='));
 const command=setting.match(/command="([^"]+)"/)[1];
 const root='00000000-0000-0000-0000-000000000001', child='00000000-0000-0000-0000-000000000002';
 const path=id=>dir+'/'+id+'.jsonl'; const at=()=>new Date().toISOString();
@@ -50,7 +61,8 @@ if(mode==='source-malformed')write(path(id),'PRIVATE_SOURCE_SENTINEL\\n',true);
 if(id!==root){if(mode==='child-id-missing'||mode==='child-id-missing-path')delete payload.agent_id;
 if(mode==='child-id-null')payload.agent_id=null;if(mode==='child-id-malformed')payload.agent_id='invalid-child-id';
 if(mode==='child-id-missing-path')payload.transcript_path=dir+'/uncreated-child.jsonl';}
-const result=spawnSync(command,[],{input:JSON.stringify(payload),timeout:3000}); if(result.status!==0)process.exit(3);}
+mark(id===root?'root_hook_start':'child_hook_start');
+const result=spawnSync(command,[],{input:JSON.stringify(payload),timeout:3000});mark(id===root?'root_hook_end':'child_hook_end',{status:result.status,signal:result.signal,error:result.error?.code??null}); if(result.status!==0)process.exit(3);}
 create(root);
 if(mode==='diagnostic-native-error'){hook(root);process.stderr.write('ERROR: unexpected status 401 Unauthorized PRIVATE_SECRET\\n');process.exit(1);}
 else if(mode.startsWith('timing-')){
@@ -78,10 +90,13 @@ if(mode==='extra'){const extra='00000000-0000-0000-0000-000000000003';create(ext
 if(mode==='pause'||mode==='cancel'||mode==='source-error'||mode==='relink')setTimeout(()=>process.exit(0),1000);
 else {response(root,'root-final');process.exit(mode==='nonzero'?2:0);}}
 `);
-  writeFileSync(executable, `#!/bin/sh\nexec '${process.execPath}' '${script}' "$@"\n`, { mode: 0o700 });
+  writeFileSync(executable, `#!/bin/sh\n: > '${join(dir,'shell-ready')}'\nexec '${process.execPath}' '${script}' "$@"\n`, { mode: 0o700 });
   const sha256 = createHash('sha256').update(readFileSync(executable)).digest('hex');
   const options: CodexQualificationOptions = { store, projectId: 'p', taskId: 't', cwd, ledgerDirectory: ledger, codexHome, sessionsRoot, executable, executableSha256: sha256,
-    nodeExecutable: process.execPath, hookRecorder: resolve('scripts/conformance/candidate-start-recorder.mjs'), rootModel: 'gpt-6-astra', childModel: 'gpt-6.1-sol', rootEffort: 'high', childEffort: 'high', durationMs: 4500, handshakeTimeoutMs: 2000, pollMs: 10 };
+    nodeExecutable: process.execPath, hookRecorder: resolve('scripts/conformance/candidate-start-recorder.mjs'), rootModel: 'gpt-6-astra', childModel: 'gpt-6.1-sol', rootEffort: 'high', childEffort: 'high', durationMs: 8000, handshakeTimeoutMs: 4000, pollMs: 10 };
+  // Guard/identity tests need both fake Node launches to reach their assertion.
+  // Explicit deadline/missing-handshake cases retain their original budgets.
+  if(mode==='missing'){options.handshakeTimeoutMs=2000;options.durationMs=4500;}
   if(mode.startsWith('timing-')){options.handshakeTimeoutMs=1800;options.durationMs=mode==='timing-no-progress'||mode==='timing-unknown'?4300:9500;}
   // Keep real bounded reader/permission guards; serialize only the fake writer.
   const realNow=Date.now;let clockJump=0;
@@ -91,7 +106,16 @@ else {response(root,'root-final');process.exit(mode==='nonzero'?2:0);}}
     while(fd===undefined){try{fd=openSync(lock,'wx');}catch(error){if(!(error instanceof Error)||!('code' in error)||error.code!=='EEXIST'||Date.now()>deadline)throw error;Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);}}
     try{if(mode==='timing-late-reader'&&path===join(sessionsRoot,'00000000-0000-0000-0000-000000000002.jsonl'))clockJump=2000;return readSyntheticSource(path);}finally{closeSync(fd);unlinkSync(lock);}
   });
-  return { dir, store, lifecycle, options, sourceReadSpy, cleanup: () => { sourceReadSpy.mockRestore();clockSpy?.mockRestore();store.close(); rmSync(dir, { recursive: true, force: true }); } };
+  let primedNative:ChildProcess|undefined;
+  async function primeNative(startupDelayMs=0){
+    // Interpreter startup is fixture setup; the real runner still owns its
+    // reservation, process-group teardown and unchanged handoff/deadline clocks.
+    const native=spawn(process.execPath,[script],{detached:true,stdio:['ignore','ignore','pipe','ipc'],env:{...process.env,HD_SYNTHETIC_SETUP_DELAY_MS:String(startupDelayMs)}});primedNative=native;
+    await new Promise<void>((ok,no)=>{const timer=setTimeout(()=>no(new Error('synthetic_fixture_startup_timeout')),15000);native.once('message',()=>{clearTimeout(timer);ok();});native.once('error',no);});
+    vi.mocked(spawn).mockImplementationOnce((command,args)=>{if(command!==executable)throw new Error('unexpected_fixture_executable');native.send({args,startedAt:Date.now()});return native;});
+  }
+  const timing=()=>({shellReadyAt:existsSync(join(dir,'shell-ready'))?statSync(join(dir,'shell-ready')).birthtimeMs:null,marks:existsSync(join(dir,'synthetic-timing.jsonl'))?readFileSync(join(dir,'synthetic-timing.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line) as unknown):[]});
+  return { dir, store, lifecycle, options, sourceReadSpy, timing, primeNative, cleanup: () => { if(primedNative?.pid){try{process.kill(-primedNative.pid,'SIGKILL');}catch{/* already reaped */}}vi.mocked(spawn).mockClear();sourceReadSpy.mockRestore();clockSpy?.mockRestore();store.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
 test('concrete qualification entry registers real lifecycle sources before callback return and preserves initial contexts, root continuation and replay', async () => {
@@ -109,9 +133,10 @@ test('concrete qualification entry registers real lifecycle sources before callb
 
 test.each(['child-id-missing','child-id-null','child-id-malformed','child-id-missing-path'] as const)('child native identity %s is rejected before source access, reservation or linkage without prior spawn progress', async mode => {
   const f=fixture(mode);try{
-    const lane=await prepareCodexQualification(f.options);const result=await lane.run();
+    await f.primeNative();
+    const lane=await prepareCodexQualification(f.options);const startedAt=Date.now();const result=await lane.run();
     const rootPath=join(f.options.sessionsRoot,'00000000-0000-0000-0000-000000000001.jsonl');
-    expect(f.sourceReadSpy.mock.calls.length).toBeGreaterThan(0);
+    expect(f.sourceReadSpy.mock.calls.length,JSON.stringify({startedAt,result,timing:f.timing()})).toBeGreaterThan(0);
     expect(f.sourceReadSpy.mock.calls.filter(([path])=>path!==rootPath)).toHaveLength(0);
     expect(existsSync(join(f.options.ledgerDirectory,'codex-candidate','child.reserved'))).toBe(false);
     expect(f.store.all('SELECT id FROM sessions WHERE parent_id IS NOT NULL')).toHaveLength(0);
@@ -121,7 +146,18 @@ test.each(['child-id-missing','child-id-null','child-id-malformed','child-id-mis
     expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({phase:'handshake_schema',field:'hook_schema',code:result.reason})]));
     await expect(lane.run()).rejects.toThrow('candidate_root_already_started');
   }finally{f.cleanup();}
-});
+},20000);
+
+test('synthetic interpreter setup longer than handoff timeout does not consume the identity operation budget',async()=>{
+  const f=fixture('child-id-missing');try{
+    await f.primeNative(4200);
+    const lane=await prepareCodexQualification(f.options);const result=await lane.run();
+    expect(result).toMatchObject({status:'stopped',reason:'candidate_unapproved_handshake',registeredSessions:1});
+    expect(f.sourceReadSpy.mock.calls.length).toBeGreaterThan(0);
+    expect(existsSync(join(f.options.ledgerDirectory,'codex-candidate','child.reserved'))).toBe(false);
+    expect(result.elapsedMs).toBeLessThan(f.options.handshakeTimeoutMs!);
+  }finally{f.cleanup();}
+},20000);
 
 test.each(['missing', 'late', 'late-partial', 'extra', 'settings', 'nonzero'] as const)('whole entry stops on %s without retrying', async mode => {
   const f = fixture(mode); try { const lane=await prepareCodexQualification(f.options); const result=await lane.run(); expect(result.status).not.toBe('completed'); expect(result.reason).toBe({missing:'candidate_missing_handshake',late:'candidate_late_handshake','late-partial':'candidate_incomplete_initial_source',extra:'candidate_unapproved_handshake',settings:'candidate_unapproved_handshake',nonzero:'candidate_failed'}[mode]); await expect(lane.run()).rejects.toThrow('candidate_root_already_started'); } finally { f.cleanup(); }
@@ -160,6 +196,29 @@ test.each(['headless-never','auto-review'])('source-shaped headless %s policy re
     expect(lane.argv).toContain('read-only');expect(lane.argv).toContain('approval_policy="on-request"');
     expect(lane.argv.some(value=>value.includes('dangerously'))).toBe(false);
   }finally{f.cleanup();}
+});
+
+test('existing authenticated-home opt-in preserves unrelated prior sources and reads only fresh linked callbacks', async () => {
+  const f = fixture(); const prior = join(f.options.sessionsRoot, 'prior-native.jsonl');
+  writeFileSync(prior, 'PRIVATE_UNRELATED_PRIOR_SOURCE');
+  try {
+    expect(() => prepareCodexQualification(f.options)).toThrow('candidate_invalid_invocation');
+    const lane = await prepareCodexQualification({ ...f.options, reuseExistingHome: true });
+    expect(await lane.run()).toMatchObject({ status: 'completed', observedRequests: 3, registeredSessions: 2 });
+    expect(f.sourceReadSpy.mock.calls.some(([path]) => path === prior)).toBe(false);
+    expect(readFileSync(prior, 'utf8')).toBe('PRIVATE_UNRELATED_PRIOR_SOURCE');
+  } finally { f.cleanup(); }
+});
+
+test('reusing a home cannot admit a pre-existing exact callback source before bounded content reads', async () => {
+  const f = fixture(); const prior = join(f.options.sessionsRoot, '00000000-0000-0000-0000-000000000001.jsonl');
+  writeFileSync(prior, 'PRIVATE_PREEXISTING_ROOT');
+  try {
+    const lane = await prepareCodexQualification({ ...f.options, reuseExistingHome: true }); const result = await lane.run();
+    expect(result.status).not.toBe('completed'); expect(result.observedRequests).toBe(0);
+    expect(f.sourceReadSpy.mock.calls.some(([path]) => path === prior)).toBe(false);
+    expect(f.store.all('SELECT * FROM sessions')).toHaveLength(0);
+  } finally { f.cleanup(); }
 });
 
 test.each(['wire-mismatch','permissions-missing','profile-write','profile-disabled','split-write','permission-relaxation'])('declared permissions %s stop before baseline/ack or later collection', async mode => {
@@ -260,7 +319,7 @@ test.each(['timing-extra','timing-late-reader','timing-conflict','timing-wrong-t
 },12000);
 
 test('stage timing elapsed absolute deadline before invocation skips launch and durable reservation',async()=>{
-  const f=fixture();const realNow=Date.now;let reads=0;const clock=vi.spyOn(Date,'now').mockImplementation(()=>realNow()+(reads++===0?0:5000));
+  const f=fixture();f.options.durationMs=4500;const realNow=Date.now;let reads=0;const clock=vi.spyOn(Date,'now').mockImplementation(()=>realNow()+(reads++===0?0:5000));
   try{const lane=await prepareCodexQualification(f.options);const result=await lane.run();
     expect(result.reason).toBe('candidate_timed_out');expect(result.registeredSessions).toBe(0);
     expect(existsSync(join(f.options.ledgerDirectory,'codex-candidate','root.reserved'))).toBe(false);

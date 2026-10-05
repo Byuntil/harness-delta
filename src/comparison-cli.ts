@@ -1,4 +1,5 @@
 import { registerPriceTable,readPriceTable } from './pricing.js';
+import { registerObservedCostCommand } from './pricing-cli.js';
 import { PriceTableSchema,parseTaskMetadata } from './flexible-contracts.js';
 import { parseComparison } from './comparison-contracts.js';
 import { readRuntimeHistory } from './runtime-history.js';
@@ -20,6 +21,7 @@ export function registerComparisonCommands(program: Command, store: () => Store,
   const prices=program.command('price-table').description('Immutable explicit standardized cost prices; not actual billing');
   prices.command('register').requiredOption('--config <file>').action((o:{config:string})=>{registerPriceTable(store(),parseComparison(PriceTableSchema,readConfig(o.config),'invalid_price_table'));});
   prices.command('show <id>').action((id:string)=>{print(readPriceTable(store(),id));});
+  registerObservedCostCommand(prices, store, print);
   const variant = program.command('variant').description('Register immutable harness configurations');
   variant.command('register').requiredOption('--config <file>').action((options: { config: string }) => { registerVariant(store(), readConfig(options.config)); });
   variant.command('show <id>').action((id: string) => { print(showVariant(store(), id)); });

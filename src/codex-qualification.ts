@@ -24,6 +24,10 @@ export interface CodexQualificationOptions {
   codexHome: string; sessionsRoot: string; executable: string; executableSha256: string;
   nodeExecutable: string; hookRecorder: string; rootModel: 'gpt-6-astra'; childModel: 'gpt-6.1-sol';
   rootEffort: 'high'; childEffort: 'high'; durationMs?: number; handshakeTimeoutMs?: number; pollMs?: number;
+  /** Reuse login through the native process only; never inspect/delete prior
+   * transcripts or copy credentials. Fresh callback/birthtime guards still apply.
+   * New fixture/task/ledger and new specific actual-call approval are required. */
+  reuseExistingHome?: boolean;
 }
 export interface CodexQualificationDiagnostic {
   phase:'handshake_json'|'handshake_schema'|'permissions'|'source_metadata'|'registration'|'baseline'|'listener_io'|'observation'|'capability'|'progress';
@@ -83,8 +87,10 @@ export function prepareCodexQualification(input: CodexQualificationOptions) {
   for (const path of [options.cwd,options.ledgerDirectory,options.codexHome,options.sessionsRoot,options.executable,options.nodeExecutable,options.hookRecorder]) checkedPath(path);
   const cwd = realpathSync(options.cwd); const sessionsRoot = realpathSync(options.sessionsRoot);
   const codexHome = realpathSync(options.codexHome);
+  if (options.reuseExistingHome !== undefined && typeof options.reuseExistingHome !== 'boolean') throw new Error('candidate_invalid_invocation');
+  const homeFresh = () => options.reuseExistingHome === true || readdirSync(sessionsRoot).length === 0;
   if (cwd !== options.cwd || sessionsRoot !== options.sessionsRoot || codexHome !== options.codexHome ||
-    sessionsRoot !== join(codexHome,'sessions') || readdirSync(cwd).length!==0 || readdirSync(sessionsRoot).length!==0 ||
+    sessionsRoot !== join(codexHome,'sessions') || readdirSync(cwd).length!==0 || !homeFresh() ||
     options.rootModel!=='gpt-6-astra' || options.childModel!=='gpt-6.1-sol' || options.rootEffort!=='high' || options.childEffort!=='high') throw new Error('candidate_invalid_invocation');
   const digest = createHash('sha256').update(readFileSync(options.executable)).digest('hex');
   if (!/^[0-9a-f]{64}$/.test(options.executableSha256) || digest!==options.executableSha256) throw new Error('candidate_executable_mismatch');
@@ -103,7 +109,7 @@ export function prepareCodexQualification(input: CodexQualificationOptions) {
       options.store.get("SELECT 1 FROM tombstones WHERE (kind='task' AND id=?) OR (kind='project' AND id=?)",[options.taskId,options.projectId])||
       options.store.get('SELECT 1 FROM sessions WHERE task_id=?',[options.taskId]))throw new Error('candidate_inactive_scope');
     if(options.store.get('SELECT 1 FROM comparison_assignments WHERE task_id=? UNION ALL SELECT 1 FROM otel_processes WHERE task_id=? UNION ALL SELECT 1 FROM observation_runs WHERE task_id=? UNION ALL SELECT 1 FROM events WHERE task_id=? LIMIT 1',[options.taskId,options.taskId,options.taskId,options.taskId]))throw new Error('candidate_mixed_sources');
-    if(realpathSync(options.cwd)!==cwd||realpathSync(options.codexHome)!==codexHome||realpathSync(options.sessionsRoot)!==sessionsRoot||readdirSync(cwd).length!==0||readdirSync(sessionsRoot).length!==0)throw new Error('candidate_invalid_invocation');
+    if(realpathSync(options.cwd)!==cwd||realpathSync(options.codexHome)!==codexHome||realpathSync(options.sessionsRoot)!==sessionsRoot||readdirSync(cwd).length!==0||!homeFresh())throw new Error('candidate_invalid_invocation');
     if(createHash('sha256').update(readFileSync(options.executable)).digest('hex')!==digest)throw new Error('candidate_executable_mismatch');
   };
   validateLaunch();
@@ -242,7 +248,9 @@ export function prepareCodexQualification(input: CodexQualificationOptions) {
             const path=checkedPath(message.transcript_path); const rel=relative(sessionsRoot,path); const stat=statSync(path);
             // Declared run-scoped sessions root + held native callback authorize this
             // exact fresh path. Header contents validate identity; they grant no permission.
-            if(rel.startsWith('..')||isAbsolute(rel)||realpathSync(path)!==path||!stat.isFile()||stat.birthtimeMs<started)throw new Error('candidate_source_scope_mismatch');
+            // Date.now truncates fractional filesystem milliseconds. Exclude
+            // the entire launch millisecond so a prior file cannot look fresh.
+            if(rel.startsWith('..')||isAbsolute(rel)||realpathSync(path)!==path||!stat.isFile()||stat.birthtimeMs<started+1)throw new Error('candidate_source_scope_mismatch');
             const native=root?message.session_id:message.agent_id!; const sessionId=randomUUID(); const sourceId=randomUUID();
             if(root){rootNative=native;childReservation=new BoundedCandidateInvocation(directory,{rootSessionId:native,childModel:options.childModel,childEffort:options.childEffort});}
             else{childReservation!.reserveDirectChild({callerSessionId:rootNative!,parentSessionId:rootNative!,depth:1,model:options.childModel,effort:options.childEffort});childTurn=message.turn_id!;}

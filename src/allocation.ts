@@ -113,7 +113,7 @@ export function assignTask(store: Store, input: unknown, dependencies: Allocatio
       return { receipt: receipt(original, true) };
     }
     const protocol = comparisonProtocol(store, requestedProtocol);
-    if(protocol.purpose==='real_experiment' && (protocol.schema_version!==2 || !comparisonReadiness(store,protocol.id,now).real_allocation))throw new Error('real_experiment_disabled');
+    if(protocol.purpose!=='synthetic_validation' && (protocol.schema_version!==2 || !comparisonReadiness(store,protocol.id,now).real_allocation))throw new Error('real_experiment_disabled');
     if (Date.parse(now) < Date.parse(protocol.recruitment_start) || Date.parse(now) >= Date.parse(protocol.recruitment_end)) throw new Error('outside_recruitment');
     const variant = comparisonVariant(store, protocol.variant_ids[0]);
     if (protocol.schema_version !== config.schema_version || variant.schema_version !== config.schema_version) throw new Error('configuration_mismatch');

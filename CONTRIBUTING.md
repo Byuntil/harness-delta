@@ -2,10 +2,16 @@
 
 Harness Delta has metadata contracts and a local storage foundation. Read the
 [product requirements](docs/requirements.md) before proposing or implementing behavior.
-The repository provides a local measurement CLI and partial sequential adapters for
-Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283. These observations are incomplete and do
-not establish full task usage, app support, or descendant aggregation. See the
-[capability evidence and limits](docs/decisions/001-adapter-capabilities.md) and
+The repository provides a local measurement CLI, legacy partial sequential adapters
+for Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283, and two separately admitted
+Codex 0.160.0 workflow profiles: root own responses and a fresh root with one fresh
+direct child. The child profile is read-only; family resume and broader descendant
+collection are unsupported. Assigned CLI wiring is verified offline; exact native
+engine runs are separate evidence. Claude 2.1.288 has a successful bounded internal
+synchronous probe, but its general workflow is not admitted. All usage remains
+partial, with no complete task cost or inferential adoption support. See the
+[current native workflow and limits](docs/runbooks/task-native-workflow.md),
+[capability evidence](docs/decisions/001-adapter-capabilities.md), and
 [local measurement runbook](docs/runbooks/local-measurement.md).
 
 ## Development environment

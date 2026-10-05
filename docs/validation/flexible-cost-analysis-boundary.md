@@ -8,8 +8,16 @@ the policy effect under study.
 
 Real allocation, complete cost and inference require separate evidence. Source
 readiness binds a code-owned evidence ID to exact product/version, profile,
-semantics digest and validation kind. The production source and analysis
-registries are empty. Synthetic coverage cannot authorize real allocation.
+semantics digest and validation kind. The production source registry contains the
+[Codex 0.160.0 root own-response workflow](codex-workflow-01600-source-readiness.md)
+and the separate [fresh root/single-direct-child workflow](codex-workflow-01600-direct-child-source-readiness.md),
+each with real engine operational evidence and `complete_cost: false`. The child
+profile is read-only and does not support family resume; broader topology is
+unqualified. Assigned ordinary CLI wiring is offline evidence. Claude general
+workflow is absent from this registry, even though its exact bounded internal
+synchronous probe succeeded. The production analysis
+registry remains empty. Synthetic coverage cannot authorize real allocation or
+override the admitted source's incomplete-cost boundary.
 Coverage decisions are recomputed from scoped facts, never accepted from a user
 boolean. Task identity and declared followup windows must match. Operational
 readiness alone cannot certify a complete request universe or valid inference.

@@ -28,3 +28,11 @@ reasoning, and parent-inclusive counters are not established by these fixtures.
 `tests/codex-topology.test.ts` and `tests/codex-production.test.ts`. Live admission
 is separately bound to the source registry entry; synthetic tests alone cannot
 promote a version.
+
+`codex-workflow-root-paginated.jsonl` is a structural reduction of one 0.160 root:
+eight contiguous ordinal records, no fork/history-base and no usage record.
+All identities, paths and times are synthetic; prompts, instructions, content,
+creator/auth fields, world state and settings bodies are omitted. It reproduces
+the root collector contract without copying a transcript and does not establish
+native model/usage support or production admission. The associated tests use
+fake Node processes only.
