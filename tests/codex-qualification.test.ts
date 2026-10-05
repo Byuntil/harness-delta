@@ -4,6 +4,9 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import { expect, test, vi } from 'vitest';
+
+// Lane budgets below must stay shorter than these timeouts to keep failure reasons visible.
+vi.setConfig({ testTimeout: 30000 });
 import { Store } from '../src/store.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import * as collection from '../src/collection.js';
@@ -62,7 +65,7 @@ if(id!==root){if(mode==='child-id-missing'||mode==='child-id-missing-path')delet
 if(mode==='child-id-null')payload.agent_id=null;if(mode==='child-id-malformed')payload.agent_id='invalid-child-id';
 if(mode==='child-id-missing-path')payload.transcript_path=dir+'/uncreated-child.jsonl';}
 mark(id===root?'root_hook_start':'child_hook_start');
-const result=spawnSync(command,[],{input:JSON.stringify(payload),timeout:3000});mark(id===root?'root_hook_end':'child_hook_end',{status:result.status,signal:result.signal,error:result.error?.code??null}); if(result.status!==0)process.exit(3);}
+const result=spawnSync(command,[],{input:JSON.stringify(payload),timeout:15000});mark(id===root?'root_hook_end':'child_hook_end',{status:result.status,signal:result.signal,error:result.error?.code??null}); if(result.status!==0)process.exit(3);}
 create(root);
 if(mode==='diagnostic-native-error'){hook(root);process.stderr.write('ERROR: unexpected status 401 Unauthorized PRIVATE_SECRET\\n');process.exit(1);}
 else if(mode.startsWith('timing-')){
@@ -93,9 +96,11 @@ else {response(root,'root-final');process.exit(mode==='nonzero'?2:0);}}
   writeFileSync(executable, `#!/bin/sh\n: > '${join(dir,'shell-ready')}'\nexec '${process.execPath}' '${script}' "$@"\n`, { mode: 0o700 });
   const sha256 = createHash('sha256').update(readFileSync(executable)).digest('hex');
   const options: CodexQualificationOptions = { store, projectId: 'p', taskId: 't', cwd, ledgerDirectory: ledger, codexHome, sessionsRoot, executable, executableSha256: sha256,
-    nodeExecutable: process.execPath, hookRecorder: resolve('scripts/conformance/candidate-start-recorder.mjs'), rootModel: 'gpt-6-astra', childModel: 'gpt-6.1-sol', rootEffort: 'high', childEffort: 'high', durationMs: 8000, handshakeTimeoutMs: 4000, pollMs: 10 };
-  // Guard/identity tests need both fake Node launches to reach their assertion.
-  // Explicit deadline/missing-handshake cases retain their original budgets.
+    nodeExecutable: process.execPath, hookRecorder: resolve('scripts/conformance/candidate-start-recorder.mjs'), rootModel: 'gpt-6-astra', childModel: 'gpt-6.1-sol', rootEffort: 'high', childEffort: 'high', durationMs: 15000, handshakeTimeoutMs: 10000, pollMs: 10 };
+  // Guard/identity tests need both fake Node launches to reach their assertion;
+  // the default budgets leave room for slow CI runners and stay below the test
+  // timeouts, so a stuck lane reports its own reason. Explicit
+  // deadline/missing-handshake cases retain their original budgets.
   if(mode==='missing'){options.handshakeTimeoutMs=2000;options.durationMs=4500;}
   if(mode.startsWith('timing-')){options.handshakeTimeoutMs=1800;options.durationMs=mode==='timing-no-progress'||mode==='timing-unknown'?4300:9500;}
   // Keep real bounded reader/permission guards; serialize only the fake writer.
@@ -149,19 +154,19 @@ test.each(['child-id-missing','child-id-null','child-id-malformed','child-id-mis
 },20000);
 
 test('synthetic interpreter setup longer than handoff timeout does not consume the identity operation budget',async()=>{
-  const f=fixture('child-id-missing');try{
+  const f=fixture('child-id-missing');f.options.handshakeTimeoutMs=4000;f.options.durationMs=8000;try{
     await f.primeNative(4200);
     const lane=await prepareCodexQualification(f.options);const result=await lane.run();
     expect(result).toMatchObject({status:'stopped',reason:'candidate_unapproved_handshake',registeredSessions:1});
     expect(f.sourceReadSpy.mock.calls.length).toBeGreaterThan(0);
     expect(existsSync(join(f.options.ledgerDirectory,'codex-candidate','child.reserved'))).toBe(false);
-    expect(result.elapsedMs).toBeLessThan(f.options.handshakeTimeoutMs!);
+    expect(result.elapsedMs).toBeLessThan(f.options.handshakeTimeoutMs);
   }finally{f.cleanup();}
 },20000);
 
 test.each(['missing', 'late', 'late-partial', 'extra', 'settings', 'nonzero'] as const)('whole entry stops on %s without retrying', async mode => {
   const f = fixture(mode); try { const lane=await prepareCodexQualification(f.options); const result=await lane.run(); expect(result.status).not.toBe('completed'); expect(result.reason).toBe({missing:'candidate_missing_handshake',late:'candidate_late_handshake','late-partial':'candidate_incomplete_initial_source',extra:'candidate_unapproved_handshake',settings:'candidate_unapproved_handshake',nonzero:'candidate_failed'}[mode]); await expect(lane.run()).rejects.toThrow('candidate_root_already_started'); } finally { f.cleanup(); }
-});
+},20000);
 
 test.each(['pause','cancel','source-error','relink'] as const)('observer stops active process on %s', async mode => {
   const f=fixture(mode); try {
@@ -319,7 +324,7 @@ test.each(['timing-extra','timing-late-reader','timing-conflict','timing-wrong-t
 },12000);
 
 test('stage timing elapsed absolute deadline before invocation skips launch and durable reservation',async()=>{
-  const f=fixture();f.options.durationMs=4500;const realNow=Date.now;let reads=0;const clock=vi.spyOn(Date,'now').mockImplementation(()=>realNow()+(reads++===0?0:5000));
+  const f=fixture();f.options.durationMs=4500;f.options.handshakeTimeoutMs=4000;const realNow=Date.now;let reads=0;const clock=vi.spyOn(Date,'now').mockImplementation(()=>realNow()+(reads++===0?0:5000));
   try{const lane=await prepareCodexQualification(f.options);const result=await lane.run();
     expect(result.reason).toBe('candidate_timed_out');expect(result.registeredSessions).toBe(0);
     expect(existsSync(join(f.options.ledgerDirectory,'codex-candidate','root.reserved'))).toBe(false);

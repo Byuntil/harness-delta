@@ -62,6 +62,7 @@ function safeReason(error:unknown){
   }catch{return 'collection_failed';}
 }
 export const pinnedCodexWorkflowBinarySha='112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b';
+const maxUnstableReads=20;
 const hookRecorderSha='e20dc70b2864cead9819cbb4f6717164778121b4aef510c820e795eb19835bf0';
 export interface CodexQualificationPhase {
   intent_sha256:string;deadline:number;expectedMarker:string|null;fixtureScript?:string;onNativeSpawn?():void;
@@ -285,6 +286,18 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     if(permissionSignatures.has(id)&&permissionSignatures.get(id)!==signature)throw new Error('runtime_mismatch');
     permissionSignatures.set(id,signature);
   }
+  // A read racing a native append sees the file change underneath it and yields no
+  // snapshot. The transaction ingests nothing, so the next poll rereads; identity,
+  // truncation and prefix checks still fail closed. Bounded so a source that never
+  // settles keeps failing with unstable_read.
+  let unstableReads=0;
+  function attempt<T>(read:()=>T):{value:T}|undefined{
+    try{const value=read();unstableReads=0;return {value};}
+    catch(error){
+      if(!(error instanceof SourceFailure)||sourceCategory(error,'read_failed')!=='unstable_read'||++unstableReads>maxUnstableReads)throw error;
+      return undefined;
+    }
+  }
   function tick(baseline=false,baselineChild=false){return store.immediateTransaction(()=>{
     guard();if(!source||!session)throw new Error('session_not_linked');exactSource(source,e.codex_home);
     if(e.direct_child)guardChild();
@@ -416,7 +429,13 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     if(e.operation!=='launch'){
       const linked=store.get<{source_path:string|null}>('SELECT source_path FROM sessions WHERE id=?',[e.session_id!]);
       const path=e.source_path??(synthetic?store.get<{source_path:string}>('SELECT source_path FROM codex_workflow_runs WHERE session_id=? AND source_path IS NOT NULL ORDER BY started_at LIMIT 1',[e.session_id!])?.source_path:linked?.source_path);
-      if(!path)throw new Error('explicit_source_required');bind(e.session_id!,path,e.operation!=='link');if(e.direct_child)bindChild();tick(true);baselineAt=new Date().toISOString();
+      if(!path)throw new Error('explicit_source_required');bind(e.session_id!,path,e.operation!=='link');if(e.direct_child)bindChild();
+      while(!attempt(()=>tick(true))){
+        // tick() runs guard() first, so stop, pause and revocation end this loop too.
+        if(Date.now()-Date.parse(started)>=e.timeout_ms){stage='process';throw new Error('deadline');}
+        await delay(e.poll_ms);
+      }
+      baselineAt=new Date().toISOString();
     }
     if(e.operation==='link'){store.execute('UPDATE codex_workflow_runs SET application=? WHERE id=?',[application,e.run_id]);}
     else if(e.operation==='launch'||e.operation==='resume'){
@@ -450,7 +469,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
             while(true){
               stage='root_header';if(closing)throw new Error('stop_requested');
               if(Date.now()>=headerDeadline)throw new Error('initial_source_incomplete');
-              if(tick(!isChild,isChild))break;
+              if(attempt(()=>tick(!isChild,isChild))?.value)break;
               await delay(e.poll_ms);
             }
             if(!isChild){baselineAt=started;hookSeen=true;}
@@ -526,8 +545,11 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       guard();if(failure)throw new Error(failure);
       if(codexWorkflowRun(store,e.run_id)?.stop_requested){failure='stop_requested';break;}
       if(Date.now()-Date.parse(started)>=e.timeout_ms){capture('process',new Error('deadline'));failure='deadline';break;}
-      if(hookSeen||e.operation==='collect')tick();
+      const read=hookSeen||e.operation==='collect'?attempt(()=>tick()):{value:true};
       if(qualification?.replay){stopCodexWorkflow(store,e.run_id);continue;}
+      // Completion needs a stable read taken after the exit was observed, so the
+      // final appended usage is never skipped by an unstable last poll.
+      if(exited&&!read){await delay(e.poll_ms);continue;}
       if(exited){stage='process';if(!hookSeen)throw new Error('hook_missing');if(!metadataReady)throw new Error('initial_source_incomplete');if(exitCode!==0)throw new Error('process_failed');
         if(e.child_runtime&&(!childHookSeen||!e.direct_child||pendingChildId!==e.direct_child.session_id||!store.get('SELECT 1 FROM events WHERE task_id=? AND session_id=?',[c.taskId,e.direct_child.session_id])))throw new Error('hook_missing');
         break;}

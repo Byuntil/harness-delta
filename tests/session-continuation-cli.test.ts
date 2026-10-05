@@ -35,7 +35,7 @@ function fixture() {
   const run = async (args: string[], expectedCode = 0) => {
     const process = launch(args);
     const result = await process.exited;
-    expect(result.code, result.stderr).toBe(expectedCode);
+    expect(result.code,result.stderr+result.stdout).toBe(expectedCode);
     expect(result.signal).toBeNull();
     return result.stdout;
   };

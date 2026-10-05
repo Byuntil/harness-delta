@@ -186,7 +186,10 @@ first bounded read; existing source usage establishes a baseline and is excluded
 `collect` requires that linked UUID and admits only future usage while it runs in
 the foreground. Link and collect do not launch or apply a harness and therefore
 return `external_unverified`. Every command's operation must match its JSON file.
-No session discovery, `--last`, automatic retry or retrospective backfill occurs.
+No session discovery, `--last`, automatic operation retry or retrospective backfill
+occurs. A bounded read that races a native append (`unstable_read`) ingests nothing
+and is reread at the next poll, up to 20 consecutive times or the invocation
+deadline; identity, truncation and prefix changes still fail closed.
 
 Launch/resume use the awaited metadata hook to bind the exact native UUID/path,
 then poll only that authorized source with task generation, configuration,

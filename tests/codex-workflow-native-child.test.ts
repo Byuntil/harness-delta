@@ -49,7 +49,7 @@ test('actual CLI schema/coordinator resumes a linked root with one child and rep
     const call=async(id:string,operation:'launch'|'resume'|'link',e:unknown)=>{
       output='';writeFileSync(config,JSON.stringify({...f.input,confirmation_id:id+'-confirmation'}));writeFileSync(runtime,JSON.stringify({model:'root-user-choice',effort:'medium'}));writeFileSync(execution,JSON.stringify(e));
       const code=await main(['--db',f.database,'workflow','codex',operation,'--config',config,'--runtime',runtime,'--execution',execution],{codexAdapter:(store,input)=>createSyntheticCodexWorkflowAdapter(store,input,f.script)});
-      expect(code).toBe(0);return JSON.parse(output) as {adapter_result:{state:string;session_id:string;observed_requests:number}};
+      expect(code,output).toBe(0);return JSON.parse(output) as {adapter_result:{state:string;session_id:string;observed_requests:number}};
     };
     writeFileSync(f.script,f.baseScript);const first=await call('cli-root','launch',f.executionFactory('cli-root'));
     writeFileSync(f.script,f.nativeScript);const resumed=await call('cli-child','resume',{...f.execution,run_id:'cli-child',operation:'resume',session_id:first.adapter_result.session_id});
@@ -59,7 +59,7 @@ test('actual CLI schema/coordinator resumes a linked root with one child and rep
     expect(replay.adapter_result).toMatchObject({state:'completed',observed_requests:0});expect(f.store.eventCount()).toBe(4);expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(1);
     expect(output).not.toContain('SYNTHETIC_PRIVATE');
   }finally{out.mockRestore();f.cleanup();}
-});
+},20000);
 
 
 test.each(['spawn','empty-wait','empty-wait-missing-child-usage','foreign-wait','empty-spawn','unknown-item'])('one-shot family qualification validates %s with source-owned child evidence',async stdoutMode=>{

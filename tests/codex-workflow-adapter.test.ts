@@ -1,9 +1,11 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createCodexWorkflowAdapter, createSyntheticCodexWorkflowAdapter } from '../src/codex-workflow-adapter.js';
 import { runAssignedWorkflow } from '../src/task-workflow.js';
 import { stopCodexWorkflow, codexWorkflowCostFacts, recoverCodexWorkflow } from '../src/codex-workflow-journal.js';
 import { Lifecycle } from '../src/lifecycle.js';
+import * as collection from '../src/collection.js';
+import { SourceFailure } from '../src/source-errors.js';
 import { codexWorkflowFixture } from './helpers/codex-workflow-fixture.js';
 import type { RuntimeEvidence } from '../src/flexible-contracts.js';
 
@@ -123,9 +125,59 @@ test('a live collector stops after its run is recovered and keeps the abandoned 
     expect(f.store.get('SELECT state,reason FROM codex_workflow_runs WHERE id=?',['live'])).toEqual({state:'failed',reason:'abandoned'});
   }finally{f.cleanup();}
 },20000);
+/** A read that races a native append sees the file change underneath it. */
+function racingReads(times:number){
+  const original=collection.readSource;let left=times;
+  const spy=vi.spyOn(collection,'readSource').mockImplementation(path=>{if(left>0){left--;throw new SourceFailure('unstable_read');}return original(path);});
+  return Object.assign(spy,{race:(next:number)=>{left=next;}});
+}
+test('reads that race a native append are retried and the usage is counted once',async()=>{
+  const f=codexWorkflowFixture();const read=racingReads(3);try{
+    const result=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('raced-launch'),f.script),runtime);
+    expect(result.adapter_result,JSON.stringify(result.adapter_result)).toMatchObject({state:'completed',observed_requests:1});
+    expect(f.store.eventCount()).toBe(1);expect(read.mock.calls.length).toBeGreaterThan(3);
+    // An existing session's baseline read can race too; earlier usage stays excluded.
+    const root=f.newRoot();f.appendUsage(root);read.mockClear();read.race(1);
+    const linked=await runAssignedWorkflow(f.store,{...f.input,confirmation_id:'raced-link'},createSyntheticCodexWorkflowAdapter(f.store,f.execution('raced-link-run','link',root.id,root.path),f.script),runtime);
+    expect(linked.adapter_result,JSON.stringify(linked.adapter_result)).toMatchObject({state:'completed',observed_requests:0});
+    expect(f.store.eventCount()).toBe(1);expect(read.mock.calls.length).toBeGreaterThan(1);
+  }finally{read.mockRestore();f.cleanup();}
+});
+test('an unstable read at exit is reread before completion so the final usage is kept',async()=>{
+  // Fail every read that already contains the usage for a while, so the process
+  // exits while the latest poll is still unstable; completion must wait for a stable read.
+  const original=collection.readSource;let racing=15;
+  const read=vi.spyOn(collection,'readSource').mockImplementation(path=>{const bytes=original(path);
+    if(racing>0&&bytes.text.includes('token_usage_record')){racing--;throw new SourceFailure('unstable_read');}return bytes;});
+  const f=codexWorkflowFixture();try{
+    const result=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('exit-race'),f.script),runtime);
+    expect(result.adapter_result,JSON.stringify(result.adapter_result)).toMatchObject({state:'completed',observed_requests:1});
+    expect(f.store.eventCount()).toBe(1);
+  }finally{read.mockRestore();f.cleanup();}
+});
+test('a stop request ends a link whose baseline read keeps racing',async()=>{
+  const f=codexWorkflowFixture();
+  // The stop arrives from outside the read transaction, as from another process.
+  let requested=false;
+  const read=vi.spyOn(collection,'readSource').mockImplementation(()=>{if(!requested){requested=true;setTimeout(()=>stopCodexWorkflow(f.store,'stop-baseline'),0);}throw new SourceFailure('unstable_read');});
+  try{
+    const root=f.newRoot();
+    const linked=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('stop-baseline','link',root.id,root.path),f.script),runtime);
+    expect(linked.adapter_result,JSON.stringify(linked.adapter_result)).toMatchObject({state:'stopped',reason:'stop_requested'});
+    expect(read.mock.calls.length).toBeLessThan(5);
+  }finally{read.mockRestore();f.cleanup();}
+});
+test('a source that never yields a stable read still fails with its own reason',async()=>{
+  const f=codexWorkflowFixture();const read=racingReads(Number.MAX_SAFE_INTEGER);try{
+    const result=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('never-stable'),f.script),runtime);
+    expect(result.adapter_result).toMatchObject({state:'failed',reason:'collection_failed',diagnostic:{stage:'source_read',code:'unstable_read'}});
+    expect(f.store.eventCount()).toBe(0);
+  }finally{read.mockRestore();f.cleanup();}
+},20000);
 test('a response ID already owned by another session fails instead of being counted again',async()=>{
   const f=codexWorkflowFixture();try{
-    await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('launch'),f.script),runtime);
+    const launched=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('launch'),f.script),runtime);
+    expect(launched.adapter_result,JSON.stringify(launched.adapter_result)).toMatchObject({state:'completed'});
     const request=(JSON.parse(f.store.get<{payload:string}>('SELECT payload FROM runtime_evidence LIMIT 1')!.payload) as RuntimeEvidence).request_id!;
     const root=f.newRoot();await runAssignedWorkflow(f.store,{...f.input,confirmation_id:'link-confirmation'},createSyntheticCodexWorkflowAdapter(f.store,f.execution('link','link',root.id,root.path),f.script),runtime);
     const pending=runAssignedWorkflow(f.store,{...f.input,confirmation_id:'collect-confirmation'},createSyntheticCodexWorkflowAdapter(f.store,f.execution('collect','collect',root.id),f.script),runtime);

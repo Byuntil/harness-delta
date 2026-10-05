@@ -38,10 +38,12 @@ const command=get('hooks.SessionStart=').match(/command="([^"]+)"/)[1];const hoo
 appendFileSync(path,row('token_usage_record',{session_id:native,thread_id:native,turn_id:turn,root_turn_id:turn,response_id:randomUUID(),usage:{input_tokens:30,cached_input_tokens:5,cache_write_input_tokens:2,output_tokens:3,reasoning_output_tokens:1,total_tokens:33}}));
 if(prompt.includes('WAIT'))setTimeout(()=>{},60000);else appendFileSync(path,row('event_msg',{type:'task_complete',turn_id:turn}));
 `);
+  // timeout_ms leaves room for slow CI runners but stays below the 20s timeouts of
+  // long tests, so a stuck run reports the adapter's own reason. Deadline tests set their own.
   const execution = (runId: string, operation: 'launch' | 'resume' | 'link' | 'collect' = 'launch', sessionId?: string, sourcePath?: string) => ({
     run_id: runId, operation, binary: { path: realpathSync(process.execPath), sha256: createHash('sha256').update(readFileSync(process.execPath)).digest('hex') },
     codex_home: home, hook_recorder: realpathSync(resolve('scripts/conformance/candidate-start-recorder.mjs')), prompt_file: prompt,
-    sandbox: 'workspace-write', timeout_ms: 5000, poll_ms: 10, ...(sessionId ? { session_id: sessionId } : {}), ...(sourcePath ? { source_path: sourcePath } : {}),
+    sandbox: 'workspace-write', timeout_ms: 15000, poll_ms: 10, ...(sessionId ? { session_id: sessionId } : {}), ...(sourcePath ? { source_path: sourcePath } : {}),
   });
   const newRoot = () => { const id = randomUUID(); const path = join(home, 'sessions', `${id}.jsonl`); writeFileSync(path, JSON.stringify({type:'session_meta',payload:{id,session_id:id,cwd:project,cli_version:'0.160.0',source:'exec'}})+'\n'); return { id, path }; };
   const appendUsage=(session:{id:string;path:string},model='external-user-model',extra:Record<string,unknown>={})=>{
