@@ -49,7 +49,7 @@ test('actual CLI schema/coordinator resumes a linked root with one child and rep
     const call=async(id:string,operation:'launch'|'resume'|'link',e:unknown)=>{
       output='';writeFileSync(config,JSON.stringify({...f.input,confirmation_id:id+'-confirmation'}));writeFileSync(runtime,JSON.stringify({model:'root-user-choice',effort:'medium'}));writeFileSync(execution,JSON.stringify(e));
       const code=await main(['--db',f.database,'workflow','codex',operation,'--config',config,'--runtime',runtime,'--execution',execution],{codexAdapter:(store,input)=>createSyntheticCodexWorkflowAdapter(store,input,f.script)});
-      expect(code).toBe(0);return JSON.parse(output) as {adapter_result:{state:string;session_id:string;observed_requests:number}};
+      expect(code,output).toBe(0);return JSON.parse(output) as {adapter_result:{state:string;session_id:string;observed_requests:number}};
     };
     writeFileSync(f.script,f.baseScript);const first=await call('cli-root','launch',f.executionFactory('cli-root'));
     writeFileSync(f.script,f.nativeScript);const resumed=await call('cli-child','resume',{...f.execution,run_id:'cli-child',operation:'resume',session_id:first.adapter_result.session_id});

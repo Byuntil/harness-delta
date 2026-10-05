@@ -81,7 +81,7 @@ test('actual main CLI connects Claude assignment, launch, trace collector and du
     const call=(args:string[])=>new Promise<{code:number|null;stdout:string;stderr:string}>((ok,no)=>{const child=spawn(process.execPath,[entry,'--db',f.database,'workflow','claude',...args],{stdio:['ignore','pipe','pipe']});let stdout='';let stderr='';child.stdout.on('data',b=>{stdout+=String(b);});child.stderr.on('data',b=>{stderr+=String(b);});child.on('error',no);child.on('exit',code=>ok({code,stdout,stderr}));});
     const launched=call(['launch','--config',config,'--runtime',runtime,'--execution',execution]);const deadline=Date.now()+12000;
     while(f.store.eventCount()!==1&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,20));expect(f.store.eventCount()).toBe(1);
-    expect((await call(['stop','claude-run'])).code).toBe(0);const stopped=await launched;expect(stopped.code,stopped.stderr).toBe(0);
+    expect((await call(['stop','claude-run'])).code).toBe(0);const stopped=await launched;expect(stopped.code,stopped.stderr+stopped.stdout).toBe(0);
     expect((JSON.parse(stopped.stdout) as {adapter_result:unknown}).adapter_result).toMatchObject({state:'stopped',reason:'stop_requested',observed_requests:1});
     expect(f.store.all('SELECT * FROM comparison_assignments')).toHaveLength(1);expect(stopped.stdout).not.toContain('SYNTHETIC_PRIVATE');
   }finally{f.cleanup();}

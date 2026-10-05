@@ -49,7 +49,7 @@ test('assigned CLI fresh-child launch applies the sticky harness and preserves f
     const config=join(f.root,'workflow.json');const runtime=join(f.root,'runtime.json');const execution=join(f.root,'execution.json');
     writeFileSync(config,JSON.stringify(f.input));writeFileSync(runtime,JSON.stringify({model:'root-user-choice',effort:'medium'}));writeFileSync(execution,JSON.stringify(f.execution));
     const launched=await call(entry,f.database,['workflow','codex','launch','--config',config,'--runtime',runtime,'--execution',execution]);
-    expect(launched.code,launched.stderr).toBe(0);expect(JSON.parse(launched.stdout)).toMatchObject({adapter_result:{state:'completed',observed_requests:3}});
+    expect(launched.code,launched.stderr+launched.stdout).toBe(0);expect(JSON.parse(launched.stdout)).toMatchObject({adapter_result:{state:'completed',observed_requests:3}});
     expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(1);expect(f.store.all('SELECT DISTINCT task_id FROM events')).toEqual([{task_id:'task-1'}]);
     expect(f.store.all<{payload:string}>('SELECT payload FROM runtime_evidence').map(r=>JSON.parse(r.payload) as unknown)).toEqual(expect.arrayContaining([
       expect.objectContaining({model:'root-user-choice',effort:'medium'}),expect.objectContaining({model:'child-user-choice',effort:'low'})]));
@@ -94,9 +94,9 @@ test('production CLI recollects only its durable child, stops and reopens withou
     const collecting=call(entry,f.database,args('public-child-collect'));await waitBound('public-child-collect');f.appendExcluded();
     const excludedSize=lstatSync(f.kid.path).size;await vi.waitFor(()=>expect(f.store.get('SELECT source_size FROM codex_workflow_children WHERE run_id=?',['public-child-collect'])).toEqual({source_size:excludedSize}));expect(f.store.eventCount()).toBe(2);f.append();await vi.waitFor(()=>expect(f.store.eventCount()).toBe(4));
     expect((await call(entry,f.database,['workflow','codex','stop','public-child-collect'])).code).toBe(0);const collected=await collecting;
-    expect(collected.code,collected.stderr).toBe(0);expect(JSON.parse(collected.stdout)).toMatchObject({reused:true,adapter_result:{state:'stopped',reason:'stop_requested',observed_requests:2}});
+    expect(collected.code,collected.stderr+collected.stdout).toBe(0);expect(JSON.parse(collected.stdout)).toMatchObject({reused:true,adapter_result:{state:'stopped',reason:'stop_requested',observed_requests:2}});
     const replaying=call(entry,f.database,args('public-child-replay'));await waitBound('public-child-replay');expect((await call(entry,f.database,['workflow','codex','stop','public-child-replay'])).code).toBe(0);
-    const replayed=await replaying;expect(replayed.code,replayed.stderr).toBe(0);expect(JSON.parse(replayed.stdout)).toMatchObject({adapter_result:{state:'stopped',observed_requests:0}});
+    const replayed=await replaying;expect(replayed.code,replayed.stderr+replayed.stdout).toBe(0);expect(JSON.parse(replayed.stdout)).toMatchObject({adapter_result:{state:'stopped',observed_requests:0}});
     expect(f.store.eventCount()).toBe(4);expect(f.store.all('SELECT id FROM runtime_evidence')).toHaveLength(4);expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(1);
     expect(f.store.all('SELECT DISTINCT task_id FROM events')).toEqual([{task_id:'task-1'}]);expect(f.store.all('SELECT session_id FROM comparison_confirmation_sessions WHERE confirmation_id=?',['public-child-replay-confirmation'])).toHaveLength(2);
     registerPriceTable(f.store,{id:'child-rates',version:'v1',currency:'USD',source_id:'synthetic-offline-only',as_of:'2026-01-01T00:00:00Z',unit_tokens:100,display_decimals:6,rounding:'half_even',entries:['root-choice','child-choice'].flatMap(model=>[

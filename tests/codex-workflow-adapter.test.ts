@@ -125,7 +125,8 @@ test('a live collector stops after its run is recovered and keeps the abandoned 
 },20000);
 test('a response ID already owned by another session fails instead of being counted again',async()=>{
   const f=codexWorkflowFixture();try{
-    await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('launch'),f.script),runtime);
+    const launched=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('launch'),f.script),runtime);
+    expect(launched.adapter_result,JSON.stringify(launched.adapter_result)).toMatchObject({state:'completed'});
     const request=(JSON.parse(f.store.get<{payload:string}>('SELECT payload FROM runtime_evidence LIMIT 1')!.payload) as RuntimeEvidence).request_id!;
     const root=f.newRoot();await runAssignedWorkflow(f.store,{...f.input,confirmation_id:'link-confirmation'},createSyntheticCodexWorkflowAdapter(f.store,f.execution('link','link',root.id,root.path),f.script),runtime);
     const pending=runAssignedWorkflow(f.store,{...f.input,confirmation_id:'collect-confirmation'},createSyntheticCodexWorkflowAdapter(f.store,f.execution('collect','collect',root.id),f.script),runtime);
