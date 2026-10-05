@@ -42,6 +42,14 @@ export function readRuntimeHistory(store: Store, taskId: string, cutoff: string)
     .map(row => parseComparison(RuntimeEvidenceSchema, JSON.parse(row.payload) as unknown, 'invalid_runtime'))
     .filter(row => Date.parse(row.occurred_at) < end);
 }
+/** Gap for a run whose process vanished: starts after the last retained usage
+ * from that run's session (or at run start), never backfilling the interval.
+ * Returns false when the scope is no longer active, which forbids measurement writes. */
+export function recordAbandonedRunGap(store: Store, taskId: string, sessionId: string, runStartedAt: string, now: string): boolean {
+  const last = store.get<{ at: string | null }>('SELECT max(occurred_at) AS at FROM events WHERE task_id=? AND session_id=? AND occurred_at>=?', [taskId, sessionId, runStartedAt])?.at;
+  const from = last ? new Date(Math.min(Date.parse(now), Date.parse(last) + 1)).toISOString() : runStartedAt;
+  try { recordObservationGap(store, taskId, sessionId, from, now, 'incomplete', now); return true; } catch { return false; }
+}
 export function recordObservationGap(store: Store, taskId: string, sessionId: string, start: string, end: string | null, reason: string, recordedAt: string = new Date().toISOString()): void {
   const startedAt = parseComparison(TimestampSchema, start);
   const endedAt = end === null ? null : parseComparison(TimestampSchema, end);

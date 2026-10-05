@@ -44,7 +44,7 @@ test('synthetic CLI creates and renders a frozen report with no collection and d
     expect(output).not.toContain('| Assigned cohort |');
     expect(await run(['comparison', 'snapshot', 'create', request.protocolId, '--id', request.reportId, '--cutoff', request.cutoff, '--reason', 'initial'])).toBe(2);
     expect(await run(['comparison', 'report', 'PRIVATE_SENTINEL?', '--format', 'bad'])).toBe(2);
-    expect(errors).toBe('input_or_state_error\ninput_or_state_error\n');
+    expect(errors).toBe('invalidated_report\ninvalid_report_id\n');
   } finally { vi.useRealTimers(); stdout.mockRestore(); stderr.mockRestore(); collect.mockRestore(); link.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -64,7 +64,7 @@ test('identity-conflict CLI discloses affected opaque report IDs before purging 
     const config = join(root, 'conflict.json'); writeFileSync(config, JSON.stringify({ ...assignmentInput, alias_ids: ['logical-2'] }));
     expect(await main(['--db', file, 'comparison', 'assign', '--config', config])).toBe(2);
     expect(JSON.parse(output) as unknown).toEqual({ invalidating_reports: ['report-1'] });
-    expect(errors).toBe('input_or_state_error\n');
+    expect(errors).toBe('identity_conflict\n');
     output = ''; expect(await main(['--db', file, 'comparison', 'report', 'report-1'])).toBe(0);
     expect(JSON.parse(output) as unknown).toMatchObject({ validity_status: 'invalidated', reason: 'identity_conflict' });
   } finally { vi.useRealTimers(); stdout.mockRestore(); stderr.mockRestore(); rmSync(root, { recursive: true, force: true }); }

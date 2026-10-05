@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { registerExchangeCommands, ExchangeCliError } from './exchange/cli.js';
 import { Command, CommanderError } from 'commander';
+import { describeCliError } from './cli-errors.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerComparisonCommands } from './comparison-cli.js';
@@ -19,7 +20,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 export async function main(argv: string[], workflowDependencies:WorkflowCommandDependencies={}): Promise<number> {
   let store: Store | undefined;
   const program = new Command().name('hm').description('Local metadata measurement').requiredOption('--db <file>', 'local SQLite database');
-  program.exitOverride().configureOutput({ writeErr: () => process.stderr.write('invalid_command\n') });
+  // Usage errors are reported once from the catch below without echoing argv.
+  program.exitOverride().configureOutput({ writeErr: () => undefined });
   const db = () => store ??= new Store(program.opts<{ db: string }>().db);
   const life = () => new Lifecycle(db());
   const deletion = () => new Deletion(db(), undefined, ids => { print({ invalidating_reports: ids }); });
@@ -87,7 +89,7 @@ export async function main(argv: string[], workflowDependencies:WorkflowCommandD
     return 0;
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return 0;
-    process.stderr.write(error instanceof ExchangeCliError ? error.message + '\n' : 'input_or_state_error\n');
+    process.stderr.write(error instanceof ExchangeCliError ? error.message + '\n' : describeCliError(error).join('\n') + '\n');
     return 2;
   } finally { store?.close(); }
 }

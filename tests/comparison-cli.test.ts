@@ -66,7 +66,7 @@ test('CLI synthetic assignment to human outcome is durable, with fixture-only us
     expect(await run(['delete', 'task', 'task-1'])).toBe(0);
     output = ''; expect(await run(['comparison', 'show', protocol.id])).toBe(0);
     expect(JSON.parse(output) as unknown).toMatchObject({ status: 'invalidated_by_deletion', real_allocation_enabled: false });
-    expect(errors).toBe('input_or_state_error\ninput_or_state_error\n');
+    expect(errors).toBe('configuration_confirmation_required\ninvalid_input\n  at (root): invalid_value\n');
   } finally { vi.useRealTimers(); stdout.mockRestore(); stderr.mockRestore(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -81,7 +81,7 @@ test('CLI private fields and arbitrary real readiness flags fail without echoing
     expect(await main(['--db', file, 'variant', 'register', '--config', path])).toBe(2);
     writeFileSync(path, JSON.stringify({ ...protocol, analysis_validated: true }));
     expect(await main(['--db', file, 'comparison', 'register', '--config', path])).toBe(2);
-    expect(output).toBe('input_or_state_error\ninput_or_state_error\n');
+    expect(output).toBe('invalid_comparison_input\ninvalid_comparison_input\n');
     const store = new Store(file);
     try { expect(store.all('SELECT * FROM comparison_variants')).toEqual([]); expect(store.all('SELECT * FROM comparison_protocols')).toEqual([]); }
     finally { store.close(); }

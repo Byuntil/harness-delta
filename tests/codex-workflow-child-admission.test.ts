@@ -135,11 +135,11 @@ test('production direct-child launch reaches the pinned binary check without a p
     const e={...f.execution('production-guard'),sandbox:'read-only' as const,child_runtime:{model:'user-child-model',effort:'low'},binary:{path:realpathSync(process.execPath),sha256:pinnedCodexWorkflowBinarySha}};
     const {runAssignedWorkflow}=await import('../src/task-workflow.js');
     if(process.platform!=='darwin'||process.arch!=='arm64'){
-      await expect(runAssignedWorkflow(f.store,f.input,createCodexWorkflowAdapter(f.store,e),{model:null,effort:null})).rejects.toThrow('workflow_adapter_failed');expect(f.store.all('SELECT id FROM codex_workflow_runs')).toHaveLength(0);return;
+      await expect(runAssignedWorkflow(f.store,f.input,createCodexWorkflowAdapter(f.store,e),{model:null,effort:null})).rejects.toThrow(/^codex_workflow_child_operation_unsupported$/);expect(f.store.all('SELECT id FROM codex_workflow_runs')).toHaveLength(0);return;
     }
-    const result=await runAssignedWorkflow(f.store,f.input,createCodexWorkflowAdapter(f.store,e),{model:null,effort:null});
-    expect(result.adapter_result).toMatchObject({state:'failed',reason:'binary_mismatch',observed_requests:0,harness_application:'unapplied'});
-    expect(f.store.all('SELECT id FROM sessions')).toHaveLength(0);expect(f.store.eventCount()).toBe(0);expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(1);
+    await expect(runAssignedWorkflow(f.store,f.input,createCodexWorkflowAdapter(f.store,e),{model:null,effort:null})).rejects.toThrow(/^binary_mismatch$/);
+    expect(f.store.all('SELECT id FROM sessions')).toHaveLength(0);expect(f.store.eventCount()).toBe(0);expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(0);
+    expect(f.store.all('SELECT id FROM codex_workflow_runs')).toHaveLength(0);
   }finally{f.cleanup();}
 });
 
@@ -149,7 +149,9 @@ test('coordinator rechecks the selected profile if input mutates after admission
     const input:Record<string,unknown>={...f.execution('mutated-after-admission'),binary:{path:realpathSync(process.execPath),sha256:pinnedCodexWorkflowBinarySha},sandbox:'read-only'};
     let calls=0;const clock=()=>{if(++calls===2)input.child_runtime={model:'foreign-child-choice',effort:'high'};return new Date().toISOString();};
     const {runAssignedWorkflow}=await import('../src/task-workflow.js');
-    await expect(runAssignedWorkflow(f.store,f.input,createCodexWorkflowAdapter(f.store,input),{model:null,effort:null},clock)).rejects.toThrow('workflow_scope_revoked');
+    // Skip only the local file preflight; the profile getter must stay live.
+    const adapter=createCodexWorkflowAdapter(f.store,input);delete adapter.preflight;
+    await expect(runAssignedWorkflow(f.store,f.input,adapter,{model:null,effort:null},clock)).rejects.toThrow('workflow_scope_revoked');
     expect(f.store.all('SELECT id FROM codex_workflow_runs')).toHaveLength(0);expect(f.store.all('SELECT id FROM sessions')).toHaveLength(0);
   }finally{f.cleanup();}
 });

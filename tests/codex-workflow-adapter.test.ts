@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createCodexWorkflowAdapter, createSyntheticCodexWorkflowAdapter } from '../src/codex-workflow-adapter.js';
 import { runAssignedWorkflow } from '../src/task-workflow.js';
-import { stopCodexWorkflow, codexWorkflowCostFacts } from '../src/codex-workflow-journal.js';
+import { stopCodexWorkflow, codexWorkflowCostFacts, recoverCodexWorkflow } from '../src/codex-workflow-journal.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import { codexWorkflowFixture } from './helpers/codex-workflow-fixture.js';
 import type { RuntimeEvidence } from '../src/flexible-contracts.js';
@@ -78,13 +78,51 @@ test.each(['replace','rewrite'] as const)('a separate resume preserves the durab
 });
 test('binary mismatch reports unapplied and a forked source never yields usage',async()=>{
   const f=codexWorkflowFixture();try{
-    const failed=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,{...f.execution('wrong-binary'),binary:{path:process.execPath,sha256:'0'.repeat(64)}},f.script),runtime);
-    expect(failed.adapter_result).toMatchObject({state:'failed',reason:'binary_mismatch',harness_application:'unapplied'});
+    const wrong={...f.execution('wrong-binary'),binary:{path:process.execPath,sha256:'0'.repeat(64)}};
+    // Preflight rejects before assignment, task start or a run journal row.
+    await expect(runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,wrong,f.script),runtime)).rejects.toThrow(/^binary_mismatch$/);
+    expect(f.store.all('SELECT id FROM comparison_assignments')).toEqual([]);expect(f.store.all('SELECT id FROM codex_workflow_runs')).toEqual([]);
+    // A binary changing after preflight is still caught before spawn; this invocation's activation is paused.
+    const raced=createSyntheticCodexWorkflowAdapter(f.store,wrong,f.script);delete raced.preflight;
+    const failed=await runAssignedWorkflow(f.store,f.input,raced,runtime);
+    expect(failed).toMatchObject({state:'paused',activation_reverted:true});
+    expect(failed.adapter_result).toMatchObject({state:'failed',reason:'binary_mismatch',harness_application:'unapplied',process_started:false});
+    expect(f.store.all('SELECT id FROM active_intervals WHERE ended_at IS NULL')).toEqual([]);
     const root=f.newRoot();const header=JSON.parse(readFileSync(root.path,'utf8')) as {payload:Record<string,unknown>};header.payload.forked_from_id='another-root';writeFileSync(root.path,JSON.stringify(header)+'\n');
     const linked=await runAssignedWorkflow(f.store,{...f.input,confirmation_id:'fork-confirmation'},createSyntheticCodexWorkflowAdapter(f.store,f.execution('fork','link',root.id,root.path),f.script),runtime);
     expect(linked.adapter_result).toMatchObject({state:'failed',reason:'unsupported_session'});expect(f.store.eventCount()).toBe(0);
   }finally{f.cleanup();}
 });
+test('a binary expectation changed after preflight is re-hashed and rejected before spawn',async()=>{
+  const f=codexWorkflowFixture();try{
+    const input=f.execution('changed-after-preflight');const adapter=createSyntheticCodexWorkflowAdapter(f.store,input,f.script);
+    const preflight=adapter.preflight!.bind(adapter);
+    adapter.preflight=async runtimeInput=>{await preflight(runtimeInput);input.binary={...input.binary,sha256:'0'.repeat(64)};};
+    const result=await runAssignedWorkflow(f.store,f.input,adapter,runtime);
+    expect(result).toMatchObject({state:'paused',activation_reverted:true,adapter_result:{state:'failed',reason:'binary_mismatch',process_started:false}});
+    expect(f.store.eventCount()).toBe(0);
+  }finally{f.cleanup();}
+});
+test('a resume failing before spawn pauses the task it resumed',async()=>{
+  const f=codexWorkflowFixture();try{
+    const first=await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('run-1'),f.script),runtime);
+    new Lifecycle(f.store).pause(first.task_id);
+    const raced=createSyntheticCodexWorkflowAdapter(f.store,{...f.execution('run-2','resume',first.adapter_result!.session_id!),binary:{path:process.execPath,sha256:'0'.repeat(64)}},f.script);delete raced.preflight;
+    const result=await runAssignedWorkflow(f.store,{...f.input,confirmation_id:'resume-confirmation'},raced,runtime);
+    expect(result).toMatchObject({state:'paused',activation_reverted:true,adapter_result:{state:'failed',reason:'binary_mismatch',process_started:false}});
+    expect(f.store.all('SELECT id FROM active_intervals WHERE ended_at IS NULL')).toEqual([]);
+  }finally{f.cleanup();}
+});
+test('a live collector stops after its run is recovered and keeps the abandoned state',async()=>{
+  const f=codexWorkflowFixture();try{
+    writeFileSync(f.prompt,'SYNTHETIC_PRIVATE_TASK WAIT');
+    const launched=runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,{...f.execution('live'),timeout_ms:20000},f.script),runtime);
+    const deadline=Date.now()+10000;while(!f.store.get("SELECT 1 FROM codex_workflow_runs WHERE id='live' AND identity_verified=1")&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,20));
+    expect(recoverCodexWorkflow(f.store,'live')).toMatchObject({state:'failed',reason:'abandoned'});
+    await launched.catch(()=>undefined);
+    expect(f.store.get('SELECT state,reason FROM codex_workflow_runs WHERE id=?',['live'])).toEqual({state:'failed',reason:'abandoned'});
+  }finally{f.cleanup();}
+},20000);
 test('a response ID already owned by another session fails instead of being counted again',async()=>{
   const f=codexWorkflowFixture();try{
     await runAssignedWorkflow(f.store,f.input,createSyntheticCodexWorkflowAdapter(f.store,f.execution('launch'),f.script),runtime);

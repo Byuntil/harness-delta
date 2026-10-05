@@ -1,6 +1,7 @@
 import { IdSchema } from './contracts.js';
 import { CostFactsSchema } from './flexible-contracts.js';
 import type { CostCoverageEvidence } from './flexible-contracts.js';
+import { recordAbandonedRunGap } from './runtime-history.js';
 import type { Store } from './store.js';
 
 export const codexWorkflowProfileId = 'codex-workflow-own-response-v1';
@@ -22,6 +23,21 @@ export function stopCodexWorkflow(store:Store,id:string) {
     const row=codexWorkflowRun(store,id);if(!row)throw new Error('unknown_codex_workflow_run');
     if(row.state==='running')store.execute('UPDATE codex_workflow_runs SET stop_requested=1 WHERE id=?',[id]);
     return {run_id:id,task_id:row.task_id,stop_requested:row.state==='running',state:row.state};
+  });
+}
+/** Explicit human fencing for a run whose process is gone (crash, SIGKILL, reboot).
+ * A still-live process sees the non-running state at its next guard and stops.
+ * Never finalizes the task or backfills usage; bound sessions receive a gap. */
+export function recoverCodexWorkflow(store:Store,id:string,now:string=new Date().toISOString()) {
+  return store.immediateTransaction(()=>{
+    const row=codexWorkflowRun(store,id);if(!row)throw new Error('unknown_codex_workflow_run');
+    if(row.state!=='running')throw new Error('workflow_run_not_running');
+    store.execute("UPDATE codex_workflow_runs SET state='failed',reason='abandoned',stop_requested=1,ended_at=? WHERE id=? AND state='running'",[now,id]);
+    const sessions=[row.session_id,...store.all<{session_id:string}>('SELECT session_id FROM codex_workflow_children WHERE run_id=?',[id]).map(c=>c.session_id)].filter((s):s is string=>s!==null);
+    const gaps=sessions.filter(session=>recordAbandonedRunGap(store,row.task_id,session,row.started_at,now)).length;
+    // An inactive (paused/finished/deleted) task forbids measurement writes; say so.
+    return {run_id:id,task_id:row.task_id,state:'failed' as const,reason:'abandoned' as const,observation_gaps:gaps,
+      gaps_not_recorded:sessions.length-gaps,...(gaps<sessions.length?{gap_warning:'task_not_active' as const}:{})};
   });
 }
 /** Only host scope/identity facts supported by successful guarded reads are

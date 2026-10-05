@@ -13,6 +13,8 @@ import type { TaskRow } from '../lifecycle.js';
 import type { Store } from '../store.js';
 import { canonicalJson } from './comparison-snapshot.js';
 import { ComparisonSnapshotInputSchema, SnapshotAssignmentSchema, RevisionReasonSchema } from './comparison-contracts.js';
+/** Version 2 adds the late outcome disclosure; version 1 snapshots stay readable. */
+export const FlexibleDescriptiveVersionSchema = z.enum(['flexible-cost-descriptive-1', 'flexible-cost-descriptive-2']);
 export const FlexibleSnapshotAssignmentSchema = z.strictObject({
   ...SnapshotAssignmentSchema.omit({ metadata: true, usages: true }).shape, metadata: FlexibleTaskMetadataSchema,
   usages: z.array(z.strictObject({ event: EventV2Schema, recorded_at: TimestampSchema.nullable() })),
@@ -23,7 +25,7 @@ export const FlexibleSnapshotAssignmentSchema = z.strictObject({
 });
 export const FlexibleSnapshotInputSchema = z.strictObject({
   ...ComparisonSnapshotInputSchema.omit({ schema_version: true, descriptive_version: true, protocol: true, variants: true, assignments: true }).shape,
-  schema_version: z.literal(2), descriptive_version: z.literal('flexible-cost-descriptive-1'),
+  schema_version: z.literal(2), descriptive_version: FlexibleDescriptiveVersionSchema,
   protocol: FlexibleProtocolSchema, variants: z.tuple([FlexibleVariantSchema, FlexibleVariantSchema]),
   assignments: z.array(FlexibleSnapshotAssignmentSchema), price_table: PriceTableSchema, formula_version: z.literal(costFormulaVersion),
 }).refine(value => value.price_table.id === value.protocol.price_table_id)
@@ -31,6 +33,7 @@ export const FlexibleSnapshotInputSchema = z.strictObject({
   .refine(value => new Set(value.assignments.map(a => a.task_id)).size === value.assignments.length);
 export type FlexibleSnapshotInput = z.infer<typeof FlexibleSnapshotInputSchema>;
 const amount = TaskCostSchema.shape.complete_amount;
+const LateOutcomeSchema = z.strictObject({ status: z.enum(['success', 'failed', 'aborted']), assessed_at: TimestampSchema });
 export const FlexibleTaskReportSchema = z.strictObject({ task_id: IdSchema, assignment_id: IdSchema, original_variant_id: IdSchema,
   metadata: FlexibleTaskMetadataSchema, followup_ends_at: TimestampSchema,
   deadline_status: z.enum(['followup_pending', 'success', 'failed', 'aborted', 'not_started', 'outcome_missing']),
@@ -39,16 +42,22 @@ export const FlexibleTaskReportSchema = z.strictObject({ task_id: IdSchema, assi
   quality: z.strictObject({ outcome: z.enum(['success', 'failed', 'aborted']).nullable(), criteria_met: z.array(IdSchema), criteria_total: z.number().int().nonnegative(), first_success: z.boolean().nullable() }),
   time: z.strictObject({ elapsed_ms: z.number().nonnegative().nullable(), active_ms: z.number().nonnegative().nullable(), rework_count: z.number().int().nonnegative() }),
   runtime_summary: z.strictObject({ models: z.array(ModelSchema.nullable()).max(10000), efforts: z.array(IdSchema.nullable()).max(10000), changes: z.number().int().nonnegative(), unknown_count: z.number().int().nonnegative() }),
+  /** Descriptive version 2: an outcome assessed at/after the follow-up deadline and
+   * before the cutoff. Disclosed only; it never changes deadline_status or rates. */
+  late_outcome: LateOutcomeSchema.nullable().optional(),
 });
-export const FlexibleComparisonReportSchema = z.strictObject({ schema_version: z.literal(2), descriptive_version: z.literal('flexible-cost-descriptive-1'),
+export const FlexibleComparisonReportSchema = z.strictObject({ schema_version: z.literal(2), descriptive_version: FlexibleDescriptiveVersionSchema,
   purpose: z.literal('functional_pilot').optional(), evaluation_status: z.literal('functional_only').optional(),
   report_id: IdSchema, protocol_id: IdSchema, cutoff: TimestampSchema, evaluated_at: TimestampSchema, validity_status: z.literal('valid'),
   data_revision: z.number().int().nonnegative(), snapshot_sequence: z.number().int().positive(), revision_reason: RevisionReasonSchema,
   supersedes_report_id: IdSchema.nullable(), snapshot_hash: z.string(), price_table_hash: z.string(), price_table: PriceTableSchema, formula_version: z.literal(costFormulaVersion),
   tasks: z.array(FlexibleTaskReportSchema), arms: z.array(z.strictObject({ variant_id: IdSchema, assigned_count: z.number().int().nonnegative(), complete_count: z.number().int().nonnegative(),
     partial_count: z.number().int().nonnegative(), missing_count: z.number().int().nonnegative(), complete_mean: amount, partial_mean: amount,
-    deadline_success_rate: z.number().min(0).max(1).nullable() })), relative_change: z.string().nullable(),
+    deadline_success_rate: z.number().min(0).max(1).nullable(), late_outcome_count: z.number().int().nonnegative().optional() })), relative_change: z.string().nullable(),
   adoption: z.strictObject({ status: z.enum(['inconclusive', 'not_applicable']), reasons: z.array(z.enum(['analysis_unverified', 'incomplete', 'followup_pending', 'quality_missing', 'functional_pilot_only'])) }), limitations: z.array(z.string()),
+}).refine(value => {
+  const v2 = value.descriptive_version === 'flexible-cost-descriptive-2';
+  return value.tasks.every(t => (t.late_outcome !== undefined) === v2) && value.arms.every(a => (a.late_outcome_count !== undefined) === v2);
 }).refine(value => value.purpose === 'functional_pilot'
   ? value.evaluation_status === 'functional_only' && value.adoption.status === 'not_applicable' && value.adoption.reasons.includes('functional_pilot_only') && value.relative_change === null && value.arms.every(arm => arm.complete_mean === null)
   : value.evaluation_status === undefined && value.adoption.status === 'inconclusive' && !value.adoption.reasons.includes('functional_pilot_only'));
@@ -58,6 +67,9 @@ const Money = Decimal.clone({ precision: 160, rounding: Decimal.ROUND_HALF_EVEN,
 export function projectFlexibleComparison(input: FlexibleSnapshotInput): FlexibleComparisonReport {
   const config = parseComparison(FlexibleSnapshotInputSchema, input, 'invalid_snapshot_input');
   const functional = config.protocol.purpose === 'functional_pilot';
+  // Stored version 1 snapshots must re-project byte-identically, so the late
+  // outcome disclosure exists only in version 2 inputs.
+  const disclosesLate = config.descriptive_version === 'flexible-cost-descriptive-2';
   const evaluation = Date.parse(config.evaluated_at);
   if (Date.parse(config.cutoff) > evaluation) throw new Error('invalid_cutoff');
   const tasks = config.assignments.filter(a => Date.parse(a.assigned_at) < Date.parse(config.cutoff) && Date.parse(a.recorded_at) <= evaluation).map(a => {
@@ -80,6 +92,8 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
     const outcome = a.outcome && window(a.outcome.assessed_at) ? a.outcome : null;
     if (outcome?.criteria_met.some(id => !a.metadata.criterion_ids.includes(id))) throw new Error('invalid_criteria');
     const deadlineStatus = pending ? 'followup_pending' as const : outcome?.status ?? (startedAt === null ? 'not_started' as const : 'outcome_missing' as const);
+    const late = !pending && a.outcome !== null && outcome === null && Date.parse(a.outcome.assessed_at) >= Date.parse(a.followup_ends_at) &&
+      Date.parse(a.outcome.assessed_at) < Date.parse(config.cutoff) ? { status: a.outcome.status, assessed_at: a.outcome.assessed_at } : null;
     const intervals = a.active_intervals.map(i => [Math.max(timeStart, Date.parse(i.started_at)), Math.min(end, Date.parse(i.ended_at ?? new Date(end).toISOString()))] as const).filter(([x,y]) => x < y).sort(([x],[y]) => x-y);
     let active = 0; let until = timeStart; for (const [x,y] of intervals) { if (y > until) { active += y-Math.max(x,until); until=y; } }
     let changes = 0; for (let i=1;i<runtime.length;i++) if (runtime[i]!.model !== runtime[i-1]!.model || runtime[i]!.effort !== runtime[i-1]!.effort) changes++;
@@ -87,7 +101,8 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
       deadline_status: deadlineStatus, cost, deviations: a.deviations.filter(d=>window(d.occurred_at)&&Date.parse(d.recorded_at)<=evaluation).map(d=>({occurred_at:d.occurred_at,recorded_at:d.recorded_at,reason_code:d.reason_code})), quality: { outcome: outcome?.status ?? null, criteria_met: outcome?.criteria_met ?? [], criteria_total: a.metadata.criterion_ids.length,
         first_success: a.first_assessed_at !== null && window(a.first_assessed_at) ? a.first_success : null },
       time: { elapsed_ms: startedAt === null ? null : Math.max(0,Math.min(end,a.finalized_at === null ? end : Date.parse(a.finalized_at))-timeStart), active_ms: startedAt === null ? null : active, rework_count: a.rework_starts.filter(window).length },
-      runtime_summary: { models: [...new Set(runtime.map(r=>r.model))], efforts: [...new Set(runtime.map(r=>r.effort))], changes, unknown_count: runtime.filter(r=>r.model===null||r.boundary==='unknown').length } }, 'invalid_snapshot_input');
+      runtime_summary: { models: [...new Set(runtime.map(r=>r.model))], efforts: [...new Set(runtime.map(r=>r.effort))], changes, unknown_count: runtime.filter(r=>r.model===null||r.boundary==='unknown').length },
+      ...(disclosesLate ? { late_outcome: late } : {}) }, 'invalid_snapshot_input');
   });
   const allComplete = tasks.length > 0 && tasks.every(t => t.cost.complete_amount !== null);
   const mean = (values: string[]) => values.length ? values.reduce((sum, value) => sum.plus(value),new Money(0)).div(values.length).toFixed() : null;
@@ -97,14 +112,15 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
     return { variant_id, assigned_count: rows.length, complete_count: complete.length, partial_count: partial.length, missing_count: rows.length-complete.length-partial.length,
       complete_mean: allComplete && !functional ? mean(rows.map(t=>t.cost.complete_amount!)) : null,
       partial_mean: mean(rows.flatMap(t=>t.cost.partial_amount===null?[]:[t.cost.partial_amount])),
-      deadline_success_rate: rows.length && rows.every(t=>!['followup_pending','outcome_missing'].includes(t.deadline_status)) ? rows.filter(t=>t.deadline_status==='success').length/rows.length : null };
+      deadline_success_rate: rows.length && rows.every(t=>!['followup_pending','outcome_missing'].includes(t.deadline_status)) ? rows.filter(t=>t.deadline_status==='success').length/rows.length : null,
+      ...(disclosesLate ? { late_outcome_count: rows.filter(t=>t.late_outcome).length } : {}) };
   });
   const a=arms[0]!.complete_mean; const b=arms[1]!.complete_mean;
   const relative = a!==null&&b!==null&&!new Money(a).isZero() ? new Money(b).minus(a).div(a).toFixed() : null;
   const reasons: FlexibleComparisonReport['adoption']['reasons']=functional?['functional_pilot_only']:['analysis_unverified'];
   if(!allComplete)reasons.push('incomplete'); if(tasks.some(t=>t.deadline_status==='followup_pending'))reasons.push('followup_pending');
   if(tasks.some(t=>t.quality.outcome===null))reasons.push('quality_missing');
-  return parseComparison(FlexibleComparisonReportSchema, { schema_version:2,descriptive_version:'flexible-cost-descriptive-1', report_id:config.report_id,protocol_id:config.protocol.id,
+  return parseComparison(FlexibleComparisonReportSchema, { schema_version:2,descriptive_version:config.descriptive_version, report_id:config.report_id,protocol_id:config.protocol.id,
     cutoff:config.cutoff,evaluated_at:config.evaluated_at,validity_status:'valid',data_revision:config.data_revision,snapshot_sequence:config.snapshot_sequence,revision_reason:config.revision_reason,supersedes_report_id:config.supersedes_report_id,
     snapshot_hash:createHash('sha256').update(canonicalJson(config)).digest('hex'),price_table_hash:createHash('sha256').update(canonicalJson(config.price_table)).digest('hex'),price_table:config.price_table,formula_version:config.formula_version,
     ...(functional ? { purpose: 'functional_pilot', evaluation_status: 'functional_only' } : {}),
@@ -134,7 +150,7 @@ export function captureFlexibleInput(store: Store, protocolId: string, reportId:
       gaps:store.all('SELECT started_at,ended_at,recorded_at,reason FROM observation_gaps WHERE task_id=? ORDER BY started_at,id',[a.task_id]),
       coverage:{profile_id:'unsupported-production-cost',task_id:a.task_id,window_start:a.assigned_at,window_end:a.followup_ends_at,facts:Object.fromEntries(Object.keys(CostFactsSchema.shape).map(k=>[k,'unknown'])),has_observed_value:usages.length>0}};
   });
-  return parseComparison(FlexibleSnapshotInputSchema,{schema_version:2,descriptive_version:'flexible-cost-descriptive-1',report_id:reportId,protocol,variants,cutoff:comparisonTimestamp(cutoff),evaluated_at:comparisonTimestamp(evaluatedAt),data_revision:row.data_revision,snapshot_sequence:sequence,revision_reason:reason,supersedes_report_id:supersedes,
+  return parseComparison(FlexibleSnapshotInputSchema,{schema_version:2,descriptive_version:'flexible-cost-descriptive-2',report_id:reportId,protocol,variants,cutoff:comparisonTimestamp(cutoff),evaluated_at:comparisonTimestamp(evaluatedAt),data_revision:row.data_revision,snapshot_sequence:sequence,revision_reason:reason,supersedes_report_id:supersedes,
     assignments,registrations:[],price_table:readPriceTable(store,protocol.price_table_id),formula_version:costFormulaVersion},'invalid_snapshot_input');
 }
 export function aggregateFlexibleTaskReport(store: Store,taskId:string,cutoff:string):FlexibleTaskReport {

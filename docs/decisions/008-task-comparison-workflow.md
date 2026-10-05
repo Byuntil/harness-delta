@@ -166,6 +166,9 @@ occurred. Once mature, a qualifying human assessment yields success/failed/abort
 otherwise no pre-deadline start yields `not_started`, and a pre-deadline start yields
 `outcome_missing`. These classifications do not finalize tasks. A late start cannot
 repair deadline status. Absence of success is not evidence of human failure.
+Flexible reports with descriptive version `flexible-cost-descriptive-2` disclose an
+outcome assessed at or after the deadline as a separate `late_outcome`; it never
+changes the classification, denominators or rates.
 
 Deadline-success denominator is all assigned tasks, with each category disclosed.
 The rate is null while any assigned task's follow-up is pending; every arm follows

@@ -99,6 +99,13 @@ Elapsed time is not human labor. Frozen snapshots preserve cutoff, receipt-time
 boundary, actual price contents/hash and formula. Late arrivals require a new
 revision and never mutate an earlier report.
 
+New snapshots use descriptive version `flexible-cost-descriptive-2`. It adds a
+task `late_outcome` (status and assessment time) for an outcome assessed at or after
+the follow-up deadline and before the cutoff, and an arm `late_outcome_count`.
+These are disclosures only: the task's deadline status stays `outcome_missing`,
+and rates, means and adoption reasons are unchanged. Snapshots stored with
+`flexible-cost-descriptive-1` keep their original shape and remain readable.
+
 The [file exchange workflow](team-file-exchange.md) also accepts v2 data packages.
 Only allowlisted task metadata, runtime summaries and cost provenance are shared;
 local sessions, requests, event identities and detailed runtime history are omitted.

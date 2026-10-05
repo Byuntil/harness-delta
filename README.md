@@ -8,7 +8,9 @@ reports are implemented. Validated sequential CLI counters and limited command
 executions remain partial; complete task totals and unverified metrics stay null.
 See the [local runbook](docs/runbooks/local-measurement.md)
 ([한국어 사용 안내](docs/runbooks/local-measurement.ko.md)) and
-[capability limits](docs/decisions/001-adapter-capabilities.md).
+[capability limits](docs/decisions/001-adapter-capabilities.md). For an assigned
+A/B task, start with the [first workflow run quickstart](docs/runbooks/workflow-quickstart.md)
+([한국어](docs/runbooks/workflow-quickstart.ko.md)).
 
 ## Development
 

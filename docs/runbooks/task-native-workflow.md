@@ -1,5 +1,8 @@
 # Assigned task workflow and native execution boundary
 
+New to the workflow? Start with the [first A/B run quickstart](workflow-quickstart.md)
+([한국어](workflow-quickstart.ko.md)); this page holds the detailed contracts.
+
 The common workflow connects durable flexible assignment, selected instruction
 artifacts, task start/resume, an explicit execution-adapter boundary, human finish,
 and an existing comparison snapshot. Models and effort are runtime choices;
@@ -98,7 +101,9 @@ Only exact `cli` and `exec` source origins are allowed; IDE/MCP and other source
 origins are unsupported even with a matching root UUID and version.
 
 Each invocation uses the common workflow/runtime files and a strict execution
-JSON file. Use a fresh `run_id` and `confirmation_id` for every operation:
+JSON file. Use a fresh `run_id` and `confirmation_id` for every operation. Pass
+`--confirmation <id>` to override the configuration's `confirmation_id` instead of
+editing the file. [Example files](../../examples/workflow/) match these schemas:
 
 ```json
 {
@@ -116,6 +121,13 @@ JSON file. Use a fresh `run_id` and `confirmation_id` for every operation:
 
 Paths must be absolute and canonical. The native binary must match the pinned
 SHA-256; the metadata-only recorder must match its code-owned content hash.
+These file checks, plus the prompt file and Codex home, run as a preflight before
+assignment or task activation. A failure prints a fixed code (for example
+`binary_mismatch`) and leaves no assignment, active interval or run journal row.
+The binary is checked again immediately before spawn and is re-hashed unless the
+file identity hashed by preflight is unchanged. If a launch still fails before any
+native process starts, and that invocation activated the task, the task is paused
+again and the receipt reports `activation_reverted: true`.
 For a bounded fresh parent verification launch, explicitly adding
 `"project_trust": "untrusted"` passes the registered project root's trust setting
 through a one-invocation CLI override. This optional setting disables project-local
@@ -150,7 +162,21 @@ node dist/cli.js --db .harness-delta/local.sqlite workflow codex link \
 node dist/cli.js --db .harness-delta/local.sqlite workflow codex collect \
   --config workflow.json --runtime runtime.json --execution collect.json
 node dist/cli.js --db .harness-delta/local.sqlite workflow codex stop run-1
+node dist/cli.js --db .harness-delta/local.sqlite workflow codex recover run-1
+node dist/cli.js --db .harness-delta/local.sqlite workflow task task-1
 ```
+
+`stop` asks a live run to end. `recover` is for a run left `running` after its
+process disappeared (crash, kill or reboot), which otherwise blocks the task with
+`workflow_run_active`. It marks the run `failed` with reason `abandoned`, records
+an `incomplete` observation gap after the last retained usage of each bound
+session, and never adds usage; a harness-delta collector that is still alive stops
+at its next guard. Recover before pausing or finishing: an inactive task cannot
+record the gap, and the result reports `gap_warning: task_not_active`. Codex and
+Claude Code processes run in their own process groups and can outlive a killed
+collector; no process ID is persisted, so `recover` cannot signal them and they
+must be ended manually. `workflow task` prints the task state, follow-up deadline, run states
+and fixed next-action codes without paths or instruction text.
 
 `resume` requires `operation: "resume"` and the exact previously linked UUID in
 `session_id`. It applies the selected harness again with current runtime choices.
@@ -364,8 +390,13 @@ node dist/cli.js --db .harness-delta/local.sqlite workflow report protocol-1 \
   --id report-1 --cutoff 2026-10-05T00:00:00Z --reason initial
 ```
 
-Use a real, explicit cutoff after finalization and no later than report evaluation.
-Snapshots are half-open; an outcome exactly at the cutoff is excluded. Finish and
+Finish before the task's `followup_ends_at`. An outcome assessed at or after that
+deadline is stored, but deadline status stays `outcome_missing` (or `not_started`); `workflow finish`
+returns `counted_in_deadline_status: false` and warns
+`assessment_after_followup_deadline`. A report cutoff before the deadline shows
+`followup_pending`, so create the final report after the deadline with a cutoff at
+or after it and no later than report evaluation. Snapshots are half-open; an
+outcome exactly at the cutoff is excluded. Finish and
 report are separate durable operations so a report error cannot undo or silently
 repeat a human outcome. All linked eligible sessions and rework remain under the
 original assignment. Missing coverage or prices keep complete cost unavailable;

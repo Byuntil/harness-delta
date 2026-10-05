@@ -34,12 +34,29 @@ export interface WorkflowExecutionContext {
  */
 export interface WorkflowAdapter {
   product: 'synthetic' | 'codex' | 'claude_code'; productVersion: string; profileId: string;
+  /** Local file and qualification checks before assignment or task activation.
+   * Never launches a product, reads session sources or writes measurement data. */
+  preflight?(runtime: WorkflowRuntime): void | Promise<void>;
+  /** Throwing means no native process was started; return a result otherwise. */
   run(context: WorkflowExecutionContext): Promise<void | WorkflowAdapterResult>;
 }
 export interface WorkflowAdapterResult {
   diagnostic?:import('./codex-workflow-adapter.js').CodexWorkflowDiagnostic|null;
   run_id:string;session_id:string|null;state:'completed'|'failed'|'stopped';reason:string|null;
   observed_requests:number;harness_application:'invocation_settings_verified'|'external_unverified'|'unapplied';
+  /** False only when the adapter is certain no native process ran for this invocation;
+   * omitted when one may exist outside the adapter (link/collect). */
+  process_started?:boolean;
+}
+/** Fixed adapter failure codes that are safe to surface. Anything else is
+ * replaced by the generic fallback so producer text never escapes. */
+const workflowAdapterCodes = new Set(['binary_mismatch', 'binary_unreadable', 'invalid_hook_recorder', 'invalid_prompt', 'unsafe_home',
+  'invalid_execution', 'codex_workflow_source_unqualified', 'codex_workflow_child_operation_unsupported', 'codex_workflow_child_binding_invalid',
+  'synthetic_store_required', 'workflow_run_active', 'claude_probe_executable_mismatch', 'claude_workflow_prompt_failed',
+  'claude_workflow_effort_unsupported', 'claude_workflow_already_reserved', 'claude_workflow_private_workspace_required', 'claude_workflow_source_conflict', 'candidate_mixed_sources']);
+function workflowAdapterCode(error: unknown, fallback: string): string {
+  try { return error instanceof Error && workflowAdapterCodes.has(error.message) ? error.message : fallback; }
+  catch { return fallback; }
 }
 
 function workflowProtocol(store: Store, protocolId: string) {
@@ -74,6 +91,7 @@ export function beginAssignedWorkflow(store: Store, input: unknown, runtimeInput
   const snapshot = selectedArtifactSnapshot(artifacts);
   const variant = comparisonVariant(store, assignment.assigned_variant_id);
   if (snapshot.hash !== variant.instruction_manifest_hash) throw new Error('workflow_manifest_mismatch');
+  let activated = false;
   store.immediateTransaction(() => {
     confirmConfiguration(store, { schema_version: 1, id: config.confirmation_id, task_id: assignment.task_id,
       evidence_method: 'selected_artifact_hash', actual_variant_id: assignment.assigned_variant_id,
@@ -86,12 +104,13 @@ export function beginAssignedWorkflow(store: Store, input: unknown, runtimeInput
     if (state === 'registered') life.start(assignment.task_id);
     else if (state === 'paused') life.resume(assignment.task_id);
     else if (state !== 'active') throw new Error('invalid_transition');
+    activated = state !== 'active';
     requireConfigurationConfirmation(store, assignment.task_id, now);
   });
   const current = life.task(assignment.task_id);
   return { receipt: { ...assignment, confirmation_id: config.confirmation_id, generation: current.generation,
     state: current.state, instruction_manifest_hash: snapshot.hash, harness_application: 'prepared_only' as const,
-    complete_cost: null, inference: false }, instructions: snapshot.instructions };
+    complete_cost: null, inference: false }, instructions: snapshot.instructions, activated };
 }
 
 /** No native calls occur unless a matching code-owned real source qualifies.
@@ -108,6 +127,12 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
       !registry.some(row => row.product === adapter.product && row.product_version === adapter.productVersion && row.profile_id === adapterProfileId) ||
       !protocol.source_profiles.some(row => row.product === adapter.product && row.product_version === adapter.productVersion && row.profile_id === adapterProfileId) ||
       (protocol.purpose === 'synthetic_validation' && adapter.product !== 'synthetic')) throw new Error('workflow_adapter_mismatch');
+  // Environment checks precede assignment so a broken binary, recorder or prompt
+  // never enrolls the task, starts its first attempt or opens an active interval.
+  try { await adapter.preflight?.(runtime); }
+  // Only allowlisted fixed codes survive; producer text and paths are dropped.
+  // eslint-disable-next-line preserve-caught-error
+  catch (error) { throw new Error(workflowAdapterCode(error, 'workflow_preflight_failed')); }
   const prepared = beginAssignedWorkflow(store, config, runtime, clock);
   const taskId = prepared.receipt.task_id; const generation = prepared.receipt.generation;
   const projectId = config.assignment.project_id;
@@ -125,13 +150,31 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
     const confirmation=latest&&ConfigurationRecordSchema.parse(JSON.parse(latest.payload));
     if(latest?.id!==config.confirmation_id||confirmation?.verification_status!=='confirmed'||confirmation.observed_config_hash!==prepared.receipt.instruction_manifest_hash)throw new Error('workflow_scope_revoked');
   };
+  // Pause only an activation made by this invocation, atomically, while the same
+  // generation is active, this invocation's confirmation is the latest and no
+  // other run is in progress; nothing native ran, so no active time accrues.
+  const revertActivation = () => prepared.activated && store.immediateTransaction(() => {
+    const task = store.get<{ state: string; generation: number }>('SELECT state,generation FROM tasks WHERE id=?', [taskId]);
+    const latest = store.get<{ id: string }>('SELECT id FROM comparison_confirmations WHERE task_id=? ORDER BY rowid DESC LIMIT 1', [taskId]);
+    if (task?.state !== 'active' || task.generation !== generation || latest?.id !== config.confirmation_id ||
+        store.get("SELECT 1 FROM codex_workflow_runs WHERE task_id=? AND state='running' UNION ALL SELECT 1 FROM claude_workflow_runs WHERE task_id=? AND state='running'", [taskId, taskId])) return false;
+    new Lifecycle(store, clock).pause(taskId); return true;
+  });
   assertActive();
   let adapterResult: void | WorkflowAdapterResult;
   try { adapterResult = await adapter.run({ taskId, projectId, projectRoot, generation, assignedVariantId: prepared.receipt.assigned_variant_id,
     confirmationId: config.confirmation_id, instructionManifestHash:prepared.receipt.instruction_manifest_hash, runtime, instructions: prepared.instructions, assertActive }); }
-  catch { throw new Error('workflow_adapter_failed'); }
-  assertActive();
-  return { ...prepared.receipt, execution: 'adapter_returned' as const, outcome: null,
+  catch (error) {
+    try { revertActivation(); } catch { /* the adapter failure remains the reported error */ }
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error(workflowAdapterCode(error, 'workflow_adapter_failed'));
+  }
+  // process_started is false only when the adapter knows no native process ran.
+  const reverted = !!adapterResult && adapterResult.state === 'failed' && adapterResult.process_started === false && revertActivation();
+  if (!reverted) assertActive();
+  const current = reverted ? new Lifecycle(store, clock).task(taskId) : undefined;
+  return { ...prepared.receipt, ...(current ? { state: current.state, generation: current.generation } : {}),
+    activation_reverted: reverted, execution: 'adapter_returned' as const, outcome: null,
     ...(adapterResult ? {adapter_result:adapterResult} : {}),
     limitations: ['adapter_return_does_not_prove_native_collection', 'human_finalization_required', 'whole_task_cost_unconfirmed'] };
 }
@@ -142,8 +185,13 @@ export function finishAssignedWorkflow(store: Store, taskId: string, outcome: Ou
     const assignment = store.get<AssignmentRow>('SELECT * FROM comparison_assignments WHERE task_id=?', [taskId]);
     if (!assignment) throw new Error('task_not_assigned');
     new Lifecycle(store, clock).finalize(taskId, outcome, criteria);
+    const assessedAt = store.get<{ assessed_at: string }>('SELECT assessed_at FROM outcomes WHERE task_id=?', [taskId])!.assessed_at;
+    // ADR 008: the endpoint ends at the follow-up deadline. A later outcome is
+    // stored but never repairs deadline status; say so at the moment it is made.
+    const counted = Date.parse(assessedAt) < Date.parse(assignment.followup_ends_at);
     return { task_id: taskId, assigned_variant_id: assignment.variant_id, protocol_id: assignment.protocol_id,
-      outcome, comparison_snapshot: 'explicit_later_cutoff_required' as const };
+      outcome, assessed_at: assessedAt, followup_ends_at: assignment.followup_ends_at, counted_in_deadline_status: counted,
+      warnings: counted ? [] : ['assessment_after_followup_deadline' as const], comparison_snapshot: 'explicit_later_cutoff_required' as const };
   });
 }
 
@@ -154,4 +202,36 @@ export function workflowStatus(store: Store, protocolId: string, at = utcNow()) 
     native_execution: implemented&&readiness.real_allocation, codex_adapter_implemented:true, claude_adapter_implemented:true, common_coordinator: true, selected_instructions: 'transient_per_invocation_boundary',
     blockers: [...(protocol.purpose !== 'synthetic_validation' && !readiness.real_allocation ? ['native_source_unqualified'] : []),
       ...(!implemented?['native_adapter_not_wired']:[]), ...(!readiness.complete_cost ? ['whole_task_cost_unconfirmed'] : []), ...(!readiness.inference ? ['analysis_unverified'] : [])] };
+}
+
+/** Task-level view for a person running the workflow: IDs, times, run states and
+ * fixed next-action codes. Never includes paths, prompts or instruction text. */
+export function workflowTaskStatus(store: Store, taskId: string, at = utcNow()) {
+  parseComparison(IdSchema, taskId);
+  const task = new Lifecycle(store).task(taskId);
+  const assignment = store.get<AssignmentRow>('SELECT * FROM comparison_assignments WHERE task_id=?', [taskId]);
+  if (!assignment) throw new Error('task_not_assigned');
+  const outcome = store.get<{ status: Outcome; assessed_at: string }>('SELECT status,assessed_at FROM outcomes WHERE task_id=?', [taskId]);
+  const open = Date.parse(at) < Date.parse(assignment.followup_ends_at);
+  const runs = [
+    ...store.all<{ run_id: string; operation: string; state: string; reason: string | null; diagnostic_code: string | null; stop_requested: number; started_at: string; ended_at: string | null }>(
+      'SELECT id AS run_id,operation,state,reason,diagnostic_code,stop_requested,started_at,ended_at FROM codex_workflow_runs WHERE task_id=?', [taskId]).map(r => ({ product: 'codex' as const, ...r })),
+    ...store.all<{ run_id: string; state: string; reason: string | null; stop_requested: number; started_at: string; ended_at: string | null }>(
+      'SELECT id AS run_id,state,reason,stop_requested,started_at,ended_at FROM claude_workflow_runs WHERE task_id=?', [taskId]).map(r => ({ product: 'claude_code' as const, operation: 'launch', diagnostic_code: null, ...r })),
+  ].sort((a, b) => a.started_at < b.started_at ? -1 : a.started_at > b.started_at ? 1 : a.run_id < b.run_id ? -1 : 1)
+    .map(r => ({ ...r, stop_requested: r.stop_requested === 1 }));
+  const next: string[] = [];
+  if (runs.some(r => r.state === 'running')) next.push('stop_or_recover_running_run');
+  if (task.state === 'registered') next.push('launch');
+  else if (task.state !== 'finalized') {
+    if (task.state === 'paused') next.push('continue_with_launch_or_resume');
+    next.push(open ? 'finish_before_followup_deadline' : 'finish_now_outcome_excluded_after_deadline');
+  }
+  else next.push(open ? 'report_after_followup_deadline' : 'create_report');
+  return { schema_version: 1, task_id: taskId, state: task.state, generation: task.generation, protocol_id: assignment.protocol_id,
+    assigned_variant_id: assignment.variant_id, assigned_at: assignment.assigned_at, followup_ends_at: assignment.followup_ends_at,
+    followup: open ? 'open' as const : 'closed' as const,
+    outcome: outcome ? { status: outcome.status, assessed_at: outcome.assessed_at,
+      counted_in_deadline_status: Date.parse(outcome.assessed_at) < Date.parse(assignment.followup_ends_at) } : null,
+    runs, next_actions: next };
 }
