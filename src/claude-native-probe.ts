@@ -4,6 +4,7 @@ import { closeSync, constants, fsyncSync, lstatSync, openSync, readFileSync, wri
 import { join, resolve } from 'node:path';
 import { IdSchema } from './contracts.js';
 import { claudeTelemetryEnv, type TelemetryDestination } from './otel-launch-settings.js';
+import { claudeProbeProductVersion, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 
 export interface ClaudeNativeProbeOptions {
   /** Caller-owned ignored directory, never a user's configuration directory. */
@@ -33,9 +34,13 @@ export interface ClaudeWorkflowInvocation {
   model:string|null; effort:string|null; childRuntime?:{model:string;effort:string}|undefined;
   instructions:string; maxTurns:number; requestLimit:number; durationMs:number;
   permissions:'read-only'|'workspace-edit'; maxBudgetUsd?:number|undefined;
+  /** An unadmitted candidate pinned to the probe binary (the manual external candidate);
+   * never set by the admitted workflow adapter. */
+  pinnedProbeCandidate?:true;
 }
 export async function prepareClaudeNativeProbe(options: ClaudeNativeProbeOptions, workflow?:ClaudeWorkflowInvocation): Promise<PreparedClaudeNativeProbe> {
-  if (options.binary.version !== '2.1.288' || !/^[a-f0-9]{64}$/.test(options.binary.sha256) ||
+  // The internal probe stays on its own pinned version; a workflow invocation takes the workflow list.
+  if (!(workflow && !workflow.pinnedProbeCandidate ? isClaudeWorkflowProductVersion(options.binary.version) : options.binary.version === claudeProbeProductVersion) || !/^[a-f0-9]{64}$/.test(options.binary.sha256) ||
     !options.binary.path.startsWith('/') || /[\n\r\0]/.test(options.binary.path) ||
     options.model !== 'claude-sonnet-5-5' || options.effort !== 'high' ||
     !/^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/.test(options.nativeSessionId) ||

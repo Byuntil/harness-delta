@@ -6,21 +6,22 @@ import { IdSchema } from './contracts.js';
 import { Lifecycle } from './lifecycle.js';
 import { Store } from './store.js';
 import { prepareClaudeProbeSupervisor } from './claude-probe-supervisor.js';
+import { claudeProbeProductVersion } from './claude-workflow-versions.js';
 
 const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 function implementationDigest():string {
   const extension=import.meta.url.endsWith('.ts')?'.ts':'.js';
-  const names=['claude-minimal-run','claude-probe-supervisor','claude-native-probe','claude-probe-coordinator','claude-probe-gateway','claude-probe-hook-mediator','claude-trace-candidate','nested-candidate','otel-projection','otel-launch-settings','runtime-history','contracts','flexible-contracts','lifecycle','store'];
+  const names=['claude-minimal-run','claude-probe-supervisor','claude-native-probe','claude-probe-coordinator','claude-probe-gateway','claude-probe-hook-mediator','claude-trace-candidate','claude-workflow-versions','nested-candidate','otel-projection','otel-launch-settings','runtime-history','contracts','flexible-contracts','lifecycle','store'];
   const files=names.map(name=>({name,sha256:digest(readFileSync(new URL(name+extension,import.meta.url)))}));
   for(const name of readdirSync(new URL('migrations/',import.meta.url)).filter(n=>n.endsWith('.sql')).sort())files.push({name,sha256:digest(readFileSync(new URL('migrations/'+name,import.meta.url)))});
   return digest(JSON.stringify(files));
 }
-const binarySchema = z.strictObject({ path: z.string().startsWith('/'), version: z.literal('2.1.288'), sha256: z.string().regex(/^[a-f0-9]{64}$/) });
+const binarySchema = z.strictObject({ path: z.string().startsWith('/'), version: z.literal(claudeProbeProductVersion), sha256: z.string().regex(/^[a-f0-9]{64}$/) });
 const intentSchema = z.strictObject({ schemaVersion: z.literal(1), directory: z.string(), cwd: z.string(), workspace: z.string(),
   database: z.string(), implementationDigest:z.string().regex(/^[a-f0-9]{64}$/), mediatorSha256:z.string().regex(/^[a-f0-9]{64}$/), nodePath:z.string(),nodeSha256:z.string().regex(/^[a-f0-9]{64}$/), mediatorPath: z.string(), binary: binarySchema, projectId: IdSchema, taskId: IdSchema,
   rootSessionId: z.uuid(), nativeSessionId: z.uuid(), processId: z.uuid(), childSessionId: z.uuid(),
   generation: z.literal(1),
-  productVersion: z.literal('2.1.288'), model: z.literal('claude-sonnet-5-5'), effort: z.literal('high'),
+  productVersion: z.literal(claudeProbeProductVersion), model: z.literal('claude-sonnet-5-5'), effort: z.literal('high'),
   durationMs: z.literal(120000), plannedRequests: z.literal(3), estimatedBudgetUsd: z.literal('0.10'),
   hardBillingBound: z.null(), existingLoginOnly: z.literal(true), providerAvailabilityVerified: z.literal(false),
   actualExecutionApproved: z.literal(false), productGateDelta: z.literal(false) });
@@ -62,7 +63,7 @@ export function createClaudeMinimalIntent(directory: string, binaryInput: unknow
   mkdirSync(cwd, { mode: 0o700 }); mkdirSync(workspace, { mode: 0o700 }); closeSync(openSync(database, 'wx', 0o600));
   const intent = intentSchema.parse({ schemaVersion: 1, directory: canonical, cwd, workspace, database, mediatorPath, binary, implementationDigest:implementationDigest(),mediatorSha256:digest(readFileSync(mediatorPath)),nodePath:realpathSync(process.execPath),nodeSha256:digest(readFileSync(process.execPath)),
     projectId: `project-${randomUUID()}`, taskId: `task-${randomUUID()}`, rootSessionId: randomUUID(), nativeSessionId: randomUUID(),
-    processId: randomUUID(), childSessionId: randomUUID(), generation: 1, productVersion: '2.1.288', model: 'claude-sonnet-5-5', effort: 'high',
+    processId: randomUUID(), childSessionId: randomUUID(), generation: 1, productVersion: claudeProbeProductVersion, model: 'claude-sonnet-5-5', effort: 'high',
     durationMs: 120000, plannedRequests: 3, estimatedBudgetUsd: '0.10', hardBillingBound: null, existingLoginOnly: true,
     providerAvailabilityVerified: false, actualExecutionApproved: false, productGateDelta: false });
   const store = new Store(database);

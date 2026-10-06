@@ -4,7 +4,7 @@
 
 Use this procedure for a small **functional pilot** with descriptive partial costs.
 It covers Codex 0.160.0 (`codex-workflow-own-response-v1`) and
-Claude Code 2.1.288 parent-only launch (`claude-workflow-own-trace-v1`).
+Claude Code 2.1.291 parent-only launch (`claude-workflow-own-trace-v1`).
 Use one persistent A/B assignment for each logical task.
 Choose model and effort per invocation; a new session does not change the assignment.
 
@@ -15,7 +15,7 @@ Choose model and effort per invocation; a new session does not change the assign
 | Codex 0.160.0 root workflow | Launch, same-session resume, explicit independent-root link, foreground collect, stop and recover; partial usage |
 | Codex 0.160.0 direct-child workflow | Separate profile: fresh root and one fresh child, pinned macOS arm64/Node24, read-only; no family resume or external child link |
 | Legacy file collector | Codex 0.156.1/0.158.0 and Claude Code 2.1.283 only; use [local measurement](local-measurement.md) |
-| Claude Code 2.1.288 parent-only workflow | Fresh launch per run (read-only or `workspace-edit`), another launch on the same task, stop and recover; partial usage. No child, native resume or other version |
+| Claude Code 2.1.291 parent-only workflow | Fresh launch per run (read-only or `workspace-edit`), another launch on the same task, stop and recover; partial usage. No child, native resume or other version; 2.1.288 was retired on 2026-10-06 |
 | App/IDE/MCP, forks, compaction, deeper descendants | Unsupported for this procedure |
 | Complete task cost, actual billing, savings or adoption inference | Unavailable |
 | Team file exchange | Synthetic validation only; functional-pilot results cannot use that exchange |
@@ -34,7 +34,7 @@ See [execution details and limits](task-native-workflow.md).
 
 ## 1. Install from the checkout
 
-Prerequisites: Node.js 24, npm and the existing pinned Codex 0.160.0 or Claude Code 2.1.288 binary.
+Prerequisites: Node.js 24, npm and the existing pinned Codex 0.160.0 or Claude Code 2.1.291 binary.
 Local validation covers macOS arm64. Other platforms remain unverified.
 The package is private; there is no published-package installation procedure.
 
@@ -116,11 +116,16 @@ Those values require the owner's choice; they do not establish statistical power
 | `runtime.json` | User-selected model and effort, or `null` for unspecified; no diagnostic model is required |
 | `launch.json`, `resume.json` | Canonical absolute binary/home/recorder/prompt paths, approved sandbox and timeout |
 | `link.json`, `collect.json` | The same canonical setup; exact linked session UUID and source path where required |
-| `claude-launch.json` (Claude only) | Pinned 2.1.288 binary path/SHA, private mode-0700 workspace, built mediator, prompt, `permissions`, limits |
+| `claude-launch.json` (Claude only) | Pinned 2.1.291 binary path/SHA, private mode-0700 workspace, built mediator, prompt, `permissions`, limits |
 
-For Claude Code, also set `product: "claude_code"`, `product_version: "2.1.288"` in
-`workflow.json`, and the `claude_code / 2.1.288 / claude-workflow-own-trace-v1`
-source profile in `protocol.json`. Point `binary.path` at the exact 2.1.288 file
+For Claude Code, also set `product: "claude_code"`, `product_version: "2.1.291"` in
+`workflow.json`, and the `claude_code / 2.1.291 / claude-workflow-own-trace-v1`
+source profile in `protocol.json`. A new protocol may list only one `claude_code`
+workflow source profile, at the newest admitted Claude Code version (now 2.1.291);
+otherwise registration fails with `claude_workflow_version_not_latest`. A registered
+protocol keeps its version until that version is retired. After retirement its tasks
+cannot launch and need a new protocol.
+Point `binary.path` at the exact 2.1.291 file
 (for a native install, under `~/.local/share/claude/versions/`), not the `claude` launcher.
 If that file is missing or changed, preflight fails with `claude_probe_executable_mismatch`
 before assignment.

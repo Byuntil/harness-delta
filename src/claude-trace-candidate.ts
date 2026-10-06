@@ -1,15 +1,19 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { IdSchema, TimestampSchema } from './contracts.js';
-import { authorizeCandidateScope, checkedCandidateScope, ingestCandidateObservation, projectCandidateObservation, type CandidateScope } from './nested-candidate.js';
+import { authorizeCandidateScope, checkedCandidateScope, ingestCandidateObservation, isClaudeTraceProductVersion, projectCandidateObservation, type CandidateScope,
+  type ClaudeTraceProductVersion } from './nested-candidate.js';
+import { claudeProbeProductVersion } from './claude-workflow-versions.js';
 import { recordObservationGap, requireActiveScope, putUsageWithEvidence } from './runtime-history.js';
 import type { Store } from './store.js';
 
-/** Internal synthetic-qualified Claude 2.1.288 OTLP bridge. No shipped profile,
+/** Internal synthetic-qualified Claude OTLP bridge for the exact workflow versions. No shipped profile,
  * native file discovery, product launch or claim of complete trace delivery.
  * Format basis: https://code.claude.com/docs/en/monitoring-usage (mutable).
  */
-export interface ClaudeTraceWindow { startedAt: string; receivedAt: string; generation: number; synthetic?: boolean|undefined; lossStartedAt?:string|undefined }
+export interface ClaudeTraceWindow { startedAt: string; receivedAt: string; generation: number; synthetic?: boolean|undefined; lossStartedAt?:string|undefined;
+  /** The launched binary's version; every span must report it. Defaults to the pinned probe version. */
+  productVersion?: ClaudeTraceProductVersion|undefined }
 export interface ClaudeTraceBatchResult { requests: number; inserted: number; excluded: number; unattributed: number }
 const requestHash = (id: string|null) => createHash('sha256').update(JSON.stringify(['offline-nested-candidate-v1','synthetic','1.0.0',id])).digest('hex');
 const runtimeHash = (key:string) => createHash('sha256').update(JSON.stringify(['runtime',key])).digest('hex');
@@ -90,8 +94,9 @@ export function authorizeClaudeTraceScope(store: Store, input: CandidateScope, g
  */
 export function ingestClaudeTraceBatch(store: Store, inputScope: CandidateScope, readBody: () => unknown,
   window: ClaudeTraceWindow): ClaudeTraceBatchResult {
+  const expectedVersion = window.productVersion ?? claudeProbeProductVersion;
   if (!TimestampSchema.safeParse(window.startedAt).success || !TimestampSchema.safeParse(window.receivedAt).success ||
-    Date.parse(window.receivedAt) < Date.parse(window.startedAt)) invalid();
+    Date.parse(window.receivedAt) < Date.parse(window.startedAt) || !isClaudeTraceProductVersion(expectedVersion)) invalid();
   const scope = authorizeClaudeTraceScope(store, inputScope, window.generation, window.synthetic);
   const root = scope.sessions.find(s => s.parentSessionId === null)!;
   const from = BigInt(Date.parse(window.startedAt)) * 1000000n; const to = BigInt(Date.parse(window.receivedAt)) * 1000000n;
@@ -117,7 +122,7 @@ export function ingestClaudeTraceBatch(store: Store, inputScope: CandidateScope,
         const nativeSessionId = agreed(record, resource, 'session.id');
         const version = text(record.get('app.version')) ?? text(resource.get('app.version'));
         const resourceVersion = text(resource.get('app.version'));
-        if (version !== '2.1.288' || resourceVersion !== undefined && resourceVersion !== version ||
+        if (version !== expectedVersion || resourceVersion !== undefined && resourceVersion !== version ||
           processId !== root.processId || nativeSessionId !== root.nativeSessionId) throw new Error('candidate_scope_mismatch');
         for (const [value, length] of [[span.traceId, 32], [span.spanId, 16]] as const) {
           if (typeof value !== 'string' || value.length !== length || !/^[a-fA-F0-9]+$/.test(value) || /^0+$/.test(value)) invalid();

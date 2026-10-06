@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CommanderError } from 'commander';
@@ -51,4 +51,20 @@ test('workflow CLI reports one actionable line per failure', async () => {
   errors = '';
   expect(await main(['--db', db, 'workflow', 'finish', 'task-1', '--outcome', 'success'])).toBe(2);
   expect(errors).toMatch(/^task_not_assigned\nhint: /);
+});
+
+test('protocol registration names the newest admitted Claude workflow version rule', async () => {
+  const db = join(root, 'local.sqlite'); const project = join(root, 'project'); mkdirSync(project);
+  expect(await main(['--db', db, 'project', 'add', 'project-1', '--root', project])).toBe(0);
+  const example = JSON.parse(readFileSync('examples/workflow/protocol.json', 'utf8')) as Record<string, unknown>;
+  const claude = (product_version: string) => ({ product: 'claude_code', product_version, profile_id: 'claude-workflow-own-trace-v1' });
+  const register = (id: string, profiles: unknown[]) => { const path = join(root, `${id}.json`); writeFileSync(path, JSON.stringify({ ...example, id, source_profiles: profiles }));
+    return main(['--db', db, 'comparison', 'register', '--config', path]); };
+  errors = '';
+  expect(await register('protocol-new', [claude('2.1.288')])).toBe(2);
+  expect(errors).toBe('claude_workflow_version_not_latest\nhint: a new protocol may list one claude_code workflow source profile, only at the newest admitted Claude Code version (none while no version is admitted); a registered protocol keeps its version until that version is retired, then its tasks cannot launch and need a new protocol\n');
+  errors = '';
+  expect(await register('protocol-two', [claude('2.1.288'), { ...claude('2.1.288'), product_version: '2.1.291' }])).toBe(2);
+  expect(errors).toMatch(/^claude_workflow_version_not_latest\n/);
+  expect(await register('protocol-latest', [claude('2.1.291')])).toBe(0);
 });

@@ -24,10 +24,10 @@ includes synthetic tests and later bounded actual root functional observations; 
 fork/compaction, deeper children, app support, complete cost and inference
 remain unavailable.
 
-**Claude Code 2.1.288 parent-only launch is admitted** as
-`claude-workflow-own-trace-v1`, with `complete_cost: false`. Child execution,
-native resume and other Claude versions are not admitted; see
-[Claude parent-only workflow](#claude-parent-only-workflow).
+**Claude Code 2.1.291 parent-only launch is admitted** as
+`claude-workflow-own-trace-v1`, with `complete_cost: false`. 2.1.288 was retired
+from the workflow on 2026-10-06. Child execution, native resume and other Claude
+versions are not admitted; see [Claude parent-only workflow](#claude-parent-only-workflow).
 
 ```sh
 node dist/cli.js --db .harness-delta/local.sqlite workflow status protocol-1
@@ -321,12 +321,29 @@ synthetic local checks cannot prove billing, native support or an adoption decis
 
 `workflow claude launch`, `stop <run-id>` and `recover <run-id>` use the same
 assignment, selected-artifact confirmation and task lifecycle as Codex. The code-owned
-registry admits `claude_code / 2.1.288 / claude-workflow-own-trace-v1` for a fresh
-root session only. See [the admission evidence](../validation/claude-workflow-02188-source-readiness.md).
+registry admits `claude_code / 2.1.291 / claude-workflow-own-trace-v1` for a fresh
+root session only. See [the admission evidence](../validation/claude-workflow-02191-source-readiness.md).
+The binary's `version` must equal the configured `product_version`.
+
+2.1.288 was admitted earlier and retired on 2026-10-06, when 2.1.291 was admitted; see
+[the retired record](../validation/claude-workflow-02188-source-readiness.md). A launch
+for a 2.1.288 protocol now fails before assignment: a 2.1.288 binary fails with
+`invalid_execution`, and a 2.1.291 binary under a 2.1.288 protocol fails with
+`real_experiment_disabled`. Register a new protocol with the 2.1.291 profile and
+assign new tasks there.
+
+A new real-source protocol (any purpose except `synthetic_validation`) may list at
+most one `claude_code / claude-workflow-own-trace-v1` source profile, and its version
+must be the newest admitted Claude Code version in the code-owned registry, by
+semantic version order (now 2.1.291). Otherwise `comparison register` fails with
+`claude_workflow_version_not_latest`; with no admitted version, no Claude workflow
+profile can register. The check runs at registration only: a registered protocol
+keeps its version until that version is retired. After retirement its tasks cannot
+launch and need a new protocol. Codex profiles and synthetic protocols are unaffected.
 
 | Boundary | Supported behavior |
 | --- | --- |
-| Product | Pinned Claude Code 2.1.288 binary path and SHA-256; existing login |
+| Product | Pinned Claude Code 2.1.291 binary path and SHA-256; existing login |
 | Session | Fresh print-mode root per launch; no native resume, discovery or external link |
 | Continuation | Another `launch` on the same task keeps the original assignment; use a new `run_id` and confirmation ID. The `workspace` may be reused: each run gets its own subdirectory |
 | Child execution | Not admitted; `child_runtime` fails with `claude_workflow_child_unadmitted` before assignment |
@@ -340,7 +357,7 @@ path/version/SHA, a private `workspace` (canonical, mode 0700), the built
 `timeout_ms`, `max_turns` and `request_limit`. See
 [the example](../../examples/workflow/claude-launch.json). The protocol's
 `source_profiles` and `workflow.json` use `product: "claude_code"` and
-`product_version: "2.1.288"`. Runtime model and effort remain invocation choices;
+`product_version: "2.1.291"`. Runtime model and effort remain invocation choices;
 supported effort values are `low`, `medium`, `high`, `xhigh` and `max`.
 
 ```sh

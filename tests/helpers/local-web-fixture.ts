@@ -9,8 +9,11 @@ import { externalInstructionFragment } from '../../src/external-session-context.
 import { createLocalWebDomain, LocalWebProfileSchema } from '../../src/local-web-domain.js';
 export function localWebFixture() {
   const f = codexWorkflowFixture();
-  execFileSync('git', ['init', '-q', f.project]);
-  execFileSync('git', ['-C', f.project, '-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid', 'commit', '--allow-empty', '-qm', 'Synthetic fixture baseline']);
+  // A git hook (e.g. pre-commit in a linked worktree) exports GIT_DIR/GIT_INDEX_FILE; the
+  // fixture repository must not inherit them.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  execFileSync('git', ['init', '-q', f.project], { env });
+  execFileSync('git', ['-C', f.project, '-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid', 'commit', '--allow-empty', '-qm', 'Synthetic fixture baseline'], { env });
   if (!f.store.get("SELECT 1 FROM sqlite_master WHERE name='external_task_contracts'")) {
     const db = new Database(f.database); try { db.exec(readFileSync(new URL('../../src/migrations/019_external_connection_contract.sql', import.meta.url), 'utf8')); } finally { db.close(); }
   }

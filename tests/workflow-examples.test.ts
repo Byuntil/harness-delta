@@ -18,6 +18,7 @@ test('quickstart example files match the workflow schemas', () => {
 
 test('the Claude launch example is a parent-only workspace-edit execution', () => {
   const parsed = ClaudeWorkflowExecutionSchema.parse(example('claude-launch.json'));
-  expect(parsed).toMatchObject({ operation: 'launch', permissions: 'workspace-edit', binary: { version: '2.1.288' } });
+  expect(parsed).toMatchObject({ operation: 'launch', permissions: 'workspace-edit',
+    binary: { version: '2.1.291', sha256: '9a1d2ed6bb4421e8fc80c892c0413f293be3ee50ae3d7dda1a7622197a056690' } });
   expect(parsed.child_runtime).toBeUndefined();
 });

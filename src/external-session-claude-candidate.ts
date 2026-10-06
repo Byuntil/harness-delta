@@ -190,7 +190,7 @@ export async function prepareManualClaudeCandidate(store:Store,options:Omit<Manu
     files=await prepareClaudeNativeProbe({workspace:options.workspace,binary:options.ticket.binary,
       destination:{endpoint:gateway.endpoint,headers:candidate.receiver.exporterHeaders(),processId:options.scope.sessions[0]!.processId!},
       nativeSessionId:options.ticket.native_session_id,model:options.ticket.model,effort:options.ticket.effort,hookCommand:mediator.hookCommand},
-    {model:options.ticket.model,effort:options.ticket.effort,permissions:'read-only',instructions:options.instructions,maxTurns:1,requestLimit:1,durationMs:options.durationMs,maxBudgetUsd:0.10});
+    {model:options.ticket.model,effort:options.ticket.effort,permissions:'read-only',instructions:options.instructions,maxTurns:1,requestLimit:1,durationMs:options.durationMs,maxBudgetUsd:0.10,pinnedProbeCandidate:true});
     const instructionPath=files.argv[files.argv.indexOf('--append-system-prompt-file')+1]!;
     const mcpPath=files.argv[files.argv.indexOf('--mcp-config')+1]!;
     const handoff=candidate.bindPreparedInvocation({...options.ticket,settings_path:files.settingsPath,settings_hash:boundedFileHash(files.settingsPath,65536),

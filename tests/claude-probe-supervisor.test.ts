@@ -10,18 +10,18 @@ import { Store } from '../src/store.js';
 import { traceScope } from './helpers/claude-trace-fixture.js';
 import { compiledWorker } from './helpers/compiled-worker.js';
 
-function fixture(script = 'process.exit(0);', durationMs = 5000) {
+function fixture(script = 'process.exit(0);', durationMs = 5000, version = '2.1.288') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'claude-supervisor-'))); const cwd = join(root, 'fixture'); mkdirSync(cwd);
   const workspace = join(root, 'ledger'); mkdirSync(workspace); const compiled = compiledWorker(root);
   const binary = join(root, 'synthetic-product'); const bytes = `#!${process.execPath}\n${script}\n`; writeFileSync(binary, bytes, { mode: 0o700 });
   const store = new Store(':memory:');
   store.execute('INSERT INTO projects(id,local_root) VALUES (?,?)', ['project-1', cwd]);
   store.execute("INSERT INTO tasks(id,project_id,state) VALUES ('task-1','project-1','active')", []);
-  store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES ('root','project-1','task-1','claude_code','2.1.288')", []);
+  store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES ('root','project-1','task-1','claude_code',?)", [version]);
   const rootScope = { ...traceScope, sessions: traceScope.sessions.slice(0, 1) };
   rootScope.sessions[0] = { ...rootScope.sessions[0]!, nativeSessionId: '11111111-1111-4111-8111-111111111111' };
   const options = { store, rootScope, child: { sessionId: 'child', sourceId: 'source-child', agentType: 'qualification-child' }, generation: 0,
-    workspace, cwd, binary: { path: binary, version: '2.1.288', sha256: createHash('sha256').update(bytes).digest('hex') },
+    workspace, cwd, binary: { path: binary, version, sha256: createHash('sha256').update(bytes).digest('hex') },
     mediatorPath: join(compiled, 'claude-probe-hook-mediator.js'), durationMs };
   return { store, options, root, cleanup: () => { store.close(); rmSync(root, { recursive: true, force: true }); } };
 }
@@ -135,8 +135,10 @@ const hook = (name, fields = {}) => post('/v1/hooks', { hook_event_name: name, s
   } finally { f.cleanup(); }
 });
 test('the internal probe keeps its 120 s window while an assigned workflow may use one hour', async () => {
-  const f = fixture(); try {
-    await expect(prepareClaudeProbeSupervisor({ ...f.options, durationMs: 120001 })).rejects.toThrow('claude_probe_invalid_supervisor');
+  const probe = fixture(); try { await expect(prepareClaudeProbeSupervisor({ ...probe.options, durationMs: 120001 })).rejects.toThrow('claude_probe_invalid_supervisor'); }
+  finally { probe.cleanup(); }
+  // The assigned workflow runs an admitted workflow version.
+  const f = fixture(undefined, undefined, '2.1.291'); try {
     const workflow = { synthetic: false, prompt: 'SYNTHETIC', model: null, effort: null, instructions: 'SYNTHETIC', maxTurns: 1, requestLimit: 1, durationMs: 3600001,
       permissions: 'read-only' as const, assertActive: () => undefined, onChildBound: () => undefined, stopRequested: () => false };
     await expect(prepareClaudeProbeSupervisor({ ...f.options, durationMs: 3600001, workflow })).rejects.toThrow('claude_probe_invalid_supervisor');

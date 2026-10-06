@@ -1,6 +1,14 @@
-# Claude Code 2.1.288 parent-only workflow source admission
+# Claude Code 2.1.288 parent-only workflow source admission (retired)
 
-The code-owned source registry admits `claude_code / 2.1.288 /
+> **Retired on 2026-10-06.** 2.1.291 replaced 2.1.288 as the only admitted Claude Code
+> workflow version ([2.1.291 admission](claude-workflow-02191-source-readiness.md)).
+> The evidence entry `claude-workflow-02188-root-native-v1` was removed from the
+> registry, and 2.1.288 was removed from the workflow version list. Reason: the user
+> decided to allow only the newest admitted Claude Code version. Tasks on registered
+> 2.1.288 protocols can no longer launch and need a new protocol. The internal native
+> probe stays pinned to 2.1.288. This record is kept as historical evidence.
+
+The code-owned source registry admitted `claude_code / 2.1.288 /
 claude-workflow-own-trace-v1` with evidence ID `claude-workflow-02188-root-native-v1`,
 `validation_kind: real_operations` and `complete_cost: false`. This enables local
 partial per-request usage collection for fresh parent (root) launches through
@@ -12,7 +20,7 @@ Requirements: [R01, R02, R04, R05 and R07](../requirements.md).
 
 | Area | Admitted | Not admitted |
 | --- | --- | --- |
-| Version | Exact 2.1.288 binary, SHA-256 `bbe93063f7a0879a1021b2891e5c9354e5b3b98433e32efe6750f7710afed750` | 2.1.289, 2.1.290 and later |
+| Version | Exact 2.1.288 binary, SHA-256 `bbe93063f7a0879a1021b2891e5c9354e5b3b98433e32efe6750f7710afed750` | 2.1.289 and later ([2.1.291 admission](claude-workflow-02191-source-readiness.md)) |
 | Session | Fresh print-mode root per launch; further launches on the same task keep the assignment | Native resume, external session link, discovery |
 | Children | None | `child_runtime` fails before assignment with `claude_workflow_child_unadmitted` |
 | Tools | `read-only` (Read, Glob, Grep) or `workspace-edit` (adds Edit, Write), `dontAsk` permission mode | Bash, MCP servers, slash commands, user settings |

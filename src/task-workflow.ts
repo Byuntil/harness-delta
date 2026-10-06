@@ -12,7 +12,7 @@ import { comparisonReadiness } from './readiness-store.js';
 import { productionSourceEvidence, syntheticSourceEvidence } from './readiness.js';
 import type { Store } from './store.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId } from './codex-workflow-journal.js';
-import { claudeWorkflowProfileId } from './claude-workflow-adapter.js';
+import { claudeWorkflowProfileId, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 import { externalContract } from './external-session-contract.js';
 
 const artifactSchema = z.strictObject({ artifact_id: IdSchema, path: z.string().min(1).max(4096) });
@@ -225,7 +225,7 @@ export function finishAssignedWorkflow(store: Store, taskId: string, outcome: Ou
 export function workflowStatus(store: Store, protocolId: string, at = utcNow()) {
   const protocol = workflowProtocol(store, protocolId); const readiness = comparisonReadiness(store, protocolId, at);
   const implemented=protocol.source_profiles.some(p=>p.product==='codex'&&p.product_version==='0.160.0'&&[codexWorkflowProfileId,codexWorkflowChildProfileId].includes(p.profile_id)||
-    p.product==='claude_code'&&p.product_version==='2.1.288'&&p.profile_id===claudeWorkflowProfileId);
+    p.product==='claude_code'&&isClaudeWorkflowProductVersion(p.product_version)&&p.profile_id===claudeWorkflowProfileId);
   return { schema_version: 1, protocol_id: protocol.id, purpose: protocol.purpose, readiness,
     native_execution: implemented&&readiness.real_allocation, codex_adapter_implemented:true, claude_adapter_implemented:true, common_coordinator: true, selected_instructions: 'transient_per_invocation_boundary',
     blockers: [...(protocol.purpose !== 'synthetic_validation' && !readiness.real_allocation ? ['native_source_unqualified'] : []),

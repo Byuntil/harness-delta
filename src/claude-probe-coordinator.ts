@@ -1,7 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { IdSchema, TimestampSchema } from './contracts.js';
 import { authorizeClaudeTraceScope, ingestClaudeTraceBatch, type ClaudeTraceBatchResult } from './claude-trace-candidate.js';
-import type { CandidateScope } from './nested-candidate.js';
+import type { CandidateScope, ClaudeTraceProductVersion } from './nested-candidate.js';
+import { claudeProbeProductVersion, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 import { decodeLogsRequest, type DecodedRecord } from './otel-projection.js';
 import { recordObservationGap } from './runtime-history.js';
 import type { Clock } from './lifecycle.js';
@@ -62,6 +63,9 @@ export class ClaudeProbeHookFailure extends Error {
 export interface ClaudeProbeOptions {
   rootScope: CandidateScope; child: { sessionId: string; sourceId: string; agentType: string };
   generation: number; startedAt: string; model: string | null; effort: string | null; clock: Clock;
+  /** The launched binary's exact version. Workflow mode: one of the workflow list. Probe mode:
+   * the pinned probe version, which is also the default. */
+  productVersion?: ClaudeTraceProductVersion;
   /** Internal workflow mode; public CLI cannot supply synthetic admission. */
   workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; durationMs:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void;
     /** Trusted external candidate only: no usage before verified connection. */
@@ -90,6 +94,7 @@ export class ClaudeProbeCoordinator {
   private rootRequests = 0;
   private childRequests = 0;
   private lastVerifiedAt: string | null = null;
+  private get productVersion(): ClaudeTraceProductVersion { return this.options.productVersion ?? claudeProbeProductVersion; }
   constructor(private readonly store: Store, private readonly options: ClaudeProbeOptions) {
     if (options.rootScope.sessions.length !== 1 || !IdSchema.safeParse(options.child.sessionId).success ||
       !IdSchema.safeParse(options.child.sourceId).success || !IdSchema.safeParse(options.child.agentType).success ||
@@ -98,9 +103,15 @@ export class ClaudeProbeCoordinator {
       (options.workflow && (options.effort !== null && !['low','medium','high','xhigh','max'].includes(options.effort) || !Number.isSafeInteger(options.workflow.requestLimit) || options.workflow.requestLimit < 1 || options.workflow.requestLimit > 1024 ||
         !Number.isSafeInteger(options.workflow.durationMs) || options.workflow.durationMs < 1 || options.workflow.durationMs > 3600000)) ||
       !TimestampSchema.safeParse(options.startedAt).success ||
+      // A synthetic workflow (tests, the unadmitted external candidate) is no admission and may keep the pinned probe version.
+      (options.workflow ? !(isClaudeWorkflowProductVersion(options.productVersion ?? claudeProbeProductVersion) || options.workflow.synthetic && (options.productVersion ?? claudeProbeProductVersion) === claudeProbeProductVersion)
+        : (options.productVersion ?? claudeProbeProductVersion) !== claudeProbeProductVersion) ||
       options.child.sessionId === options.rootScope.sessions[0]?.sessionId ||
       options.child.sourceId === options.rootScope.sessions[0]?.sourceId ||
       store.get('SELECT 1 FROM sessions WHERE id=?', [options.child.sessionId])) fail('claude_probe_invalid_options');
+    // A non-synthetic root session must already carry the launched binary's version.
+    if (!options.workflow?.synthetic && store.get<{ product_version: string | null }>('SELECT product_version FROM sessions WHERE id=?',
+      [options.rootScope.sessions[0]!.sessionId])?.product_version !== (options.productVersion ?? claudeProbeProductVersion)) fail('claude_probe_invalid_options');
     this.scope = authorizeClaudeTraceScope(store, options.rootScope, options.generation, options.workflow?.synthetic);
     this.options = { ...options, child: { ...options.child }, rootScope: this.scope, ...(options.workflow ? {workflow:{...options.workflow,...(options.workflow.childRuntime ? {childRuntime:{...options.workflow.childRuntime}} : {})}} : {}) };
   }
@@ -186,7 +197,7 @@ export class ClaudeProbeCoordinator {
         this.store.immediateTransaction(() => {
           this.authorize(token);
           this.store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,product,product_version) VALUES (?,?,?,?,?,?)',
-            [child.sessionId, this.scope.projectId, this.scope.taskId, root.sessionId, this.options.workflow?.synthetic ? 'synthetic' : 'claude_code', this.options.workflow?.synthetic ? '1.0.0' : '2.1.288']);
+            [child.sessionId, this.scope.projectId, this.scope.taskId, root.sessionId, this.options.workflow?.synthetic ? 'synthetic' : 'claude_code', this.options.workflow?.synthetic ? '1.0.0' : this.productVersion]);
           authorizeClaudeTraceScope(this.store, next, this.options.generation, this.options.workflow?.synthetic);
           this.options.workflow?.onChildBound(child.sessionId);
         });
@@ -218,7 +229,7 @@ export class ClaudeProbeCoordinator {
       const name = stringValue(attrs.get('event.name')); const timestamp = stringValue(attrs.get('event.timestamp'));
       if (number === undefined || name === undefined || !TimestampSchema.safeParse(timestamp).success ||
         joinedId(record, 'harness_delta.process_id') !== root.processId || joinedId(record, 'session.id') !== root.nativeSessionId ||
-        joinedId(record, 'app.version') !== '2.1.288') this.stop('claude_probe_log_scope');
+        joinedId(record, 'app.version') !== this.productVersion) this.stop('claude_probe_log_scope');
       if (['api_error', 'api_refusal'].includes(name)) this.stop('claude_probe_request_boundary', 'incomplete');
       if (containsContent(attrs) || ['api_request_body', 'api_response_body', 'system_prompt'].includes(name)) this.stop('claude_probe_content_enabled');
       const trigger = stringValue(attrs.get('managed_settings.trigger'));
@@ -271,7 +282,7 @@ export class ClaudeProbeCoordinator {
       ({ result, inserted } = this.store.immediateTransaction(() => {
         const before = this.store.get<{ last: number }>('SELECT coalesce(max(rowid),0) AS last FROM events')!.last;
         const result = ingestClaudeTraceBatch(this.store, this.scope, () => raw, {
-          startedAt: this.options.workflow?.observationStartedAt?.()??this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic,
+          startedAt: this.options.workflow?.observationStartedAt?.()??this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic, productVersion: this.productVersion,
           ...(this.options.workflow && this.lastVerifiedAt!==null ? {lossStartedAt:new Date(Math.min(Date.parse(this.options.clock()),Date.parse(this.lastVerifiedAt)+1)).toISOString()} : {}),
         });
         // Count only rows this batch actually inserted while holding the writer

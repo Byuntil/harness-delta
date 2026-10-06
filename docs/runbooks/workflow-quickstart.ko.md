@@ -4,7 +4,7 @@
 
 부분 비용을 기술하는 작은 **기능 파일럿**에 이 절차를 사용하세요.
 대상은 Codex 0.160.0(`codex-workflow-own-response-v1`)과
-Claude Code 2.1.288 부모 전용 launch(`claude-workflow-own-trace-v1`)입니다.
+Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)입니다.
 논리적 작업마다 하나의 A/B 배정을 유지합니다.
 모델과 effort는 실행마다 선택합니다. 새 세션을 열어도 배정은 바뀌지 않습니다.
 
@@ -15,7 +15,7 @@ Claude Code 2.1.288 부모 전용 launch(`claude-workflow-own-trace-v1`)입니�
 | Codex 0.160.0 루트 workflow | launch, 같은 세션 resume, 명시적 독립 루트 link, 전경 collect, stop, recover; 부분 사용량 |
 | Codex 0.160.0 직계 자식 workflow | 별도 프로필: 새 루트와 새 자식 1개, 고정 macOS arm64/Node24, read-only; family resume·외부 자식 link 미지원 |
 | 기존 파일 수집기 | Codex 0.156.1/0.158.0, Claude Code 2.1.283만 지원; [로컬 측정](local-measurement.ko.md) 참고 |
-| Claude Code 2.1.288 부모 전용 workflow | 실행마다 새 launch(read-only 또는 `workspace-edit`), 같은 작업의 추가 launch, stop, recover; 부분 사용량. 자식·native resume·다른 버전 미지원 |
+| Claude Code 2.1.291 부모 전용 workflow | 실행마다 새 launch(read-only 또는 `workspace-edit`), 같은 작업의 추가 launch, stop, recover; 부분 사용량. 자식·native resume·다른 버전 미지원; 2.1.288은 2026-10-06에 retire됨 |
 | App/IDE/MCP, fork, compaction, 더 깊은 자식 | 이 절차에서 미지원 |
 | 작업 전체 비용, 실제 청구액, 절감·도입 추론 | 제공하지 않음 |
 | 팀 파일 교환 | 합성 검증 전용; 기능 파일럿 결과는 이 경로로 교환할 수 없음 |
@@ -34,7 +34,7 @@ Claude Code 2.1.288 부모 전용 launch(`claude-workflow-own-trace-v1`)입니�
 
 ## 1. 저장소에서 설치하기
 
-준비물은 Node.js 24, npm, 기존의 고정 Codex 0.160.0 또는 Claude Code 2.1.288 바이너리입니다.
+준비물은 Node.js 24, npm, 기존의 고정 Codex 0.160.0 또는 Claude Code 2.1.291 바이너리입니다.
 로컬 검증 환경은 macOS arm64입니다. 다른 플랫폼은 미검증입니다.
 패키지는 private 상태이며 공개 패키지 설치 절차는 없습니다.
 
@@ -116,11 +116,15 @@ finish는 이 기한 전에 실행해야 합니다. 늦은 결과는 별도 저�
 | `runtime.json` | 선택한 모델·effort 또는 미지정 `null`; 진단용 모델은 필수가 아님 |
 | `launch.json`, `resume.json` | 정규 절대 binary/home/recorder/prompt 경로, 승인된 sandbox·timeout |
 | `link.json`, `collect.json` | 같은 정규 설정; 필요한 정확한 연결 세션 UUID·source 경로 |
-| `claude-launch.json` (Claude 전용) | 고정 2.1.288 바이너리 경로/SHA, mode 0700 비공개 workspace, 빌드된 mediator, prompt, `permissions`, 한도 |
+| `claude-launch.json` (Claude 전용) | 고정 2.1.291 바이너리 경로/SHA, mode 0700 비공개 workspace, 빌드된 mediator, prompt, `permissions`, 한도 |
 
-Claude Code를 쓰면 `workflow.json`의 `product: "claude_code"`, `product_version: "2.1.288"`과
-`protocol.json`의 `claude_code / 2.1.288 / claude-workflow-own-trace-v1` source profile도 설정하세요.
-`binary.path`는 `claude` 실행기 대신 정확한 2.1.288 파일을 가리켜야 합니다
+Claude Code를 쓰면 `workflow.json`의 `product: "claude_code"`, `product_version: "2.1.291"`과
+`protocol.json`의 `claude_code / 2.1.291 / claude-workflow-own-trace-v1` source profile도 설정하세요.
+새 protocol에는 `claude_code` workflow source profile을 하나만 넣을 수 있고, 그 버전은 가장 최근에 승인된
+Claude Code 버전(현재 2.1.291)이어야 합니다. 아니면 등록이 `claude_workflow_version_not_latest`로 실패합니다.
+등록된 protocol은 그 버전이 retire될 때까지 버전을 유지합니다.
+retire된 뒤에는 그 작업을 launch할 수 없으므로 새 protocol이 필요합니다.
+`binary.path`는 `claude` 실행기 대신 정확한 2.1.291 파일을 가리켜야 합니다
 (native 설치는 `~/.local/share/claude/versions/` 아래).
 그 파일이 없거나 바뀌면 배정 전 preflight가 `claude_probe_executable_mismatch`로 실패합니다.
 `permissions: "workspace-edit"`를 쓰면 workspace·harness-delta 빌드(mediator)·prompt·바이너리·데이터베이스를

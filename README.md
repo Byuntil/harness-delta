@@ -3,7 +3,7 @@
 Measure metadata for an assigned development task across explicitly linked sessions.
 
 **Preview: partial local measurement.** Codex 0.160.0 has two separately admitted
-workflow profiles, and Claude Code 2.1.288 has a parent-only launch profile.
+workflow profiles, and Claude Code 2.1.291 has a parent-only launch profile.
 Complete task cost, actual billing and inferential adoption remain unavailable.
 Installation does not start collection. The package is private and uses Node.js 24.
 
