@@ -51,8 +51,12 @@ and the update channel. `refresh-catalog` reloads the bundle or accepts an expli
 trusted publisher artifact with SHA-256. A hash proves the supplied bytes, not the
 publisher's authority or the rates' truth: operators must obtain it from a trusted
 release channel. The approved first release is
-[reference-prices-2026-10-06-v1](https://github.com/Byuntil/harness-delta/releases/tag/reference-prices-2026-10-06-v1).
-Its two assets passed a real bounded HTTPS download/refresh check on 2026-10-06.
+[reference-prices-2026-10-06-v1](https://github.com/Qello-Labs/harness-delta/releases/tag/reference-prices-2026-10-06-v1).
+Its two assets passed a real bounded HTTPS download/refresh check on 2026-10-06
+under the original repository owner. Moving to Qello-Labs requires a fresh download
+check on that canonical source; the release bytes and `publisher_id: harness-delta`
+remain unchanged. Older clients must update their fixed source rather than rely
+on GitHub's repository-transfer redirect, which adds a hop outside this policy.
 `defaultPriceCatalogSource` uses this publisher's `releases/latest/download/manifest.json`.
 Online refresh is on demand; no automatic network refresh or scraper is enabled.
 An explicitly unconfigured server source still returns `catalog_source_not_configured`.
@@ -71,7 +75,7 @@ The transport reads at most 16 KiB of manifest and 1 MiB of catalog within the e
 5-second refresh deadline. Only a digest-named JSON artifact beside the manifest is
 accepted. HTTPS requests send no cookies/local metadata and do not use authentication.
 Redirects are denied for generic sources. A separately approved fixed
-`Byuntil/harness-delta` GitHub source may follow at most two hops: the same publisher
+`Qello-Labs/harness-delta` GitHub source may follow at most two hops: the same publisher
 tag/asset and configured `release-assets.githubusercontent.com` or
 `objects.githubusercontent.com`. Each target is validated before request; signed CDN
 queries are transient. Resolving `latest` captures its tag before fetching the artifact,

@@ -72,7 +72,10 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table refresh-cata
 ```
 
 예상 결과: `updated`/`unchanged`, 또는 승인 캐시를 유지하는 안전한 실패입니다.
-기본 공급원은 승인된 `Byuntil/harness-delta` GitHub 최신 릴리스입니다.
+기본 공급원은 승인된 `Qello-Labs/harness-delta` GitHub 최신 릴리스입니다.
+저장소 이전 뒤에는 기존 클라이언트를 이 주소로 갱신하세요. 이전 소유자의
+리디렉션은 고정된 다운로드 정책에 없는 경유를 추가합니다. 발행자 ID
+`harness-delta`, 릴리스 파일 내용과 기존 작업의 가격 기준은 유지합니다.
 첫 가격 릴리스는 2026-10-06에 실제 다운로드/갱신 검증을 통과했습니다.
 향후 최신 릴리스에도 manifest와 카탈로그 파일이 있어야 합니다. 파일이 없으면
 갱신은 실패하고 캐시 가격을 유지합니다. 서버에서 공급원을 명시적으로 미설정하면

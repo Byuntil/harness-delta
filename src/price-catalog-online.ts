@@ -6,18 +6,20 @@ import { ensureBundledCatalog,readPriceCatalogStatus,refreshPriceCatalog } from 
 import type { Store } from './store.js';
 
 export interface TrustedPriceCatalogSource {publisherId:string;manifestUrl:string;redirectHosts?:string[]}
-// Published with explicit approval and accepted through the bounded transport on 2026-10-06.
+const githubRepositoryPath='/Qello-Labs/harness-delta';
+const githubLatestManifestPath=`${githubRepositoryPath}/releases/latest/download/manifest.json`;
+// The approved release retains its issuer and bytes when the repository owner changes.
 export const defaultPriceCatalogSource:TrustedPriceCatalogSource|null={
   publisherId:'harness-delta',
-  manifestUrl:'https://github.com/Byuntil/harness-delta/releases/latest/download/manifest.json',
+  manifestUrl:`https://github.com${githubLatestManifestPath}`,
   redirectHosts:['release-assets.githubusercontent.com','objects.githubusercontent.com'],
 };
-const githubAssetPath=/^\/Byuntil\/harness-delta\/releases\/download\/[a-zA-Z0-9._-]{1,128}\/(manifest\.json|catalog-[a-f0-9]{64}\.json)$/;
+const githubAssetPath=new RegExp(String.raw`^${githubRepositoryPath}/releases/download/[a-zA-Z0-9._-]{1,128}/(manifest\.json|catalog-[a-f0-9]{64}\.json)$`);
 const sourceSchema=z.strictObject({publisherId:IdSchema,manifestUrl:z.string().url(),redirectHosts:z.array(z.enum(['release-assets.githubusercontent.com','objects.githubusercontent.com'])).max(2).optional()}).refine(source=>{
   const url=new URL(source.manifestUrl);
   if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)return false;
   return !source.redirectHosts?.length||source.publisherId==='harness-delta'&&url.origin==='https://github.com'&&
-    (githubAssetPath.test(url.pathname)&&url.pathname.endsWith('/manifest.json')||url.pathname==='/Byuntil/harness-delta/releases/latest/download/manifest.json');
+    (githubAssetPath.test(url.pathname)&&url.pathname.endsWith('/manifest.json')||url.pathname===githubLatestManifestPath);
 });
 function verifiedSource(source:TrustedPriceCatalogSource):TrustedPriceCatalogSource {
   const result=sourceSchema.safeParse(source);if(!result.success)throw new Error('invalid_catalog_source');
