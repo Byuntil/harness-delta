@@ -63,7 +63,9 @@ export interface ClaudeProbeOptions {
   rootScope: CandidateScope; child: { sessionId: string; sourceId: string; agentType: string };
   generation: number; startedAt: string; model: string | null; effort: string | null; clock: Clock;
   /** Internal workflow mode; public CLI cannot supply synthetic admission. */
-  workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; durationMs:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void };
+  workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; durationMs:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void;
+    /** Trusted external candidate only: no usage before verified connection. */
+    observationStartedAt?:()=>string|null };
   /** Caller owns a durable one-use reservation; a failure must hold, never retry. */
   reserveChild: () => void;
 }
@@ -109,6 +111,7 @@ export class ClaudeProbeCoordinator {
   authorizeTraceRequest(token: string): void {
     this.authorize(token);
     if (!this.rootStarted || this.lastSequence < 0 || (!this.options.workflow && this.childAgentId === null)) fail('claude_probe_not_ready');
+    if(this.options.workflow?.observationStartedAt&&this.options.workflow.observationStartedAt()===null)fail('claude_probe_not_ready');
   }
   state() { return { rootStarted: this.rootStarted, childBound: this.childAgentId !== null, childStopped: this.childStopped,
     sessionEnded: this.sessionEnded, lastSequence: this.lastSequence, requestsInserted: this.requestsInserted,
@@ -268,7 +271,7 @@ export class ClaudeProbeCoordinator {
       ({ result, inserted } = this.store.immediateTransaction(() => {
         const before = this.store.get<{ last: number }>('SELECT coalesce(max(rowid),0) AS last FROM events')!.last;
         const result = ingestClaudeTraceBatch(this.store, this.scope, () => raw, {
-          startedAt: this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic,
+          startedAt: this.options.workflow?.observationStartedAt?.()??this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic,
           ...(this.options.workflow && this.lastVerifiedAt!==null ? {lossStartedAt:new Date(Math.min(Date.parse(this.options.clock()),Date.parse(this.lastVerifiedAt)+1)).toISOString()} : {}),
         });
         // Count only rows this batch actually inserted while holding the writer

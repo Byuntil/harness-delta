@@ -8,6 +8,7 @@ import type { Outcome } from './lifecycle.js';
 import type { Store } from './store.js';
 import { createComparisonSnapshot } from './reports/comparison-snapshot.js';
 import type { ComparisonSnapshotRequest } from './reports/comparison-contracts.js';
+import { registerExternalSessionCommands } from './external-session-cli.js';
 
 /** Fixed codes only: read and parse errors may contain paths or file content. */
 function readConfig(path: string, label: 'config' | 'runtime' | 'execution'): unknown {
@@ -29,6 +30,7 @@ interface RunOptions { config: string; runtime: string; execution: string; confi
 export interface WorkflowCommandDependencies { codexAdapter?: (store:Store,execution:unknown)=>WorkflowAdapter; claudeAdapter?: (store:Store,execution:unknown)=>WorkflowAdapter }
 export function registerTaskWorkflowCommands(program: Command, store: () => Store, print: (value: unknown) => void, dependencies:WorkflowCommandDependencies={}) {
   const workflow = program.command('workflow').description('Assigned A/B task lifecycle: launch, observe, finish and report (see docs/runbooks/workflow-quickstart.md)');
+  registerExternalSessionCommands(workflow, store, print, dependencies.codexAdapter);
   const codex=workflow.command('codex').description('Codex task execution and own-response collection');
   const codexHelp = { launch: 'start a fresh Codex session with the assigned harness', resume: 'resume a linked session with the assigned harness',
     link: 'bind an existing session started outside the CLI; earlier usage is excluded', collect: 'observe future usage of a linked session until stopped' };

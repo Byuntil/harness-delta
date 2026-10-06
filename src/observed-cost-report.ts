@@ -44,7 +44,7 @@ export function projectObservedCost(events: readonly UsageEvent[], inputTable: P
   };
 }
 
-export function readObservedCostReport(store: Store, taskId: string, tableId: string, cutoff: string, inputBasis: LegacyInputBasis) {
+export function captureObservedCostInput(store: Store, taskId: string, tableId: string, cutoff: string, inputBasis: LegacyInputBasis) {
   return store.transaction(() => {
     const task = new Lifecycle(store).task(taskId);
     const end = parseComparison(TimestampSchema, cutoff);
@@ -68,9 +68,15 @@ export function readObservedCostReport(store: Store, taskId: string, tableId: st
     const table=readPriceTable(store,tableId);
     const report = projectObservedCost(events, table, taskId, end, inputBasis);
     const windowPolicy = 'active-observed-loss-half-open-v2';
-    return { ...report, reasons: [...new Set([...report.reasons, ...uncertain.flatMap(row => row.reason ? [row.reason] : []), ...gaps.map(row => row.reason), ...(excluded ? ['excluded_intervals'] : [])])].sort(),
+    const result = { ...report, reasons: [...new Set([...report.reasons, ...uncertain.flatMap(row => row.reason ? [row.reason] : []), ...gaps.map(row => row.reason), ...(excluded ? ['excluded_intervals'] : [])])].sort(),
       window_start: task.started_at, window_end: until, window_policy: windowPolicy, excluded_event_count: excluded,
       coverage:observedCostCoverage(store,taskId,task.started_at,until,events,table,inputBasis),
       observation_snapshot_hash: createHash('sha256').update(canonicalJson({ policy: windowPolicy, active, uncertain, gaps })).digest('hex') };
+    return { report: result, events };
   });
+}
+
+/** Existing report serialization stays unchanged; capture exposes eligible metadata for immutable repricing. */
+export function readObservedCostReport(store: Store, taskId: string, tableId: string, cutoff: string, inputBasis: LegacyInputBasis) {
+  return captureObservedCostInput(store, taskId, tableId, cutoff, inputBasis).report;
 }

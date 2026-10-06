@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { IdSchema, ModelSchema } from './contracts.js';
 import { readSource, type SourceBytes } from './collection.js';
 import { parseCodexCandidateRollout } from './codex-candidate-rollout.js';
+import { verifyExternalContext } from './external-session-context.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId, codexWorkflowRun, stopCodexWorkflow, type CodexWorkflowRun } from './codex-workflow-journal.js';
 import { productionSourceEvidence } from './readiness.js';
 import { putUsageWithEvidence, recordObservationGap, requireActiveScope } from './runtime-history.js';
@@ -400,6 +401,10 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       const projection=record.projection;const fingerprint=JSON.stringify({...projection,runtime:{...projection.runtime,recorded_at:null}});
       if(requests.has(projection.event.id)&&requests.get(projection.event.id)!==fingerprint)throw new Error('candidate_conflict');
       requests.set(projection.event.id,fingerprint);
+    }
+    if(c.externalStartup){
+      if(e.direct_child||!['link','collect'].includes(e.operation))throw new Error('unsupported_session');
+      c.externalStartup.verify({...verifyExternalContext(rows,c.externalStartup.expectation,now),sessionId:session,sourceIdentity:bytes.identity});
     }
     for(const part of snapshots){
     if(part.snapshot.hasGap)recordObservationGap(store,c.taskId,part.id,baselineAt,now,'incomplete',now);
