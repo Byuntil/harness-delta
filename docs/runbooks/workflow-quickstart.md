@@ -1,194 +1,393 @@
-# First A/B workflow run
+# Measure one assigned development task
 
-[한국어](workflow-quickstart.ko.md)
+[한국어](workflow-quickstart.ko.md) · [Documentation map](../../README.md#documentation)
 
-This page walks through one assigned task from setup to report with the admitted
-Codex 0.160.0 root profile (`codex-workflow-own-response-v1`). It shows the order
-of commands and what each output means. The detailed contracts and limits stay in
-the [native workflow runbook](task-native-workflow.md), the
-[flexible comparison runbook](flexible-comparison.md) and the
-[functional pilot guide](functional-task-pilot.md). Usage is always partial: no
-command here produces a complete task cost, savings claim or adoption decision.
+Use this procedure for a small **functional pilot** with descriptive partial costs.
+It covers Codex 0.160.0 and `codex-workflow-own-response-v1`.
+Use one persistent A/B assignment for each logical task.
+Choose model and effort per invocation; a new session does not change the assignment.
 
-Every real product launch needs your explicit approval of that run. Preparing files
-and running `workflow status` or `workflow task` never starts a product.
+## Support and costs before you start
 
-## The timeline that decides whether an outcome counts
+| Path | Supported boundary |
+| --- | --- |
+| Codex 0.160.0 root workflow | Launch, same-session resume, explicit independent-root link, foreground collect, stop and recover; partial usage |
+| Codex 0.160.0 direct-child workflow | Separate profile: fresh root and one fresh child, pinned macOS arm64/Node24, read-only; no family resume or external child link |
+| Legacy file collector | Codex 0.156.1/0.158.0 and Claude Code 2.1.283 only; use [local measurement](local-measurement.md) |
+| Claude Code 2.1.288 | Bounded internal synchronous probe verified; general assigned workflow remains unadmitted |
+| App/IDE/MCP, forks, compaction, deeper descendants | Unsupported for this procedure |
+| Complete task cost, actual billing, savings or adoption inference | Unavailable |
+| Team file exchange | Synthetic validation only; functional-pilot results cannot use that exchange |
 
-```text
-assign/launch ──► work (launch, resume, collect) ──► finish ──► followup_ends_at ──► report
-                                                     │                                │
-                                     must happen BEFORE the deadline     cutoff at or AFTER the deadline
-```
+**Execution notice:** Native launch/resume uses your existing authenticated product and can consume paid or subscription usage.
+Approve each actual run before execution. Timeout and stop are not provider spending caps.
+Preparing inputs, registering them and reading status do not launch a product.
 
-- Assignment sets a fixed `followup_ends_at` = assignment time + the protocol's
-  `followup_seconds`. Pause, resume and rework never move it.
-- `workflow finish` must happen **before** `followup_ends_at`. A later outcome is
-  stored, but the report shows `outcome_missing` (or `not_started` if the task never started
-before the deadline) for that task and lists the outcome
-  separately as `late_outcome`. `finish` warns with
-  `assessment_after_followup_deadline` when this happens.
-- A report with a cutoff **before** the deadline shows `followup_pending`, even for
-  finished tasks. For final outcomes, create the report once the deadline has passed,
-  with a cutoff at or after it. A cutoff cannot be in the future.
+Initial admission qualifications were read-only. Later bounded workspace-write functional runs produced files.
+The first run failed configuration-scope verification because native startup created a persistent trust setting.
+A subsequent run with explicit `project_trust: "untrusted"` passed its monitored configuration-scope checks.
+These observations do not guarantee that all native or managed settings remain unchanged.
+That option disables project-local Codex configuration, hooks and rules for the invocation.
+Use it only when that effect is intended. It applies to fresh root launch, not resume/link/collect or child launch.
+See [execution details and limits](task-native-workflow.md).
 
-Choose `followup_seconds` long enough to cover the work and the human review.
+## 1. Install from the checkout
 
-## 0. Prerequisites
+Prerequisites: Node.js 24, npm and the existing pinned Codex 0.160.0 binary.
+Local validation covers macOS arm64. Other platforms remain unverified.
+The package is private; there is no published-package installation procedure.
 
-- Node.js 24, then `npm ci` and `npm run build` in this checkout.
-- Codex 0.160.0 whose binary SHA-256 matches the pinned value in
-  [`examples/workflow/launch.json`](../../examples/workflow/launch.json).
-- A dedicated real database, for example `.harness-delta/pilot/local.sqlite`.
-  Keep databases, prompts and instruction files under the Git-ignored `.harness-delta/`.
+1. Select Node 24 with your version manager.
+2. From the repository root, install the locked dependencies.
 
-Commands below use `hm` for `node dist/cli.js --db .harness-delta/pilot/local.sqlite`.
+   ```sh
+   npm ci
+   ```
 
-## 1. One-time protocol setup
+3. Build the CLI.
 
-Write the price table, both variants and the v2 protocol as described in
-[flexible comparison](flexible-comparison.md), with source profile
-`{"product":"codex","product_version":"0.160.0","profile_id":"codex-workflow-own-response-v1"}`.
+   ```sh
+   npm run build
+   ```
+
+4. Read the workflow help.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow --help
+   ```
+
+Expected: the help lists `codex`, `status`, `task`, `begin`, `finish` and `report`.
+The top-level `comparison` help still describes the legacy synthetic path. Use `workflow status` in step 4 to check the v2 native gate.
+If installation fails, check Node 24 and the SQLite native-build prerequisites in [CONTRIBUTING](../../CONTRIBUTING.md#development-environment).
+Installation also installs local Git hooks. It does not start collection or change product authentication.
+Every command below runs from the repository root and includes the database explicitly.
+An installed local package can expose `hm`; `npm ci` alone does not put it on your shell PATH.
+
+## 2. Agree on the pilot inputs
+
+Before registration, have the team owner select the following inputs.
+The product supplies no experimental prices, durations, sample size or missingness limits.
+
+| Decision | Where to record it |
+| --- | --- |
+| Shared project requirements and the small A/B instruction difference | `variant-a.md`, `variant-b.md`; preserve the shared instructions in both |
+| Task output, permitted edits and human acceptance criteria | Private prompt file; criterion IDs in `workflow.json` |
+| Participants, environments, assignee strata and allocator ownership | `protocol.json`; each stratum has one assignee |
+| Recruitment dates, follow-up duration, sample budget and stopping/deviation rules | `protocol.json`; freeze before recruitment starts |
+| Explicit reference rates and legacy input basis | `prices.json` and the [cost guide](observed-cost.md) |
+| Runtime model/effort, sandbox, timeout, run count and teardown | `runtime.json`, execution files and the actual-run approval |
+
+Choose follow-up long enough for work **and human review**.
+Assignment fixes `followup_ends_at`; pause, resume and rework never move it.
+Finish must occur before that deadline. A later outcome is stored separately but does not repair deadline status.
+A final report needs a cutoff at/after the deadline and after the outcome timestamp.
+A cutoff cannot be in the future.
+
+Use `purpose: functional_pilot` for this functionality check.
+Omit `minimum_effect`, `quality_margin` and `confidence_level`; the schema rejects them for this purpose.
+The report remains `functional_only`, with adoption `not_applicable`.
+Do not run the same logical task once under each arm. A new requirement needs a new task.
+For a later batch, four distinct tasks, one assignee and two balanced blocks can bound preparation.
+Those values require the owner's choice; they do not establish statistical power.
+
+## 3. Prepare the complete input set
+
+1. Create an ignored pilot directory.
+
+   ```sh
+   mkdir -p .harness-delta/pilot
+   ```
+
+2. Copy the [synthetic example set](../../examples/workflow/).
+
+   ```sh
+   cp -R examples/workflow/. .harness-delta/pilot/
+   ```
+
+3. Replace the example choices before registering anything.
+
+| Files | Required replacements |
+| --- | --- |
+| `prices.json` | Synthetic rates/model/source/date with your explicit reference basis; no vendor prices are implied |
+| `variant-a.md`, `variant-b.md` | Reviewed A/B instructions; no personal source material in public fixtures |
+| `protocol.json` | Dates in 2099, example IDs, participants/environments/strata, follow-up/sample/missingness/stopping policies |
+| `workflow.json` | Matching IDs, logical task, criteria, environment, actual code-base commit and artifact paths |
+| `runtime.json` | User-selected model and effort, or `null` for unspecified; no diagnostic model is required |
+| `launch.json`, `resume.json` | Canonical absolute binary/home/recorder/prompt paths, approved sandbox and timeout |
+| `link.json`, `collect.json` | The same canonical setup; exact linked session UUID and source path where required |
+
+All JSON examples are complete schema inputs, but their choices are synthetic.
+Keep prompts, approved execution requests and databases under ignored local storage.
+Keep ordinary work products separate from measurement data.
+The native binary SHA must match the pinned value in the examples.
+Do not install, log in or update a product to make an example work without a separate decision.
+
+**Output notice:** The measurement CLI discards ordinary native stdout.
+For a file-producing task, specify the output destination and permitted edits in the private prompt.
+Approve root `workspace-write` when writing that output is required.
+A read-only analysis answer will not appear through this CLI.
+
+4. After editing both instruction files, update their manifests before registration.
+
+   ```sh
+   node --input-type=module <<'JS'
+   import { readFileSync, writeFileSync } from 'node:fs';
+   import { createHash } from 'node:crypto';
+   const sha = value => createHash('sha256').update(value).digest('hex');
+   for (const arm of ['a', 'b']) {
+     const path = `.harness-delta/pilot/variant-${arm}`;
+     const config = JSON.parse(readFileSync(`${path}.json`, 'utf8'));
+     config.instruction_manifest_hash = sha(JSON.stringify([
+       { artifact_id: 'instructions', sha256: sha(readFileSync(`${path}.md`)) }
+     ]));
+     writeFileSync(`${path}.json`, `${JSON.stringify(config, null, 2)}\n`);
+   }
+   JS
+   ```
+
+Expected: each variant JSON contains the manifest hash of its reviewed instruction file.
+This example uses one artifact per arm. Multiple artifacts require sorted artifact IDs and the same `{artifact_id, sha256}` formula.
+Artifact paths resolve from the command's working directory, not the config file's directory.
+Registration is immutable. Keep incomplete drafts in a separate temporary store.
+If registered inputs must change, use new IDs and an accepted prospective protocol.
+
+## 4. Register and freeze once
+
+Use a new dedicated database for this pilot. Keep synthetic trials in a different database.
+Run each command separately, in this order.
+Replace the project root with its canonical absolute path.
 
 ```sh
-hm project add project-1 --root /absolute/path/to/project
-hm price-table register --config prices.json
-hm variant register --config variant-a.json
-hm variant register --config variant-b.json
-hm comparison register --config protocol.json
-hm comparison freeze pilot-1
-hm workflow status pilot-1
+node dist/cli.js --db .harness-delta/pilot/local.sqlite project add project-1 --root /absolute/path/to/project
+node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table register --config .harness-delta/pilot/prices.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite variant register --config .harness-delta/pilot/variant-a.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite variant register --config .harness-delta/pilot/variant-b.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison register --config .harness-delta/pilot/protocol.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison freeze pilot-1
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow status pilot-1
 ```
 
-`workflow status` lists blockers. `native_source_unqualified` or
-`native_adapter_not_wired` means native runs cannot start yet;
-`whole_task_cost_unconfirmed` and `analysis_unverified` are expected and do not block a run.
+Expected: `native_execution: true` for the admitted root profile with complete accepted inputs.
+`whole_task_cost_unconfirmed` and `analysis_unverified` remain expected limitations.
+If `native_source_unqualified` or `native_adapter_not_wired` appears, stop before launch.
+If freeze fails, check every required field and ensure recruitment has not started.
+Changing a configuration flag cannot qualify an unsupported source.
 
-## 2. Per-task files
+## 5. Assign and launch the task
 
-Copy the [example files](../../examples/workflow/) and edit them:
+Prerequisites: accepted inputs, frozen protocol, exact binary and approval for this actual run.
+Use a fresh `run_id` in `launch.json` and a fresh confirmation ID.
 
-| File | Purpose | Change per operation? |
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex launch \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/launch.json --confirmation confirmation-1
+```
+
+Launch assigns and starts the task. Do not run `task register` for this v2 assignment.
+`workflow begin` prepares assignment/start without product execution; it does not apply a harness by itself.
+Preflight checks binary, recorder, prompt and home before assignment/start.
+A preflight failure creates no assignment or active interval.
+A later pre-spawn failure can pause an activated task again; its receipt shows `activation_reverted: true`.
+
+Expected receipt: canonical task ID, selected variant, session ID and `adapter_result`.
+Use the returned canonical task ID in later commands.
+`completed` means the invocation ended, not that the human task succeeded or all usage was observed.
+For `failed`, read `reason` and `diagnostic`; earlier eligible usage can remain partial.
+For `stopped`, inspect the task before continuing. Never retry a paid launch automatically.
+The receipt's instruction verification covers outgoing invocation settings, not native resolved-harness attestation.
+
+## 6. Check, stop or pause
+
+1. Read the task state, deadline, runs and `next_actions`.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow task task-1
+   ```
+
+2. If a run is alive, request its stop.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex stop run-1
+   ```
+
+3. Read the task again until the run is no longer `running`.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow task task-1
+   ```
+
+4. If you are taking a break and the task is active, pause the task.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite task pause task-1
+   ```
+
+Expected: `stop` ends the run/collection; `pause` closes the task's active-time interval.
+A completed or stopped run alone leaves the task active. Active time is not human labor.
+
+If the collector disappeared while a run stays `running`, recover before pausing or finishing:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex recover run-1
+```
+
+Recover records failure `abandoned` and an observation gap; it adds no usage.
+An inactive task reports `gap_warning: task_not_active` instead of recording that gap.
+Recover cannot signal an orphaned native process. End any leftover product process yourself before another run.
+
+## 7. Resume or use another session
+
+Use fresh run and confirmation IDs for every operation.
+Keep the original logical task, database, project, criteria and assignment.
+Changing model/effort does not rerandomize the task.
+A launch/resume reactivates a paused task with a new confirmation.
+
+For the same session, put the receipt's exact `session_id` in `resume.json`:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex resume \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/resume.json --confirmation confirmation-2
+```
+
+For another independent root, use a new `run_id` and prompt in `launch.json` with the same workflow file.
+Run the launch command from step 5 with a new confirmation ID.
+For an externally started root, explicitly bind its exact UUID and canonical source path:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex link \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/link.json --confirmation confirmation-3
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex collect \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/collect.json --confirmation confirmation-4
+```
+
+Expected: link/collect reports `external_unverified`; these operations do not apply the assigned harness or launch a product.
+For external work, confirm the selected instructions independently before using that session.
+Wait for collection's initial baseline before starting a new turn. Keep collection in the foreground while working.
+Earlier, paused and offline usage is excluded; stored observations survive source-file loss.
+There is no discovery, `--last`, retrospective backfill or automatic retry.
+A read racing a native append ingests nothing and retries at the next poll, at most 20 consecutive times or the invocation deadline.
+Identity, truncation and prefix changes still fail closed.
+Do not replace these commands with generic `session link`/`collect` for Codex 0.160.0.
+The separate direct-child profile cannot resume its family; after pause, use a fresh root/child pair.
+
+## 8. Record the human outcome
+
+Prerequisites: collection has settled, no run is still active, and the work product has been reviewed.
+Before `followup_ends_at`, record all fulfilled criterion IDs:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow finish task-1 --outcome success --met criterion-1
+```
+
+Expected: `counted_in_deadline_status: true` when assessed before the deadline.
+`success` requires every criterion. `failed` and `aborted` accept a subset.
+Finalization is immutable. A passing test, process exit or positive usage never finalizes the task automatically.
+Use first-completion/assessment/rework commands only when recording those separate lifecycle events; see [local measurement](local-measurement.md#assess-report-and-delete).
+If review is late, still record the honest outcome. The warning `assessment_after_followup_deadline` means it is stored but excluded from deadline status.
+
+## 9. Create and read the report
+
+After the follow-up deadline and outcome timestamp, capture a current UTC cutoff:
+
+```sh
+reportCutoff=$(node -p 'new Date().toISOString()')
+```
+
+Create the frozen snapshot:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow report pilot-1 \
+  --id report-1 --cutoff "$reportCutoff" --reason initial
+```
+
+Read the human-facing tables:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison report report-1 --format markdown-readable
+```
+
+Expected: original A/B assignment, human outcomes, partial costs and explicit limitations.
+A cutoff before the deadline shows `followup_pending` even for a finished task.
+`deadline_status` can be `success`, `failed`, `aborted`, `outcome_missing`, `not_started` or `followup_pending`.
+A late assessment appears as `late_outcome` in new `flexible-cost-descriptive-2` reports.
+Stored version-1 snapshots retain their original shape.
+If more evidence arrives, create a new report ID with the appropriate revision reason; old snapshots do not change.
+
+Estimate the same task's observed components using the explicit reference table:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-task task-1 \
+  --price-table prices-1 --cutoff "$reportCutoff" --input-basis output-only-v1
+```
+
+Read [the cost guide](observed-cost.md) before selecting an input assumption or comparing estimates.
+Never add cached input to its total input or reasoning output to its total output again.
+A partial amount is not a bill. An unpriced model remains unavailable; do not substitute another model's rate.
+
+| Value/state | Interpretation |
+| --- | --- |
+| Observed `0` | Eligible observation measured zero |
+| Missing | No eligible value was observed |
+| Error | The source or observation failed |
+| Excluded | The interval/value was outside permitted scope |
+| Unmeasurable | This source cannot establish the requested value |
+| `partial_amount: null` | No eligible priced amount; not zero |
+| `complete_amount: null` | Whole-task cost remains unconfirmed, even when partial usage is priced |
+
+## 10. Resolve errors or remove local data
+
+The CLI prints fixed codes and, for common errors, a `hint:` line.
+It does not print raw producer messages, private paths or instruction text.
+
+| Code | Next action |
+| --- | --- |
+| `invalid_command: ...` | Read that command's `--help`; supply the required arguments/options |
+| `*_file_unreadable`, `*_file_invalid_json`, `invalid_execution` | Correct the path/JSON and compare the operation with the example |
+| `binary_mismatch`, `binary_unreadable` | Use the exact pinned binary and canonical path; do not update it silently |
+| `invalid_hook_recorder`, `invalid_prompt`, `unsafe_home` | Correct the unmodified recorder, UTF-8 prompt (≤1 MiB), or existing home |
+| `confirmation_conflict` | Supply a new `--confirmation` ID |
+| `workflow_run_active` | Wait for, stop or recover the existing run |
+| `real_experiment_disabled` | Check freeze and `workflow status`; source qualification is independent of purpose labels |
+| `workflow_manifest_mismatch` | Stop; the registered instructions changed. Resolve prospective inputs before another run |
+| `invalid_transition` | Read `workflow task`; perform the action allowed by its current state |
+| `invalid_criteria` | Supply every fulfilled criterion ID for `success` |
+| `invalid_cutoff` | Capture a valid UTC time no later than now |
+
+Stop on scope loss, unsupported topology/version, conflicting usage, failed teardown or privacy exposure.
+Preserve failed/aborted outcomes and earlier eligible partial observations. Do not reassign or backfill them.
+
+If local task deletion is intended:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite delete task task-1
+```
+
+Deletion invalidates dependent reports and prevents identifier reuse.
+It does not delete original product transcripts, work products or exported copies.
+Retention is opt-in; see [local deletion and retention](local-measurement.md#assess-report-and-delete).
+
+## Terms and further reading
+
+| English | 한국어 | Meaning |
 | --- | --- | --- |
-| `workflow.json` | Assignment (task, protocol, criteria) and the A/B instruction files | No; reuse it |
-| `runtime.json` | Model and effort for this run; `null` means unspecified | Only if you change them |
-| `launch.json`, `resume.json`, `collect.json` | Binary, Codex home, recorder, prompt, sandbox, timeout | New `run_id` every time |
+| Task | 작업 | Durable unit with fixed human criteria |
+| Run | 실행 | One invocation; not the human outcome |
+| Session | 세션 | One explicitly linked product source |
+| Assignment | 배정 | Original A/B selection retained across runs |
+| Stop | 실행 중지 | End the run/collection |
+| Pause | 작업 일시중단 | Close active task time |
+| Follow-up deadline | 판정 기한 | Fixed deadline for the counted outcome |
+| Partial cost estimate | 부분 비용 추정 | Priceable observed components at explicit reference rates |
 
-Artifact paths in `workflow.json` are resolved from the directory you run the command
-in, not from the file's location. `confirmation_id` must be new for every operation. Instead of editing
-`workflow.json`, pass `--confirmation <new-id>` on each command.
+Use [flexible comparison](flexible-comparison.md) for configuration contracts and [native workflow](task-native-workflow.md) for advanced source/child boundaries.
+Use [v1 synthetic comparison](task-comparison.md), [synthetic exchange](team-file-exchange.md) and [method validation](comparison-analysis-validation.md) only for their stated development scopes.
+The former functional-pilot preparation guide is integrated into steps 2–5 and the flexible configuration reference.
 
-## 3. Launch
-
-```sh
-hm workflow codex launch --config workflow.json --runtime runtime.json \
-  --execution launch.json --confirmation confirmation-1
-```
-
-Before anything is assigned, the CLI checks the binary hash, the hook recorder,
-the prompt file and the Codex home. If one fails, it prints a code such as
-`binary_mismatch` with a hint. The task is not assigned, not started and no time
-is counted. Fix the file and run the same command again.
-
-If the product cannot be launched for a reason found after these checks and this command
-started the task, the task is paused again so no active time accrues; the receipt shows
-`activation_reverted: true`.
-
-The receipt prints IDs and hashes only, plus `adapter_result`:
-
-- `state: completed` — the run ended and its own usage was collected.
-- `state: failed` — see `reason` and `diagnostic`; the command exits with `codex_workflow_failed`.
-- `state: stopped` — stopped on request.
-
-## 4. Check the task at any time
-
-```sh
-hm workflow task task-1
-```
-
-It shows the state, `followup_ends_at`, whether follow-up is still `open`, the outcome
-and whether it counts, every run, and `next_actions`:
-
-| Next action | Meaning |
-| --- | --- |
-| `launch` | Assigned but not started |
-| `continue_with_launch_or_resume` | Paused (for example after a failed launch); the next launch or resume reactivates it |
-| `finish_before_followup_deadline` | Keep working; record the outcome before the deadline |
-| `finish_now_outcome_excluded_after_deadline` | Deadline passed; an outcome is still stored but will not count |
-| `stop_or_recover_running_run` | A run is still marked running (see step 6) |
-| `report_after_followup_deadline` | Finished; wait for the deadline before the final report |
-| `create_report` | Finished and the deadline passed |
-
-## 5. Continue the same task
-
-Use a new `run_id` and confirmation ID each time; the assignment never changes.
-
-```sh
-hm workflow codex resume --config workflow.json --runtime runtime.json \
-  --execution resume.json --confirmation confirmation-2
-```
-
-`resume.json` needs the `session_id` from the launch receipt. Use `link` and
-`collect` for a session you started outside the CLI; see
-[the native workflow runbook](task-native-workflow.md).
-
-## 6. Stop or recover a run
-
-```sh
-hm workflow codex stop run-3      # ask a live run to stop
-hm workflow codex recover run-3   # the process is gone (crash, kill, reboot)
-```
-
-A run left `running` after its collector disappeared blocks new runs with
-`workflow_run_active`. `recover` marks it `failed` with reason `abandoned` and records
-an observation gap for the unobserved time. It never adds usage. Recover before you
-pause or finish the task: an inactive task cannot record the gap, and the result then
-shows `gap_warning: task_not_active`. A harness-delta collector that is still alive
-stops at its next check. The Codex process itself runs in its own process group and can
-outlive a killed collector; `recover` cannot signal it, so end any leftover Codex
-process yourself.
-
-## 7. Finish
-
-```sh
-hm workflow finish task-1 --outcome success --met criterion-1
-```
-
-`success` requires every criterion ID; `failed` and `aborted` accept a subset. The
-result shows `followup_ends_at` and `counted_in_deadline_status`.
-
-## 8. Report
-
-After `followup_ends_at` has passed:
-
-```sh
-hm workflow report pilot-1 --id report-1 --cutoff 2026-10-12T00:00:00Z --reason initial
-```
-
-Per task, `deadline_status` is `success`, `failed`, `aborted`, `outcome_missing`,
-`not_started` or `followup_pending`. In reports with descriptive version
-`flexible-cost-descriptive-2`, `late_outcome` lists an outcome assessed after the
-deadline. Costs are standardized estimates from observed partial usage. They are
-not your bill.
-
-## Common error codes
-
-The CLI prints one code per failure and, for common codes, a `hint:` line. Paths,
-file contents and producer messages are never printed; other failures show
-`input_or_state_error`.
-
-| Code | What to do |
-| --- | --- |
-| `invalid_command: ...` | A required option or argument is missing; run the command with `--help` |
-| `config_file_unreadable`, `*_file_invalid_json` | Check the path and the JSON syntax of that file |
-| `invalid_execution` | The execution file does not match its operation; compare it with the examples |
-| `binary_mismatch`, `binary_unreadable` | Use the exact Codex 0.160.0 binary and its absolute canonical path |
-| `invalid_hook_recorder` | Point `hook_recorder` at the unmodified recorder in this checkout |
-| `invalid_prompt`, `unsafe_home` | Use an existing UTF-8 prompt file (≤ 1 MiB) and an existing Codex home |
-| `confirmation_conflict` | Pass a new `--confirmation` ID |
-| `workflow_run_active` | Wait for, stop or recover the running run |
-| `real_experiment_disabled` | Freeze the protocol and check `workflow status` |
-| `workflow_manifest_mismatch` | An instruction file changed after its variant was registered |
-| `invalid_transition` | The task state does not allow this; check `workflow task` |
-| `invalid_criteria` | `success` needs every criterion ID in `--met` |
-| `invalid_cutoff` | Use a UTC cutoff that is not in the future |
+These procedures use an **STE-inspired** style. They have not been assessed for full ASD-STE100 compliance or certified by ASD.
+The Korean version uses the same structure and terms; it is not an ASD-STE100-conforming language version.
+See the [official current FAQ](https://asd-ste100.org/STE_faq.html) and [official Issue 9 standard](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf).
+The standard is available free of charge, but its copyright restricts reproduction. Link to it; do not redistribute its text or dictionary here.

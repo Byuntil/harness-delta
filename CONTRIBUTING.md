@@ -6,8 +6,8 @@ The repository provides a local measurement CLI, legacy partial sequential adapt
 for Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283, and two separately admitted
 Codex 0.160.0 workflow profiles: root own responses and a fresh root with one fresh
 direct child. The child profile is read-only; family resume and broader descendant
-collection are unsupported. Assigned CLI wiring is verified offline; exact native
-engine runs are separate evidence. Claude 2.1.288 has a successful bounded internal
+collection are unsupported. Assigned CLI wiring has synthetic coverage and later bounded actual root
+functional observations; exact admission and configuration-scope limits are separate evidence. Claude 2.1.288 has a successful bounded internal
 synchronous probe, but its general workflow is not admitted. All usage remains
 partial, with no complete task cost or inferential adoption support. See the
 [current native workflow and limits](docs/runbooks/task-native-workflow.md),
@@ -123,8 +123,16 @@ Commit-message validation remains separate.
 
 ## Language and commits
 
-Write documentation, code comments, new local records, commit messages, and PR text
-in English. Use `<type>: <imperative summary>` with an optional scope, for example:
+Write developer documentation, code comments, new local records, commit messages, and PR text
+in English. User task/cost procedures also have synchronized Korean versions.
+Update each pair together: preserve section order, command blocks, JSON identifiers,
+expected results, warnings and support limits. Keep CLI identifiers untranslated.
+Use the quickstart glossary for shared terms. Write short commands to the reader,
+with one action per step; separate prerequisites and expected results from actions.
+This is STE-inspired editing, not a claim of ASD-STE100 compliance or certification.
+No translation framework or automatic translation is required.
+
+Use `<type>: <imperative summary>` with an optional scope, for example:
 
 ```text
 chore: add the development harness
@@ -191,3 +199,19 @@ for the separate `npm run analysis:validate` sharp-null arithmetic study and
 Both are synthetic development commands under Node 24. Full confidence calibration
 is opt-in, outside normal unit tests. Neither enables production inference or real
 experiments; preserve the fixed registries, failures and historical evidence.
+
+## Observed-cost verification
+
+User instructions are in the [cost guide](docs/runbooks/observed-cost.md)
+([한국어](docs/runbooks/observed-cost.ko.md)). From a Node 24 checkout:
+
+```sh
+npm test -- tests/observed-cost.test.ts tests/observed-cost-cli.test.ts tests/pricing.test.ts tests/task-cost.test.ts
+```
+
+These synthetic checks establish arithmetic and reporting behavior, not whole-task
+source coverage or real experiment effectiveness. Workflow example schemas are
+covered by `tests/workflow-examples.test.ts`; contract/store boundaries use
+`tests/contracts.test.ts` and `tests/store.test.ts`. Documentation-only edits need
+link/anchor, example/schema and bilingual command/support checks. Use the general
+implementation workflow and `npm run check` when product behavior changes.

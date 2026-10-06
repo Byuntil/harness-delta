@@ -1,5 +1,8 @@
 # Synthetic 메타데이터 파일 교환
 
+기능 파일럿·실제 팀 데이터는 이 교환 경로에서 미지원입니다. 먼저 저장소를 빌드하세요.
+아래 명령은 `node dist/cli.js`와 명시적 DB를 사용합니다.
+
 [영문 절차](team-file-exchange.md), [공유 계약](../decisions/011-team-file-exchange.md),
 [작업 비교 절차](task-comparison.ko.md)를 참고하세요. 오프라인 synthetic 검증이며,
 실제 실험 활성화나 전체 사용량 측정을 뜻하지 않습니다.
@@ -8,13 +11,13 @@
    작업 생성 전에 영문 절차의 source.json 예시로 공유 설정을 등록합니다.
 
 ```sh
-hm --db source.db exchange source register --config source.json
+node dist/cli.js --db source.db exchange source register --config source.json
 ```
 
 2. 기존 synthetic 작업 배정·평가 절차로 고정 스냅샷을 만들고 내보냅니다.
 
 ```sh
-hm --db source.db exchange export --protocol comparison-1 --snapshot report-1 --id 33333333-3333-4333-8333-333333333333 --out package.json
+node dist/cli.js --db source.db exchange export --protocol comparison-1 --snapshot report-1 --id 33333333-3333-4333-8333-333333333333 --out package.json
 ```
 
 재시도에는 같은 package UUID를 사용합니다. 다른 내용의 기존 파일은 덮어쓰지
@@ -24,7 +27,7 @@ hm --db source.db exchange export --protocol comparison-1 --snapshot report-1 --
 3. 작업·프로젝트 삭제 또는 원본 identity 충돌 뒤 삭제 통지를 내보냅니다.
 
 ```sh
-hm --db source.db exchange export-deletions --namespace 11111111-1111-4111-8111-111111111111 --id 44444444-4444-4444-8444-444444444444 --out deletion.json
+node dist/cli.js --db source.db exchange export-deletions --namespace 11111111-1111-4111-8111-111111111111 --id 44444444-4444-4444-8444-444444444444 --out deletion.json
 ```
 
 프로젝트 삭제 뒤에도 가능합니다. 이전에 내보낸 파일을 원격으로 삭제하지 않으며,
@@ -40,15 +43,15 @@ invalid_exchange_package는 비공개·알 수 없는 필드나 잘못된 형식
 
 ## 가져오기와 로컬 삭제
 
-`hm --db team.db project add destination --root .`로 수신 프로젝트를 등록합니다.
+`node dist/cli.js --db team.db project add destination --root .`로 수신 프로젝트를 등록합니다.
 영문 절차의 로컬 digest 계산 명령으로 검토한 프로토콜·variant를 고정하고,
 mapping.json의 REPLACE_WITH_REVIEWED_DIGEST를 실제 값으로 바꿉니다. 모든 stratum의
 writer를 선언해야 합니다. namespace는 인증 수단이 아니며 신뢰한 발신자의 파일만 받으세요.
 
 ```sh
-hm --db team.db exchange mapping register --config mapping.json
-hm --db team.db exchange import --file package.json --project destination
-hm --db team.db exchange import --file package.json --project destination
+node dist/cli.js --db team.db exchange mapping register --config mapping.json
+node dist/cli.js --db team.db exchange import --file package.json --project destination
+node dist/cli.js --db team.db exchange import --file package.json --project destination
 ```
 
 두 번째 가져오기는 replayed이며 사용량을 더하지 않습니다. 삭제·identity 충돌은
@@ -60,9 +63,9 @@ hm --db team.db exchange import --file package.json --project destination
 반환하지만 삭제는 적용됩니다. 저장소 쓰기 실패 시에는 전체 트랜잭션을 취소합니다.
 
 ```sh
-hm --db team.db exchange delete-task --project destination --shared-project 22222222-2222-4222-8222-222222222222 --task task-1
-hm --db team.db exchange retention set --project destination --shared-project 22222222-2222-4222-8222-222222222222 --days 30
-hm --db team.db exchange retention apply --project destination --shared-project 22222222-2222-4222-8222-222222222222
+node dist/cli.js --db team.db exchange delete-task --project destination --shared-project 22222222-2222-4222-8222-222222222222 --task task-1
+node dist/cli.js --db team.db exchange retention set --project destination --shared-project 22222222-2222-4222-8222-222222222222 --days 30
+node dist/cli.js --db team.db exchange retention apply --project destination --shared-project 22222222-2222-4222-8222-222222222222
 ```
 
 가져온 자료의 보존기간은 원본과 별도로 명시합니다. 확인된 finalized_at이 기간을 넘으면
@@ -91,9 +94,10 @@ mapping의 전체 목록을 넣습니다. 두 번째 stratum을 다른 원본이
 전체 프로토콜·variant 설정과 검토한 digest는 동일해야 합니다.
 
 ```sh
-hm --db team.db team snapshot create --config team-snapshot.json
-hm --db team.db team report team-report-1 --format json
-hm --db team.db team report team-report-1 --format markdown
+node dist/cli.js --db team.db team snapshot create --config team-snapshot.json
+node dist/cli.js --db team.db team report team-report-1 --format json
+node dist/cli.js --db team.db team report team-report-1 --format markdown
+node dist/cli.js --db team.db team report team-report-1 --format markdown-readable
 ```
 
 같은 ID·요청은 같은 고정 결과를 반환합니다. 갱신된 자료에는 새 snapshot ID가 필요합니다.
@@ -114,13 +118,16 @@ missing·excluded·error·unmeasurable을 구별하며 cached/reasoning 부분�
 삭제 뒤에는 통지를 직접 전달하고 가져오세요.
 
 ```sh
-hm --db team.db exchange import --file deletion.json --project destination
-hm --db team.db team report team-report-1 --format json
+node dist/cli.js --db team.db exchange import --file deletion.json --project destination
+node dist/cli.js --db team.db team report team-report-1 --format json
 ```
 
 보고서는 과거 과제·합계·입력·hash·출처를 제거한 무효화 표식만 반환합니다.
 비교에 속한 모든 writer가 대상입니다. 수신 측 개별 삭제·보존기간·프로젝트 삭제도
 같은 경로를 사용하며 오래된 파일이나 새 package/snapshot ID로 복구할 수 없습니다.
+
+`markdown-readable`은 기존 스냅샷의 표를 표시하며 추가 측정·집계를 하지 않습니다.
+기존 JSON/Markdown과 고정 스냅샷 바이트는 유지됩니다.
 
 ## 재현 가능한 오프라인 검증
 

@@ -2,7 +2,9 @@
 
 See [the exchange contract](../decisions/011-team-file-exchange.md) and
 [task comparison](task-comparison.md). This is offline synthetic validation, not
-real experiment activation or a complete-usage claim.
+real experiment activation or a complete-usage claim. Functional-pilot and live
+team data are unsupported here. Build the checkout first; every command below
+uses `node dist/cli.js` with an explicit database.
 
 1. Register a project and freeze a complete synthetic protocol in a new dedicated
    store. Before tasks, register a source configuration file:
@@ -12,14 +14,14 @@ real experiment activation or a complete-usage claim.
 ```
 
 ```sh
-hm --db source.db exchange source register --config source.json
+node dist/cli.js --db source.db exchange source register --config source.json
 ```
 
 2. Use the existing synthetic comparison lifecycle and create a frozen snapshot.
    Then explicitly export it:
 
 ```sh
-hm --db source.db exchange export --protocol comparison-1 --snapshot report-1 --id 33333333-3333-4333-8333-333333333333 --out package.json
+node dist/cli.js --db source.db exchange export --protocol comparison-1 --snapshot report-1 --id 33333333-3333-4333-8333-333333333333 --out package.json
 ```
 
 Retain the same package UUID for retries. A conflicting existing output file is
@@ -29,7 +31,7 @@ never overwritten. First export seals identities; later alias extension fails
 3. After task/project deletion or source identity conflict, transmit a compact notice:
 
 ```sh
-hm --db source.db exchange export-deletions --namespace 11111111-1111-4111-8111-111111111111 --id 44444444-4444-4444-8444-444444444444 --out deletion.json
+node dist/cli.js --db source.db exchange export-deletions --namespace 11111111-1111-4111-8111-111111111111 --id 44444444-4444-4444-8444-444444444444 --out deletion.json
 ```
 
 This command works after project deletion. It does not remove earlier exported
@@ -46,7 +48,7 @@ Create the team report before applying deletion notices; retirement is irreversi
 
 ## Import and local controls
 
-Register a destination project with `hm --db team.db project add destination --root .`.
+Register a destination project with `node dist/cli.js --db team.db project add destination --root .`.
 Review the producer protocol, variants, shared project and expected writers. From a
 built repository, obtain their canonical pin locally (no network):
 
@@ -65,9 +67,9 @@ stratum, including writers whose files have not arrived. Namespace declarations 
 not authenticate a sender. Only accept files from your explicitly trusted exchange.
 
 ```sh
-hm --db team.db exchange mapping register --config mapping.json
-hm --db team.db exchange import --file package.json --project destination
-hm --db team.db exchange import --file package.json --project destination
+node dist/cli.js --db team.db exchange mapping register --config mapping.json
+node dist/cli.js --db team.db exchange import --file package.json --project destination
+node dist/cli.js --db team.db exchange import --file package.json --project destination
 ```
 
 The second import reports `replayed`; it adds no usage. A deletion/conflict retires
@@ -79,9 +81,9 @@ the deletion DID commit. Storage failure rolls back the transaction.
 Local imported-task deletion and its separate retention policy:
 
 ```sh
-hm --db team.db exchange delete-task --project destination --shared-project 22222222-2222-4222-8222-222222222222 --task task-1
-hm --db team.db exchange retention set --project destination --shared-project 22222222-2222-4222-8222-222222222222 --days 30
-hm --db team.db exchange retention apply --project destination --shared-project 22222222-2222-4222-8222-222222222222
+node dist/cli.js --db team.db exchange delete-task --project destination --shared-project 22222222-2222-4222-8222-222222222222 --task task-1
+node dist/cli.js --db team.db exchange retention set --project destination --shared-project 22222222-2222-4222-8222-222222222222 --days 30
+node dist/cli.js --db team.db exchange retention apply --project destination --shared-project 22222222-2222-4222-8222-222222222222
 ```
 
 A finalized task older than the configured period retires its whole imported
@@ -110,10 +112,10 @@ list; each source is registered with only its owned strata. Both source protocol
 must have the same reviewed full settings/variants and digest.
 
 ```sh
-hm --db team.db team snapshot create --config team-snapshot.json
-hm --db team.db team report team-report-1 --format json
-hm --db team.db team report team-report-1 --format markdown
-hm --db team.db team report team-report-1 --format markdown-readable
+node dist/cli.js --db team.db team snapshot create --config team-snapshot.json
+node dist/cli.js --db team.db team report team-report-1 --format json
+node dist/cli.js --db team.db team report team-report-1 --format markdown
+node dist/cli.js --db team.db team report team-report-1 --format markdown-readable
 ```
 
 `json` remains the default. Existing `json` and `markdown` output and frozen
@@ -152,8 +154,8 @@ Recruitment registration counts are unavailable; no inference/adoption is enable
 After retirement, explicitly deliver and import the notice:
 
 ```sh
-hm --db team.db exchange import --file deletion.json --project destination
-hm --db team.db team report team-report-1 --format json
+node dist/cli.js --db team.db exchange import --file deletion.json --project destination
+node dist/cli.js --db team.db team report team-report-1 --format json
 ```
 
 The report returns an invalidated marker without its former tasks, totals, input,

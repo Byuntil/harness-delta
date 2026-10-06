@@ -1,135 +1,150 @@
-# Observed task cost at fixed reference rates
+# Read an observed task cost estimate
 
-This metadata-only report estimates recorded usage from every linked session of
-one task, including parent, child and rework sessions. It reads stored events,
-never session files. It does not establish complete topology, source support,
-whole-task usage, savings or an adoption decision (R04/R05/R06). Parent/child
-counter overlap must already have been excluded by the source; this report cannot
-validate that from aggregate counters. Complete cost remains unavailable.
+[한국어](observed-cost.ko.md) · [Task procedure](workflow-quickstart.md)
 
-## Select an immutable table explicitly
+This report prices **eligible stored observations** at an explicit reference rate.
+It reads database events, not session files. It starts no product or model request.
+`complete_amount` is always null. A partial estimate is not your bill, savings or an adoption result.
+Linked root/child/rework events contribute only when their source and interval are eligible.
+This report cannot qualify a source or prove that parent/child counters do not overlap.
 
-The checked-in [reference table](../../config/prices/openai-standard-short-2026-10-04.json)
-is an OpenAI API **Standard, short-context** pricing snapshot, checked on
-**2026-10-04**. The unit is **USD per 1,000,000 tokens**. Its `as_of` is the
-snapshot date, not a claim that prices first took effect at midnight that day.
+## 1. Select the rate table
+
+Use the same database as the measured task. Select the table explicitly.
+For a pilot with an already registered `prices-1`, skip this registration example.
+
+The checked-in [reference table](../../config/prices/openai-standard-short-2026-10-04.json) is a fixed OpenAI API Standard, short-context snapshot checked on **2026-10-04**.
+Its unit is USD per 1,000,000 tokens. `as_of` is the verification date, not the effective-date claim.
 
 | Exact model | Ordinary input | Cache read | Cache write | Output |
 | --- | ---: | ---: | ---: | ---: |
 | gpt-6-astra | 10 | 1 | 12.5 | 50 |
 | gpt-6.1-sol | 2 | 0.1 | 2.5 | 10 |
 
-Source ID `openai-api-pricing-2026-10-04` refers to the official
-[API pricing table](https://developers.openai.com/api/docs/pricing), under
-Flagship models, Standard, Short context. The
-[Astra announcement](https://openai.com/index/gpt-6-astra/) independently confirms
-standard input/output rates; the
-[Sol announcement](https://openai.com/index/introducing-gpt-6-1-sol/) also confirms
-its cached-input rate. The pricing table supplies cache-write rates for both.
-The official [Astra model page](https://developers.openai.com/api/docs/models/gpt-6-astra)
-and [Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
-define long-context pricing as requests with more than 272K input tokens; this
-snapshot uses the reference rates for at most 272K input tokens per request.
+The source is the [official API pricing table](https://developers.openai.com/api/docs/pricing), Flagship models / Standard / Short context.
+The [Astra announcement](https://openai.com/index/gpt-6-astra/) confirms standard input/output rates.
+The [Sol announcement](https://openai.com/index/introducing-gpt-6-1-sol/) also confirms its cached-input rate.
+The pricing table supplies cache-write rates.
+The [Astra model page](https://developers.openai.com/api/docs/models/gpt-6-astra) and [Sol model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) distinguish long context above 272K input tokens.
+This snapshot uses reference rates at or below that boundary.
 
-This table is a **fixed comparison reference**: selecting it does not prove that
-observed requests used that API service tier or context range. Long-context,
-Fast/Ultrafast, Batch/Flex, regional processing and other pricing bases are not
-selected automatically. API reference estimates are not subscription bills or
-subscription usage allowances. No model aliases or substitutions are applied.
+**Rate notice:** Selecting this table does not prove a request used its service tier or context range.
+Fast/Ultrafast, Batch/Flex, long-context and regional rates are not chosen automatically.
+API estimates do not measure subscription billing or subscription allowance use.
+No model aliases or rate substitutions apply.
 
-From the repository checkout, using the database that already contains your
-registered task's authorized usage:
+1. If this table is the agreed reference, register it.
 
-```sh
-node dist/cli.js --db .harness-delta/local.sqlite price-table register \
-  --config config/prices/openai-standard-short-2026-10-04.json
-node dist/cli.js --db .harness-delta/local.sqlite price-table estimate-task task-1 \
-  --price-table openai-standard-short-2026-10-04 \
-  --cutoff 2026-10-05T00:00:00Z
-```
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table register \
+     --config config/prices/openai-standard-short-2026-10-04.json
+   ```
 
-Use your explicit database, task ID and cutoff. The examples do not launch a
-product CLI, log in, read credentials or collect new data. The cutoff is exclusive;
-events before the task start and at/after task finalization are excluded. Only
-recorded active intervals contribute. Explicit collection-loss, error and excluded
-intervals from both `observations` and `observation_gaps` are conservatively
-excluded across the task. Generic `unmeasurable/incomplete` observations and
-`incomplete`/`not_available` gaps describe unknown coverage and retain independently
-observed eligible events; complete cost still remains null. Both metadata tables
-and the versioned window policy participate in the observation hash, and gap
-reasons remain visible. A Claude out-of-window span currently marks the entire
-listener window offline, which can conservatively exclude valid companion usage.
-Excluded event counts, window policy and the observation-window hash are reported.
-Paused or unobserved intervals are not backfilled. Deleting a task makes subsequent
-estimates fail rather than restoring prior data.
+2. Read its registered contents.
 
-## Choose a legacy input basis
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table show openai-standard-short-2026-10-04
+   ```
 
-The default `output-only-v1` prices known legacy output only. V1 events do not
-record a verified disjoint ordinary/cache-write input split, so their input cost
-stays unavailable. To request a descriptive assumption explicitly:
+Expected: immutable rates and the selected source/version.
+Identical registration is idempotent. Changed content under one ID fails.
+For different rates, select a new ID/version prospectively; a frozen protocol keeps its original table.
+
+For another model, provide your explicitly chosen rates or omit the model.
+Use the complete `prices.json` example with a new ID/version/source/date, one currency, `unit_tokens`, display policy and exact component rates.
+Record the source URL, tier/context scope and verification date beside your local configuration.
+A user reference rate is not an official vendor price.
+A missing model remains unavailable; do not use another model's price.
+The checked-in bounded table deliberately omits `gpt-6-sol` and other models.
+
+## 2. Create the estimate
+
+Prerequisite: authorized task observations already exist in this database.
+Replace the task/table IDs if your pilot uses other identifiers.
+Capture the UTC cutoff after the observations you intend to include:
 
 ```sh
-node dist/cli.js --db .harness-delta/local.sqlite price-table estimate-task task-1 \
-  --price-table openai-standard-short-2026-10-04 \
-  --cutoff 2026-10-05T00:00:00Z \
-  --input-basis cache-read-remainder-ordinary-v1
+reportCutoff=$(node -p 'new Date().toISOString()')
 ```
 
-This basis prices `(total input - cached input)` as ordinary input and cached
-input as cache read. It assumes the remainder contains no separately billed cache
-writes; unobserved cache writes have **not** been verified as zero. It cannot be
-used to certify complete cost. Missing total/cache counters withhold the input
-estimate; cache exceeding total input fails. Reasoning output is already included
-in output total and is never added again. V2 events retain their recorded disjoint
-billing components and attribution regardless of the legacy basis selection.
-
-The JSON report embeds immutable table contents and their SHA-256 hash, a hash of
-the deduplicated usage snapshot, formula
-version `decimal160-disjoint-v1`, report version `observed-cost-v1`, the chosen
-input basis, observation boundaries, event/session counts, assumed input event
-count and missing/unpriced reasons. Decimal amounts are exact strings; rounding
-is for display only. `partial_amount` sums available components and may include
-the explicitly selected assumption. `complete_amount` is always null. Empty or
-entirely unavailable observations produce null partial cost; an observed zero
-remains `"0"`. Output-only estimates and estimates with missing rates should not
-be compared as if they price the same components. The existing task/comparison
-reports and production completeness gates retain their current behavior.
-
-## User-defined versioned rates and missing models
-
-For a model without verified public prices, omit its entries so cost stays
-unavailable, or supply your explicit reference rates through an ordinary
-`price-table register --config` file. Use the reference table's existing strict
-shape: a new `id`, `version`, `source_id`, `as_of`, one currency, `unit_tokens`,
-rounding/display policy, and exact `(product, model, component)` decimal-string
-rates. Record the source URL or user-selected basis, verification date, tier and
-context scope beside the configuration; a user-defined rate is not an official
-vendor price. Never substitute another model's rate. `gpt-6-sol` and other models
-are deliberately absent from this bounded snapshot.
-
-Registration of identical content is idempotent. Changed contents under the same
-ID fail; choose a new ID/version and select it explicitly for a new comparison.
-Changing a reference table never changes stored usage or a protocol's immutable
-price-table binding. No operational prices or missing settings are generated by
-default.
-
-Offline checks:
+Estimate with the default legacy output-only basis:
 
 ```sh
-npm test -- tests/observed-cost.test.ts tests/observed-cost-cli.test.ts tests/pricing.test.ts tests/task-cost.test.ts
-npm run check
+node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-task task-1 \
+  --price-table prices-1 --cutoff "$reportCutoff" --input-basis output-only-v1
 ```
 
-Public fixtures are synthetic. These tests establish arithmetic and reporting
-behavior, not production source completeness or real experiment readiness.
+If you selected the checked-in table instead, replace `prices-1` with `openai-standard-short-2026-10-04`.
+This operation estimates existing data; it does not collect additional usage or inspect authentication.
 
-The report's `coverage` object is produced from the same task window and recorded
-workflow journals. It exposes verified guarded source scope/identity, unknown
-facts and an ineligible decision; a source-change failure retains an identity
-violation. Journals finishing after the cutoff cannot justify earlier coverage.
-`observed_components_priced` describes only eligible recorded usage under the
-explicit selected table. Even `true` does not establish whole-task price coverage,
-request-universe completeness or terminal delivery. Empty windows have null
-evidence and an ineligible decision. The coverage snapshot hash binds the journal
-metadata, eligible events, rates and input basis; no source paths are returned.
+Expected: `partial_amount`, null `complete_amount`, explicit reasons and observation-window evidence.
+If the task was deleted, the estimate fails. Deletion does not restore earlier events.
+The [workflow comparison report](workflow-quickstart.md#9-create-and-read-the-report) freezes its own assignment/follow-up window.
+This task estimate uses task-start/active intervals and cutoff/finalization.
+Do not assume the two reports include identical time windows.
+
+## 3. Choose a legacy input basis only when intended
+
+| Basis | Effect |
+| --- | --- |
+| `output-only-v1` | Price known legacy output; legacy input split stays unavailable |
+| `cache-read-remainder-ordinary-v1` | Assume ordinary input is total input minus cached input; price cached input as cache read |
+
+V1 events lack a verified disjoint ordinary/cache-write split.
+The remainder basis assumes no separately billed cache writes in that remainder.
+Unobserved cache writes have **not** been verified as zero.
+Missing total/cache counters withhold the input estimate; cache above total input fails.
+Reasoning output is already included in total output. Do not add it again.
+V2 events retain their recorded disjoint billing components and attribution with either legacy basis.
+
+If the assumption is agreed, request it explicitly:
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-task task-1 \
+  --price-table prices-1 --cutoff "$reportCutoff" --input-basis cache-read-remainder-ordinary-v1
+```
+
+Expected: the report names the basis and counts assumed input events.
+Compare estimates only when rates, component coverage, input assumptions and windows are comparable.
+An output-only estimate is not equivalent to an estimate with assumed input prices.
+
+## 4. Read amount, missingness and coverage separately
+
+| Field/state | Meaning |
+| --- | --- |
+| `partial_amount` | Sum of eligible priceable components; can contain an explicit input assumption |
+| `partial_amount: "0"` | Eligible priced observations sum to zero |
+| `partial_amount: null` | No eligible priced amount; not zero |
+| `complete_amount: null` | Complete task cost is unavailable |
+| `unpriced_events` | Recorded events have at least one component without a rate |
+| `unavailable_events` | Events have no priceable partial amount |
+| `excluded_event_count` | Stored candidates excluded by the observation-window policy |
+| Missing / error / excluded / unmeasurable | Different reading states; none is observed zero |
+| `observed_components_priced: true` | Eligible observed components are priceable; whole-task coverage is still unknown |
+
+Read the reasons with the amounts. Empty or entirely unavailable observations have null partial cost.
+Usage absence, unknown attribution/components and missing rates must remain visible.
+Never add cached/reasoning subsets again or infer parent/child completeness from an aggregate.
+
+The cutoff is exclusive. Events before task start and at/after finalization do not contribute.
+Only recorded active intervals contribute. Paused and unobserved intervals are not backfilled.
+Explicit loss/error/excluded intervals conservatively exclude events across the task.
+Generic incomplete/unavailable coverage retains independently observed eligible events; it does not make them complete.
+A candidate Claude out-of-window span can mark its listener window offline and exclude companion events conservatively.
+
+The `coverage` object exposes guarded scope/identity facts, unknown facts and an ineligible decision.
+A source-change failure retains an identity violation.
+Journals ending after the cutoff cannot prove earlier coverage.
+Empty windows have null coverage evidence and an ineligible decision.
+Priceability does not establish request-universe completeness or terminal delivery.
+
+## Provenance and verification reference
+
+The JSON includes table contents/hash, deduplicated usage hash, formula `decimal160-disjoint-v1`, report version `observed-cost-v1` and input basis.
+It also includes boundaries, event/session counts, assumed input counts and missing/unpriced reasons.
+Amounts are decimal strings; rounding is for display.
+Observation tables, gap reasons and the versioned window policy participate in the observation-window hash.
+The coverage hash binds eligible events, journal metadata, rates and basis; it returns no source paths.
+
+Developer arithmetic/reporting checks are listed in [CONTRIBUTING](../../CONTRIBUTING.md#observed-cost-verification).
+They use synthetic fixtures and do not establish production completeness or real experiment effectiveness.

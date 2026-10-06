@@ -13,7 +13,9 @@ semantics digest and validation kind. The production source registry contains th
 and the separate [fresh root/single-direct-child workflow](codex-workflow-01600-direct-child-source-readiness.md),
 each with real engine operational evidence and `complete_cost: false`. The child
 profile is read-only and does not support family resume; broader topology is
-unqualified. Assigned ordinary CLI wiring is offline evidence. Claude general
+unqualified. Assigned CLI wiring has synthetic coverage and later bounded actual
+root functional observations; see the root record. The child coordinator remains
+offline-verified separately from its shared-engine native qualification. Claude general
 workflow is absent from this registry, even though its exact bounded internal
 synchronous probe succeeded. The production analysis
 registry remains empty. Synthetic coverage cannot authorize real allocation or

@@ -1,5 +1,8 @@
 # Codex version admission and partial measurement
 
+Developer admission procedure for the legacy file adapter. It is not the first
+installation path; use [the task procedure](workflow-quickstart.md).
+
 This workflow supports exact, source-reviewed Codex rollout versions. It does not
 establish complete task tokens, child aggregation, interactive linkage or an A/B
 adoption decision. Read [ADR 007](../decisions/007-adapter-version-profiles.md).

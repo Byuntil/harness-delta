@@ -7,7 +7,8 @@ application evidence, human outcomes and assignment reports using synthetic task
 **V1 real randomized experiment allocation is disabled.** V2 supports the limited
 [Codex 0.160.0 root workflow](task-native-workflow.md) with explicit user inputs and
 partial usage only. Complete cost and inference remain unavailable. The complete team workflow,
-file exchange, method validation and validated inference are later gates. Existing
+real-data file exchange, method validation and validated inference remain gated.
+Separate [synthetic file exchange](team-file-exchange.md) is implemented. Existing
 local measurement continues under its own [runbook](local-measurement.md).
 See [ADR 008](../decisions/008-task-comparison-workflow.md) and
 [requirements R09/R10](../requirements.md#r09---randomized-task-comparisons).
@@ -215,9 +216,10 @@ valid only for self-attestation. Product/model/global settings remain declaratio
 
 The synthetic CLI deliberately cannot `session link` a synthetic product or read a
 real session in this validation store. Test fixtures inject synthetic usage only in
-tests. Ordinary Codex/Claude collection remains separate; a future admitted real
-workflow will require supported exact versions, an explicit task/session/source map,
-a running collector and explicit confirmation linkage (`session link --confirmation`).
+tests. Ordinary Codex/Claude collection remains separate. The admitted v2 native
+workflow uses `workflow codex` and its own confirmation/source boundary.
+The generic file path still requires exact versions, an explicit task/session/source
+map, a running collector and confirmation linkage (`session link --confirmation`).
 Neither assignment nor confirmation reads session contents or backfills earlier usage.
 
 ## Create a synthetic assignment report
@@ -297,8 +299,9 @@ provided. See ADR 008 for the full time, revision and deletion contracts.
 
 Existing task reports continue to show missing/partial usage, never a full randomized
 endpoint or adoption result. A synthetic task without injected observations has
-missing usage, not zero. Synthetic assignment reports are available as described below. Team exchange,
-network transmission, validated inference and v1 real allocation remain unavailable.
+missing usage, not zero. Synthetic assignment reports are available as described above. Separate synthetic
+team exchange is implemented; real-data sharing, network transmission, validated
+inference and v1 real allocation remain unavailable.
 
 ```sh
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite delete task task-1
@@ -309,9 +312,11 @@ Deletion invalidates the experiment and stops new assignments; related evidence 
 private replay queues are removed. Known identity/alias tombstones reject reuse.
 Retained tasks may finish their normal lifecycle. Project deletion removes its
 comparison data; explicitly configured retention uses the same deletion path.
-Deletion cannot erase exported copies (export itself is not implemented here).
+Deletion cannot erase exported copies. The separate synthetic exchange path
+provides deletion notices; it does not add live-data sharing to this v1 example.
 
 For the additive v2 flexible model workflow, explicit prices and independent
 readiness gates, see [flexible comparison](flexible-comparison.md). Production
-flexible collection is admitted only for the exact Codex 0.160.0 root workflow;
+flexible collection is admitted for exact Codex 0.160.0 root and separate bounded
+direct-child workflow profiles;
 complete cost and inference remain unavailable.

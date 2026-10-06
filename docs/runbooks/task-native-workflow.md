@@ -18,8 +18,9 @@ See [the source evidence and limits](../validation/codex-workflow-01600-source-r
 The CLI connects per-invocation selected instructions, launch, explicit
 resume/link, foreground collection and durable stop. Unqualified exact versions
 and profiles fail before reading selected instructions or launching a product.
-The actual run validates the shared execution engine; production coordinator/CLI
-coverage is offline. Only the bounded direct-child flow below is admitted;
+The admission run validates the shared execution engine. Coordinator/CLI coverage
+includes synthetic tests and later bounded actual root functional observations; see
+[the evidence distinction](../validation/codex-workflow-01600-source-readiness.md#later-bounded-functional-observations). Only the bounded direct-child flow below is admitted;
 fork/compaction, deeper children, app support, complete cost and inference
 remain unavailable. Claude trace candidates are not production admissions.
 
@@ -32,6 +33,9 @@ incomplete whole-task cost and unvalidated inference. These are independent
 blockers; a writable configuration flag cannot admit a source.
 
 ## Begin an assigned task
+
+This is a command/source reference. Use the [task procedure](workflow-quickstart.md)
+for installation, complete input preparation and the human task sequence.
 
 Register and freeze the complete explicit v2 protocol, two immutable variants and
 price table using the [comparison commands](task-comparison.md). Synthetic checks
@@ -146,9 +150,11 @@ workflow stdout is discarded, so a read-only analysis answer is not returned by
 this measurement CLI. For a useful file-producing task, explicitly include a
 normal work-product destination in the prompt and approve root workspace-write
 permissions; keep that artifact separate from measurement data and reports. The
-existing native qualifications were read-only, so this write-mode invocation
-requires new supervised execution evidence. See the
-[small functional pilot preparation](functional-task-pilot.md). Runtime
+initial native qualifications were read-only. Later bounded write-mode functional
+observations exist: one failed configuration scope; a subsequent explicitly untrusted
+launch passed its monitored checks. They do not establish general settings isolation.
+See [the task procedure](workflow-quickstart.md) and
+[the evidence distinction](../validation/codex-workflow-01600-source-readiness.md#later-bounded-functional-observations). Runtime
 model/effort may be null or explicit native choices; actual context values are
 recorded per request. Null does not select a diagnostic model.
 
@@ -272,109 +278,9 @@ and whole-task completeness remain unqualified.
 
 ## One-shot Codex workflow qualification
 
-The root reader accepts legacy rollouts and native 0.160 paginated roots starting
-at ordinal0. Parent/fork/history-base/child-own-history markers remain rejected;
-the existing projection parser enforces contiguous ordinals. Native pagination
-is distinct from inherited history ([pinned ordinal implementation](https://raw.githubusercontent.com/openai/codex/a956835d020762cb2b570053af06f643a11c0ecc/codex-rs/rollout/src/ordinal.rs)).
-An empty or partial initial header keeps the hook acknowledgement pending within
-the existing five-second hook limit and invocation deadline. Complete malformed
-lines still stop immediately. The first failed stage and fixed allowlisted code
-are retained in the invocation journal/result; error bodies and causes are not.
-
-The internal manual `scripts/codex-workflow-qualification-command.mjs` entry now
-connects qualification intent to the same adapter engine. It is separate from
-production allocation and does not modify a registry or turn the synthetic
-factory into a native launcher. Preparation starts no product or auth command:
-
-```sh
-node scripts/codex-workflow-qualification-command.mjs prepare \
-  /absolute/new-private-qualification-directory /absolute/pinned-codex \
-  112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b \
-  /absolute/existing-codex-home \
-  /absolute/harness-delta/scripts/conformance/candidate-start-recorder.mjs
-```
-
-Preparation creates an isolated legacy task, empty fixture, qualification-only
-lease, two immutable harness artifacts and one selected variant. No comparison
-assignment or production source is admitted. The mode-0600 intent pins artifact,
-binary, Node, recorder and built implementation hashes. Its runtime conditions
-are launch `gpt-6-astra/high` and then `gpt-6.1-sol/high` in the same root UUID;
-these are qualification conditions, not product defaults or runtime restrictions
-for normal development. It requests no child or other tools, uses read-only
-sandbox and the existing authenticated home without opening prior transcripts or
-credentials. The assistant performs no login, update or auth-status lookup.
-
-After explicit user approval and execution-policy allowance, a trusted executor
-provides the intent SHA and approval reference in a private consent JSON:
-
-```json
-{
-  "intent_sha256": "<prepared-intent-SHA256>",
-  "approval_reference": "<actual-user-approval-reference>",
-  "actual_model_run": true,
-  "transient_harness_hooks": true,
-  "marker_response_validation": true
-}
-```
-
-The file is an executor witness, not independent proof of user permission.
-
-```sh
-node scripts/codex-workflow-qualification-command.mjs execute \
-  /absolute/qualification/execution-intent.json /absolute/approved-consent.json
-```
-
-Execute fsyncs an exclusive permanent reservation before any native spawn. One
-shared absolute 180-second lease covers launch, resume and reopened collection;
-there is no new budget at resume and no automatic retry/fallback. Native CLI is
-intended to spawn twice with one own response per phase. Additional responses,
-missing marker/usage, mismatched runtime/source or expiry fail the single attempt.
-This bounds supervised process observation, not backend requests/tokens/billing.
-
-Only this qualification lane enables bounded transient JSON stdout inspection.
-It compares each selected harness marker in memory after root binding, rejects
-unexpected items, and retains marker booleans plus normalized usage/runtime
-metadata. It closes/reopens SQLite and collects a baseline to prove replay adds
-zero under the same task/session. `execution-evidence.json` records actual spawn
-count, shared times, selected manifest, phase status, marker booleans, own usage,
-runtime and replay, never raw instructions/prompts/output. A spawn with no usage
-evidence leaves backend model usage unknown. Normal production stdout handling
-remains unchanged.
-
-The separately authorized successful root run supports the code-owned registration
-for this exact 0.160 root workflow with `complete_cost: false`. The separate child
-run supports only the bounded direct-child profile above. The manual entry
-itself never modifies the registry. Neither run qualifies fork/compaction,
-prove all-request coverage or open cost/analysis gates. Test-only Node dependencies
-produce `validation_kind: synthetic`; the public native entry rejects those
-intents. Qualification does not prove the production allocation/coordinator path
-has run live before admission; it verifies their shared execution engine.
-
-Both development and qualification invocations explicitly use `on-request` with
-`auto_review`, then verify the declared native context. The pinned
-[exec configuration resolver](https://github.com/openai/codex/blob/a956835d020762cb2b570053af06f643a11c0ecc/codex-rs/exec/src/lib.rs#L731)
-otherwise installs a headless `never` override. No sandbox or hook-trust bypass
-flag is used, and managed restrictions remain authoritative.
-
-The separate manual `prepare-child` command uses the same preparation arguments
-as `prepare`, but writes `topology: "root_direct_child"` into a new intent/lease.
-It authorizes no execution. After new explicit execution-session consent, its
-one-shot plan is one Astra/high root launch and one Sol/high fresh direct child,
-with one shared 180-second deadline, followed by database reopen and replay with
-no additional native launch. It plans up to four observed own responses (three
-root, one child); more than four observed responses, missing/extra child evidence,
-wrong marker/runtime/topology or unexpected tools stop the attempt. Observed
-limits are not hard bounds on backend requests, tokens or costs.
-
-The root-resume lease rejects child inputs. A family lease binds its topology,
-implementation, selected manifest, binary and child identity to the same reserved
-intent. Qualification inspects only bounded transient marker/collaboration JSON
-stdout using the
-[pinned exec contract](https://github.com/openai/codex/blob/a956835d020762cb2b570053af06f643a11c0ecc/codex-rs/exec/src/exec_events.rs#L195).
-It retains metadata/counts/booleans, not collaboration prompts or agent text.
-Synthetic CLI/lease tests cover this path. The separately approved successful native
-family qualification is documented in the direct-child source evidence above; it
-is not a live user A/B run. The command never modifies the source registry.
+Developer-only qualification commands and historical consent/lease/marker rules
+are preserved in [the admission record](../validation/codex-workflow-01600-source-readiness.md#one-shot-codex-workflow-qualification).
+They are not part of an ordinary assigned task and do not grant actual-run approval.
 
 ## Continue, finish and compare
 
@@ -382,7 +288,9 @@ The existing task pause/resume, first-completion, assessment and rework commands
 retain their behavior. Explicit session linking and foreground collection remain
 subject to their own admitted profiles and scope rules; this common workflow
 does not admit a candidate or authorize automatic session discovery/backfill.
-See [session continuation](session-continuation.md).
+Use [the task continuation procedure](workflow-quickstart.md#7-resume-or-use-another-session)
+for Codex 0.160.0. [Legacy session continuation](session-continuation.md) describes
+the separate generic file path and internal candidates.
 
 Human assessment supplies the fixed criteria:
 

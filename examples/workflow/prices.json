@@ -1,0 +1,36 @@
+{
+  "id": "prices-1",
+  "version": "example-rates-v1",
+  "currency": "USD",
+  "source_id": "synthetic-example-not-vendor-prices",
+  "as_of": "2026-01-01T00:00:00Z",
+  "unit_tokens": 1000000,
+  "display_decimals": 6,
+  "rounding": "half_even",
+  "entries": [
+    {
+      "product": "codex",
+      "model": "example-model",
+      "component": "ordinary_input",
+      "price_per_unit": "1"
+    },
+    {
+      "product": "codex",
+      "model": "example-model",
+      "component": "cache_read",
+      "price_per_unit": "0.1"
+    },
+    {
+      "product": "codex",
+      "model": "example-model",
+      "component": "cache_write",
+      "price_per_unit": "1.25"
+    },
+    {
+      "product": "codex",
+      "model": "example-model",
+      "component": "output",
+      "price_per_unit": "2"
+    }
+  ]
+}

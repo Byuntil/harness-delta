@@ -1,74 +1,52 @@
 # Harness Delta
 
-Local metadata measurement and harness comparison for real development tasks.
+Measure metadata for an assigned development task across explicitly linked sessions.
 
-**Status: local measurement preview with partial CLI observations.** Task lifecycle,
-explicit session linking, foreground collection, deletion/retention, and JSON/Markdown
-reports are implemented. Validated sequential CLI counters and limited command
-executions remain partial; complete task totals and unverified metrics stay null.
-See the [local runbook](docs/runbooks/local-measurement.md)
-([한국어 사용 안내](docs/runbooks/local-measurement.ko.md)) and
-[capability limits](docs/decisions/001-adapter-capabilities.md). For an assigned
-A/B task, start with the [first workflow run quickstart](docs/runbooks/workflow-quickstart.md)
-([한국어](docs/runbooks/workflow-quickstart.ko.md)).
+**Preview: partial local measurement.** Codex 0.160.0 has two separately admitted
+workflow profiles. Complete task cost, actual billing and inferential adoption
+remain unavailable. Claude's bounded internal probe is not general workflow support.
+Installation does not start collection. The package is private and uses Node.js 24.
+
+처음 설치하는 팀 사용자는 아래 작업 절차를 읽으세요.
+현재는 부분 로컬 측정 미리보기이며 전체 비용·실제 청구액·추론에 따른 도입 판정은 제공하지 않습니다.
+
+**Start here:** [Measure one assigned task](docs/runbooks/workflow-quickstart.md) ·
+[배정된 작업 하나 측정하기](docs/runbooks/workflow-quickstart.ko.md).
+The procedure covers installation → A/B setup → launch → stop/pause/resume/new session →
+human outcome → partial cost and missingness → recovery.
+
+## Documentation
+
+| Need | English | 한국어 |
+| --- | --- | --- |
+| First installation and functional pilot | [Task procedure](docs/runbooks/workflow-quickstart.md) | [작업 절차](docs/runbooks/workflow-quickstart.ko.md) |
+| Partial estimate and missing prices | [Observed cost](docs/runbooks/observed-cost.md) | [관측 비용](docs/runbooks/observed-cost.ko.md) |
+| Exact native/child contracts | [Native workflow](docs/runbooks/task-native-workflow.md) | 핵심 지원 범위는 [작업 절차](docs/runbooks/workflow-quickstart.ko.md) |
+| Flexible v2 configuration reference | [Flexible comparison](docs/runbooks/flexible-comparison.md) | 핵심 입력 준비는 [작업 절차](docs/runbooks/workflow-quickstart.ko.md) |
+| Existing older-version file collection | [Local measurement](docs/runbooks/local-measurement.md), [continuation](docs/runbooks/session-continuation.md) | [로컬 측정](docs/runbooks/local-measurement.ko.md) |
+| Developer synthetic checks | [V1 comparison](docs/runbooks/task-comparison.md), [exchange](docs/runbooks/team-file-exchange.md), [analysis](docs/runbooks/comparison-analysis-validation.md) | [V1 비교](docs/runbooks/task-comparison.ko.md), [교환](docs/runbooks/team-file-exchange.ko.md) |
+| Source admission and historical evidence | [Version admission](docs/runbooks/codex-version-admission.md), [validation records](docs/validation/), [decisions](docs/decisions/) | 개발·검증 기록은 영어로 보존 |
+
+The task and cost procedures have synchronized English/Korean versions.
+They use an STE-inspired style, without ASD compliance or certification claims.
+Unique architecture decisions and dated validation records remain available as evidence.
+They are not prerequisites to follow the task procedure.
 
 ## Development
 
-Use Node.js 24 and npm:
-
-```sh
-nvm install
-nvm use
-npm ci
-npm run check
-```
-
-Use your preferred version manager if you do not use nvm. Select Node 24 before
-installation; the project enforces the Node major version and pins dependencies.
-Local validation has covered macOS arm64. Other platforms remain unverified.
-
-Dependency installation also installs Husky. Each commit runs `npm run check`;
-the commit-msg hook validates Conventional Commit formatting. Select Node 24 in
-your terminal or Git client before committing. See the
-[Git hook instructions](CONTRIBUTING.md#git-hooks).
-
-| Command | Purpose |
-| --- | --- |
-| `npm test` | Run all tests |
-| `npm test -- tests/runtime.test.ts` | Check SQLite and decimal dependencies |
-| `npm run test:watch` | Watch tests |
-| `npm run lint` | Run ESLint with type-aware TypeScript rules |
-| `npm run lint:fix` | Apply supported lint fixes |
-| `npm run typecheck` | Check source and test types |
-| `npm run build` | Build ESM output and copy SQL assets to dist |
-| `npm run check:privacy` | Reject local records in the Git index |
-| `npm run check` | Run privacy guard, lint, type checking, tests, and build |
-| `npm pack --dry-run` | Inspect the package contents |
+Use [CONTRIBUTING](CONTRIBUTING.md) for Node 24 setup, checks, Git hooks and contribution rules.
+Agents use [AGENTS.md](AGENTS.md) and the [development workflow](docs/development/workflow.md).
+The [product requirements](docs/requirements.md) define collection and acceptance gates.
 
 SQL migrations live under `src/migrations` and are copied to `dist/migrations`.
-`src/index.ts` exports `Store` and strict event, reading, shared task/outcome, and
-monetary schemas. The local `hm` executable is also available as `node dist/cli.js`.
+`src/index.ts` exports `Store` and strict metadata schemas.
+`Store.putEvent` inserts once per source key: identical replay returns false;
+conflicting identity/data throws `event_conflict`.
+A registered project, task and linked session must exist before insertion.
+`Store.transaction` is synchronous; close the store when finished.
+Use the contract/store tests documented in CONTRIBUTING for these API boundaries.
 
-`Store.putEvent` inserts once per source key, returns false for identical replay,
-and throws `event_conflict` for a reused ID or source with different data. A
-registered project, task, and linked session must exist before event insertion.
-`Store.transaction` is synchronous; always close the store when finished.
-Run `npm test -- tests/contracts.test.ts tests/store.test.ts` for these boundaries.
-
-## Requirements and contribution
-
-- [Product requirements and acceptance gates](docs/requirements.md)
-- [Contribution guide](CONTRIBUTING.md)
-- [Shared agent instructions](AGENTS.md)
-- [Development and handoff workflow](docs/development/workflow.md)
-
-The project is designed to collect metadata only for registered projects, active
-measurement tasks, and linked sessions. Prompt/response content, source-code
-contents, and secrets are excluded. Installation does not start collection.
-
-Public documentation is in English. Personal plans, progress, and review records
-stay under the Git-ignored `.harness-delta/` directory; a fresh clone does not need
-them to build or contribute. Codex and Claude Code share a single `AGENTS.md`.
-
-The package remains `private: true` while under development. Publication name and
-channel are separate decisions. See the [MIT license](LICENSE).
+Collection excludes prompt/response text, source-code content and secrets from measurement data.
+Personal plans, databases and detailed reviews remain in Git-ignored `.harness-delta/`.
+A fresh clone does not need those records to build or contribute.
+See the [MIT license](LICENSE). Publication name/channel are separate decisions.

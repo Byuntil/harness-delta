@@ -7,7 +7,9 @@ reports remain readable unchanged. Use Node 24 and `npm run build`.
 
 ## Inputs and scope
 
-Use a dedicated synthetic store. Registration and offline synthetic tests require
+For synthetic checks, use a dedicated synthetic store. For the functional pilot, use
+a different dedicated database and the [task procedure](workflow-quickstart.md).
+Registration and offline synthetic tests require
 no product executable or model request. The production registry admits two separate Codex 0.160.0 profiles:
 [the root workflow](../validation/codex-workflow-01600-source-readiness.md) and
 [the fresh root/single-direct-child workflow](../validation/codex-workflow-01600-direct-child-source-readiness.md).
@@ -50,8 +52,15 @@ Task creation through comparison assignment uses schema_version 2 and task
 metadata schema_version 2 with initial_model nullable, replacing v1 model.
 The flag-based task register command remains v1. Null means unknown, not zero.
 
-For a first useful task, follow the [functional pilot preparation](functional-task-pilot.md).
-It reuses these contracts and keeps incomplete drafts separate from frozen inputs.
+For a first useful task, follow the [task procedure](workflow-quickstart.md)
+([한국어](workflow-quickstart.ko.md)). Its complete synthetic example set includes
+prices, both variants, instructions, a functional protocol and execution configs.
+Replace all operational choices before registration; keep incomplete drafts separate.
+Before an actual run, approve the project/task/profile, pinned binary and implementation
+identity, artifact manifests, runtime/sandbox, work-product destination, invocation
+count, timeout, no-retry rule and teardown. Previous qualification consent is consumed.
+Offline preparation starts no product, does not read authentication and grants no
+permission to commit, publish or run a model. Public fixtures remain synthetic.
 
 ## Immutable prices and commands
 
@@ -63,16 +72,16 @@ price_per_unit. Duplicate keys and changing an existing table ID are rejected.
 Select and document your prices explicitly; no current market prices are fetched.
 
 ```sh
-hm --db .harness-delta/demo/local.sqlite price-table register --config prices.json
-hm --db .harness-delta/demo/local.sqlite price-table show prices-1
-hm --db .harness-delta/demo/local.sqlite variant register --config variant-a.json
-hm --db .harness-delta/demo/local.sqlite variant register --config variant-b.json
-hm --db .harness-delta/demo/local.sqlite comparison register --config protocol.json
-hm --db .harness-delta/demo/local.sqlite comparison freeze comparison-1
-hm --db .harness-delta/demo/local.sqlite comparison assign --config assignment.json
-hm --db .harness-delta/demo/local.sqlite task config-history task-1
-hm --db .harness-delta/demo/local.sqlite comparison readiness comparison-1
-hm --db .harness-delta/demo/local.sqlite report task task-1 --cutoff 2027-01-02T00:00:00Z
+node dist/cli.js --db .harness-delta/demo/local.sqlite price-table register --config prices.json
+node dist/cli.js --db .harness-delta/demo/local.sqlite price-table show prices-1
+node dist/cli.js --db .harness-delta/demo/local.sqlite variant register --config variant-a.json
+node dist/cli.js --db .harness-delta/demo/local.sqlite variant register --config variant-b.json
+node dist/cli.js --db .harness-delta/demo/local.sqlite comparison register --config protocol.json
+node dist/cli.js --db .harness-delta/demo/local.sqlite comparison freeze comparison-1
+node dist/cli.js --db .harness-delta/demo/local.sqlite comparison assign --config assignment.json
+node dist/cli.js --db .harness-delta/demo/local.sqlite task config-history task-1
+node dist/cli.js --db .harness-delta/demo/local.sqlite comparison readiness comparison-1
+node dist/cli.js --db .harness-delta/demo/local.sqlite report task task-1 --cutoff 2027-01-02T00:00:00Z
 ```
 
 Create the local directory and register the project first, as in the existing
@@ -121,7 +130,10 @@ The exact Codex 0.160.0 `codex-workflow-own-response-v1` and separately admitted
 `codex-workflow-direct-child-v1` sources permit real local allocation and partial
 collection for a complete frozen v2 protocol, within each profile's supported
 scope. Their shared native engine has operational evidence; ordinary assigned
-CLI wiring has offline evidence. Unmatched
+CLI wiring has offline evidence; later bounded root workspace-write pilots also
+exercised actual assigned execution. The first failed configuration scope and the
+subsequent untrusted launch passed its monitored checks; see
+[the evidence distinction](../validation/codex-workflow-01600-source-readiness.md#later-bounded-functional-observations). Unmatched
 profiles, mixed unqualified products and invalidated protocols remain closed.
 The analysis registry is empty. Whole-task cost facts remain unknown without a
 validated complete producer. Synthetic test inputs do not become real experiment

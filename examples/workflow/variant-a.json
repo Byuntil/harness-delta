@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "id": "variant-a",
+  "harness_version": "a-v1",
+  "instruction_manifest_hash": "ce1feced0f644b39960fc540d6e08e1935905feee709b75fa8d16755baca46fb",
+  "policy_version": "example-policy-v1",
+  "policy_status": "eligible",
+  "runtime_policy": "flexible"
+}
