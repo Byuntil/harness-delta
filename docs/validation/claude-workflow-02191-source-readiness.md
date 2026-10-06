@@ -62,6 +62,10 @@ A launch fails before assignment: a 2.1.288 binary fails with `invalid_execution
 a 2.1.291 binary under a 2.1.288 configuration fails with `real_experiment_disabled`.
 Usage already stored with 2.1.288 labels stays readable, and reports still include it.
 Register a new protocol with the 2.1.291 profile and assign new tasks there.
+The unadmitted manual external Claude candidate stays pinned to the 2.1.288 probe
+binary. It is not a workflow admission: it prepares its files with an explicit
+pinned-candidate flag that the admitted workflow adapter never sets, and its
+coordinator runs in synthetic mode.
 
 ## Native evidence
 

@@ -12,6 +12,7 @@ import type { AssignmentRow } from '../allocation.js';
 import type { TaskRow } from '../lifecycle.js';
 import type { Store } from '../store.js';
 import { canonicalJson } from './comparison-snapshot.js';
+import { assertLegacyComparisonTiming } from '../external-session-contract.js';
 import { ComparisonSnapshotInputSchema, SnapshotAssignmentSchema, RevisionReasonSchema } from './comparison-contracts.js';
 /** Version 2 adds the late outcome disclosure; version 1 snapshots stay readable. */
 export const FlexibleDescriptiveVersionSchema = z.enum(['flexible-cost-descriptive-1', 'flexible-cost-descriptive-2']);
@@ -127,6 +128,7 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
     tasks,arms,relative_change:relative,adoption:{status:functional?'not_applicable':'inconclusive',reasons},limitations:['standardized_estimated_cost_is_not_actual_billing','whole_task_cost_unconfirmed_without_coverage','elapsed_is_not_human_labor','realized_model_is_descriptive_only'] }, 'invalid_snapshot');
 }
 export function captureFlexibleInput(store: Store, protocolId: string, reportId: string, cutoff: string, evaluatedAt: string, sequence: number, reason: FlexibleSnapshotInput['revision_reason'], supersedes: string|null): FlexibleSnapshotInput {
+  assertLegacyComparisonTiming(store,protocolId);
   const row=protocolRow(store,protocolId); const protocol=comparisonProtocol(store,row); if(protocol.schema_version!==2)throw new Error('unsupported_report_mode');
   const variants=protocol.variant_ids.map(id=>comparisonVariant(store,id));
   const assignments=store.all<AssignmentRow>('SELECT * FROM comparison_assignments WHERE protocol_id=? ORDER BY task_id',[protocolId]).filter(a=>Date.parse(a.assigned_at)<Math.min(Date.parse(cutoff),Date.parse(protocol.recruitment_end))).map(a=>{

@@ -36,6 +36,12 @@ test('probe preparation and binary verification keep 2.1.288 while the workflow 
     const prepared = await prepareClaudeNativeProbe(options(join(root, 'probe'))); await prepared.dispose();
     await expect(prepareClaudeNativeProbe(options(join(root, 'workflow')), { model: null, effort: null, instructions: 'SYNTHETIC', maxTurns: 1, requestLimit: 1,
       durationMs: 1000, permissions: 'read-only' })).rejects.toThrow(/^claude_probe_invalid_preparation$/);
+    // Only an explicitly pinned, unadmitted candidate keeps the probe binary in workflow-shaped preparation.
+    const pinned = await prepareClaudeNativeProbe(options(join(root, 'candidate')), { model: null, effort: null, instructions: 'SYNTHETIC', maxTurns: 1, requestLimit: 1,
+      durationMs: 1000, permissions: 'read-only', pinnedProbeCandidate: true }); await pinned.dispose();
+    await expect(prepareClaudeNativeProbe({ ...options(join(root, 'candidate-new')), binary: { path: '/synthetic/claude-2.1.291', version: '2.1.291', sha256: 'a'.repeat(64) } },
+      { model: null, effort: null, instructions: 'SYNTHETIC', maxTurns: 1, requestLimit: 1, durationMs: 1000, permissions: 'read-only', pinnedProbeCandidate: true }))
+      .rejects.toThrow(/^claude_probe_invalid_preparation$/);
     const binary = { path, version: '2.1.288', sha256: createHash('sha256').update(readFileSync(path)).digest('hex') };
     expect(() => verifyClaudeProbeBinary(binary)).not.toThrow();
     expect(() => verifyClaudeProbeBinary(binary, claudeWorkflowProductVersions)).toThrow(/^claude_probe_executable_mismatch$/);

@@ -67,7 +67,9 @@ export interface ClaudeProbeOptions {
    * the pinned probe version, which is also the default. */
   productVersion?: ClaudeTraceProductVersion;
   /** Internal workflow mode; public CLI cannot supply synthetic admission. */
-  workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; durationMs:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void };
+  workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; durationMs:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void;
+    /** Trusted external candidate only: no usage before verified connection. */
+    observationStartedAt?:()=>string|null };
   /** Caller owns a durable one-use reservation; a failure must hold, never retry. */
   reserveChild: () => void;
 }
@@ -101,7 +103,9 @@ export class ClaudeProbeCoordinator {
       (options.workflow && (options.effort !== null && !['low','medium','high','xhigh','max'].includes(options.effort) || !Number.isSafeInteger(options.workflow.requestLimit) || options.workflow.requestLimit < 1 || options.workflow.requestLimit > 1024 ||
         !Number.isSafeInteger(options.workflow.durationMs) || options.workflow.durationMs < 1 || options.workflow.durationMs > 3600000)) ||
       !TimestampSchema.safeParse(options.startedAt).success ||
-      (options.workflow ? !isClaudeWorkflowProductVersion(options.productVersion ?? claudeProbeProductVersion) : (options.productVersion ?? claudeProbeProductVersion) !== claudeProbeProductVersion) ||
+      // A synthetic workflow (tests, the unadmitted external candidate) is no admission and may keep the pinned probe version.
+      (options.workflow ? !(isClaudeWorkflowProductVersion(options.productVersion ?? claudeProbeProductVersion) || options.workflow.synthetic && (options.productVersion ?? claudeProbeProductVersion) === claudeProbeProductVersion)
+        : (options.productVersion ?? claudeProbeProductVersion) !== claudeProbeProductVersion) ||
       options.child.sessionId === options.rootScope.sessions[0]?.sessionId ||
       options.child.sourceId === options.rootScope.sessions[0]?.sourceId ||
       store.get('SELECT 1 FROM sessions WHERE id=?', [options.child.sessionId])) fail('claude_probe_invalid_options');
@@ -118,6 +122,7 @@ export class ClaudeProbeCoordinator {
   authorizeTraceRequest(token: string): void {
     this.authorize(token);
     if (!this.rootStarted || this.lastSequence < 0 || (!this.options.workflow && this.childAgentId === null)) fail('claude_probe_not_ready');
+    if(this.options.workflow?.observationStartedAt&&this.options.workflow.observationStartedAt()===null)fail('claude_probe_not_ready');
   }
   state() { return { rootStarted: this.rootStarted, childBound: this.childAgentId !== null, childStopped: this.childStopped,
     sessionEnded: this.sessionEnded, lastSequence: this.lastSequence, requestsInserted: this.requestsInserted,
@@ -277,7 +282,7 @@ export class ClaudeProbeCoordinator {
       ({ result, inserted } = this.store.immediateTransaction(() => {
         const before = this.store.get<{ last: number }>('SELECT coalesce(max(rowid),0) AS last FROM events')!.last;
         const result = ingestClaudeTraceBatch(this.store, this.scope, () => raw, {
-          startedAt: this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic, productVersion: this.productVersion,
+          startedAt: this.options.workflow?.observationStartedAt?.()??this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic, productVersion: this.productVersion,
           ...(this.options.workflow && this.lastVerifiedAt!==null ? {lossStartedAt:new Date(Math.min(Date.parse(this.options.clock()),Date.parse(this.lastVerifiedAt)+1)).toISOString()} : {}),
         });
         // Count only rows this batch actually inserted while holding the writer

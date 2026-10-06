@@ -1,0 +1,109 @@
+# Local browser workflow
+
+Use the private `hm` checkout with Node.js 24. This UI shares the CLI's Store and
+external-task coordinator. It does not launch an agent, change authentication,
+create commits, or publish a service.
+
+## Start the local service
+
+From the checkout:
+
+```sh
+npm ci
+npm run build
+node dist/local-web-main.js --db local.sqlite --setup reviewed-ui-setup.json
+```
+
+After main CLI registration, the equivalent command is:
+
+```sh
+hm --db local.sqlite ui --setup reviewed-ui-setup.json
+```
+
+Open the printed `http://127.0.0.1:4318` address. `--port` changes only the local
+port; no host option exists. Stop the local service with Ctrl+C. Its collectors
+settle and active measurement pauses; the external AI remains under your control.
+
+## Reuse reviewed settings
+
+In **Setup**, select a project directory. Registration reads Git HEAD and does not
+create a repository or commit. The code baseline is read again when preparing a
+new task. Uncommitted edits are preserved; HEAD identifies the committed baseline,
+not a snapshot of uncommitted files.
+
+Choose an existing reviewed UI setup file, or pass it through `--setup`. The
+private manifest has `schema_version: 1` and `profiles`, each with `id`, `name`,
+`setup`, and `execution`. `setup` uses the shared `ExternalTaskSetupSchema`;
+`execution` contains the reviewed binary, Codex home, recorder, sandbox, timeout,
+and poll interval. Session identity and source paths are chosen later, not preset.
+See the [external workflow](external-session-workflow.md) for its source contract.
+
+Templates must already refer to a registered project, frozen schema-2 protocol,
+reviewed harness pair and fixed completion criteria. The shared selection builder
+checks those references. The UI does not invent comparison rules, pricing,
+completion criteria, or source admission. Unsupported type/size choices stay
+disabled. The form offers feature/fix/infra/chore/docs/ci and small/medium/large.
+Model and effort remain flexible choices in your native agent.
+
+## Prepare, connect and observe
+
+1. In **Tasks**, select **New task**. Enter a recognizable name, project and setup.
+   Optional settings contain type, size and the automatically read baseline.
+2. Select **Prepare measurement**. The task is registered and automatically
+   assigned to A/B. Internal IDs are generated; no observation interval starts.
+3. Apply the prepared configuration. Only the reviewed managed instruction file
+   can change; unapproved existing contents and common-file drift block writes.
+4. Get new-session instructions. Copy them to your usual terminal and open a
+   fresh session yourself. Production handoff requires the reviewed canonical
+   Codex 0.160.0 binary hash; it never falls back to an older PATH binary.
+5. Select the exact session file and connect it. A one-use ticket binds the fresh
+   root and native developer fragment to this preparation. Prior usage is excluded.
+6. Start observation and wait for the in-progress state before doing the work.
+   Pause stops observation and active time, not the external AI. Resume establishes
+   another future-only baseline; usage during pauses is not backfilled.
+
+The operative deadline starts at the first verified connection and survives
+reconnection and rework. Active measurement time is not human labor time.
+File preparation, native input evidence and actual tool use are separate facts.
+The actual native startup order before work remains unverified. External Claude
+and IDE collection remain unsupported; the admitted tool-launched Claude parent
+workflow is a separate path.
+
+## Decide the result
+
+After observation settles, decide success, same-request rework, failure or
+abandonment in the detail view. Successful confirmation records the reviewed
+criteria as fulfilled; optional details expose per-criterion assessment. Success
+is final for this task. Rework before finalization keeps the assignment, window,
+previous usage and attempt history. Added requirements belong in a new task.
+Leaving the page keeps the result undecided. Agent exit never records success.
+
+Before preparing another task in the same project, stop the external AI yourself
+and confirm it stopped. This releases preparation ownership; the UI does not kill
+that process or silently replace its harness. Existing preimage checks still apply.
+
+## Prices, recovery and local boundaries
+
+Reference prices use the tool-owned approved update source. Configured does not
+mean reachable or latest; refresh failure retains cached prices and pinned task
+bases. Cost is only the partial estimate for observed, matched usage. Unknown
+prices retain usage observations. Complete cost and inferential adoption remain
+unavailable. See [reference prices](reference-price-catalog.md).
+
+Reload restores saved tasks and user-confirmed results. A disconnected browser
+shows stale values and disables writes until a fresh read succeeds. Service
+restart does not automatically resume an observer. Explicit recovery fences an
+abandoned collector and records a gap before a new baseline. Confirm the previous
+observer is no longer running before using that action.
+
+Task writes check the current control version against concurrent CLI/window
+changes. Usage updates do not invalidate pause controls. Durable action keys
+prevent repeated clicks from performing the same action twice. Ambiguous actions
+are reported rather than automatically retried.
+
+The service binds only 127.0.0.1 and checks Host, Origin, CSRF and bounded typed
+request bodies. No arbitrary shell or browser-supplied source URL exists. Native
+pickers use constant local dialogs; cancellation makes no task transition. Private
+names, setup paths and start commands live in a separate UI database, outside
+measurement exports. Keep that database with the measurement Store when moving
+this local installation; do not share it as a measurement report.

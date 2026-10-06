@@ -13,6 +13,7 @@ import { productionSourceEvidence, syntheticSourceEvidence } from './readiness.j
 import type { Store } from './store.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId } from './codex-workflow-journal.js';
 import { claudeWorkflowProfileId, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
+import { externalContract } from './external-session-contract.js';
 
 const artifactSchema = z.strictObject({ artifact_id: IdSchema, path: z.string().min(1).max(4096) });
 export const AssignedWorkflowInputSchema = z.strictObject({ schema_version: z.literal(1),
@@ -28,12 +29,19 @@ export interface WorkflowExecutionContext {
   runtime: WorkflowRuntime; instructions: { artifact_id: string; content: string }[];
   /** Recheck before every source read, launch and observation boundary. */
   assertActive(): void;
+  /** Trusted external coordinator only; receives hashes after native scope gates. */
+  externalStartup?: {
+    expectation: import('./external-session-context.js').ExternalStartupExpectation;
+    verify(evidence: import('./external-session-context.js').ExternalContextEvidence & {sessionId: string; sourceIdentity: string}): void;
+  };
 }
 /** Trusted code adapter, not a user-configured script or admission flag.
  * Owns per-invocation application, pre-access linkage, collection and teardown.
  * Native execution remains gated by the code-owned qualification registry.
  */
 export interface WorkflowAdapter {
+  /** Trusted new external coordinator; never an input-schema admission flag. */
+  externalContractCoordinator?: true;
   product: 'synthetic' | 'codex' | 'claude_code'; productVersion: string; profileId: string;
   /** Local file and qualification checks before assignment or task activation.
    * Never launches a product, reads session sources or writes measurement data. */
@@ -74,7 +82,19 @@ function checkReadiness(store: Store, protocolId: string, at: string) {
 /** Persist original assignment before revealing/reading selected instruction bytes.
  * Returns private transient application data separately from the printable receipt.
  */
-export function beginAssignedWorkflow(store: Store, input: unknown, runtimeInput: unknown, clock: Clock = utcNow) {
+export function beginAssignedWorkflow(store: Store, input: unknown, runtimeInput: unknown, clock: Clock = utcNow, externalCoordinator = false) {
+  const config=AssignedWorkflowInputSchema.parse(input);
+  const taskId=store.get<{task_id:string}>('SELECT task_id FROM comparison_identity_keys WHERE project_id=? AND key_id=?',[config.assignment.project_id,config.assignment.logical_task_id])?.task_id??config.assignment.task_id;
+  if(externalContract(store,taskId)&&!externalCoordinator)throw new Error('timing_contract_mismatch');
+  return prepareWorkflow(store, input, runtimeInput, clock, true);
+}
+
+/** Assign and confirm selected input bytes without starting an active interval. */
+export function prepareAssignedWorkflow(store: Store, input: unknown, runtimeInput: unknown, clock: Clock = utcNow) {
+  return prepareWorkflow(store, input, runtimeInput, clock, false);
+}
+
+function prepareWorkflow(store: Store, input: unknown, runtimeInput: unknown, clock: Clock, activate: boolean) {
   const config = parseComparison(AssignedWorkflowInputSchema, input, 'invalid_workflow_input');
   const runtime = parseComparison(WorkflowRuntimeSchema, runtimeInput, 'invalid_workflow_runtime');
   const now = clock(); const requested = checkReadiness(store, config.assignment.protocol_id, now);
@@ -102,10 +122,12 @@ export function beginAssignedWorkflow(store: Store, input: unknown, runtimeInput
     const record = parseComparison(ConfigurationRecordSchema, JSON.parse(confirmation?.payload ?? 'null') as unknown, 'workflow_manifest_mismatch');
     if (record.verification_status !== 'confirmed' || record.observed_config_hash !== snapshot.hash) throw new Error('workflow_manifest_mismatch');
     const state = life.state(assignment.task_id);
-    if (state === 'registered') life.start(assignment.task_id);
-    else if (state === 'paused') life.resume(assignment.task_id);
-    else if (state !== 'active') throw new Error('invalid_transition');
-    activated = state !== 'active';
+    if (activate) {
+      if (state === 'registered') life.start(assignment.task_id);
+      else if (state === 'paused') life.resume(assignment.task_id);
+      else if (state !== 'active') throw new Error('invalid_transition');
+      activated = state !== 'active';
+    }
     requireConfigurationConfirmation(store, assignment.task_id, now);
   });
   const current = life.task(assignment.task_id);
@@ -120,6 +142,8 @@ export function beginAssignedWorkflow(store: Store, input: unknown, runtimeInput
 export async function runAssignedWorkflow(store: Store, input: unknown, adapter: WorkflowAdapter,
   runtimeInput: unknown, clock: Clock = utcNow) {
   const config = parseComparison(AssignedWorkflowInputSchema, input, 'invalid_workflow_input');
+  const existingTaskId=store.get<{task_id:string}>('SELECT task_id FROM comparison_identity_keys WHERE project_id=? AND key_id=?',[config.assignment.project_id,config.assignment.logical_task_id])?.task_id??config.assignment.task_id;
+  if (externalContract(store,existingTaskId) && adapter.externalContractCoordinator !== true) throw new Error('timing_contract_mismatch');
   const runtime = parseComparison(WorkflowRuntimeSchema, runtimeInput, 'invalid_workflow_runtime');
   const protocol = checkReadiness(store, config.assignment.protocol_id, clock());
   const registry = protocol.purpose !== 'synthetic_validation' ? productionSourceEvidence : syntheticSourceEvidence;
@@ -135,7 +159,7 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
   // Only allowlisted fixed codes survive; producer text and paths are dropped.
   // eslint-disable-next-line preserve-caught-error
   catch (error) { throw new Error(workflowAdapterCode(error, 'workflow_preflight_failed')); }
-  const prepared = beginAssignedWorkflow(store, config, runtime, clock);
+  const prepared = beginAssignedWorkflow(store, config, runtime, clock,adapter.externalContractCoordinator===true);
   const taskId = prepared.receipt.task_id; const generation = prepared.receipt.generation;
   const projectId = config.assignment.project_id;
   const projectRoot = store.get<{ local_root: string | null }>('SELECT local_root FROM projects WHERE id=?', [projectId])?.local_root;
@@ -183,6 +207,7 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
 
 export function finishAssignedWorkflow(store: Store, taskId: string, outcome: Outcome, criteria: string[], clock: Clock = utcNow) {
   parseComparison(IdSchema, taskId);
+  if (externalContract(store,taskId)) throw new Error('timing_contract_mismatch');
   return store.immediateTransaction(() => {
     const assignment = store.get<AssignmentRow>('SELECT * FROM comparison_assignments WHERE task_id=?', [taskId]);
     if (!assignment) throw new Error('task_not_assigned');
@@ -215,7 +240,9 @@ export function workflowTaskStatus(store: Store, taskId: string, at = utcNow()) 
   const assignment = store.get<AssignmentRow>('SELECT * FROM comparison_assignments WHERE task_id=?', [taskId]);
   if (!assignment) throw new Error('task_not_assigned');
   const outcome = store.get<{ status: Outcome; assessed_at: string }>('SELECT status,assessed_at FROM outcomes WHERE task_id=?', [taskId]);
-  const open = Date.parse(at) < Date.parse(assignment.followup_ends_at);
+  const contract=externalContract(store,taskId);
+  const deadline=contract?contract.ends_at:assignment.followup_ends_at;
+  const open = deadline!==null && Date.parse(at) < Date.parse(deadline);
   const runs = [
     ...store.all<{ run_id: string; operation: string; state: string; reason: string | null; diagnostic_code: string | null; stop_requested: number; started_at: string; ended_at: string | null }>(
       'SELECT id AS run_id,operation,state,reason,diagnostic_code,stop_requested,started_at,ended_at FROM codex_workflow_runs WHERE task_id=?', [taskId]).map(r => ({ product: 'codex' as const, ...r })),
@@ -225,16 +252,17 @@ export function workflowTaskStatus(store: Store, taskId: string, at = utcNow()) 
     .map(r => ({ ...r, stop_requested: r.stop_requested === 1 }));
   const next: string[] = [];
   if (runs.some(r => r.state === 'running')) next.push('stop_or_recover_running_run');
-  if (task.state === 'registered') next.push('launch');
+  if (task.state === 'registered') next.push(contract?'external_start_then_connect':'launch');
   else if (task.state !== 'finalized') {
-    if (task.state === 'paused') next.push('continue_with_launch_or_resume');
-    next.push(open ? 'finish_before_followup_deadline' : 'finish_now_outcome_excluded_after_deadline');
+    if (task.state === 'paused') next.push(contract?'external_collect_or_connect_fresh_session':'continue_with_launch_or_resume');
+    next.push(deadline===null?'wait_for_verified_connection':open ? 'finish_before_followup_deadline' : 'finish_now_outcome_excluded_after_deadline');
   }
   else next.push(open ? 'report_after_followup_deadline' : 'create_report');
   return { schema_version: 1, task_id: taskId, state: task.state, generation: task.generation, protocol_id: assignment.protocol_id,
-    assigned_variant_id: assignment.variant_id, assigned_at: assignment.assigned_at, followup_ends_at: assignment.followup_ends_at,
-    followup: open ? 'open' as const : 'closed' as const,
+    assigned_variant_id: assignment.variant_id, assigned_at: assignment.assigned_at, followup_ends_at: deadline,
+    ...(contract?{timing_contract:contract.timing_contract,report_contract:contract.report_contract}:{}),
+    followup: deadline===null?'pending' as const:open ? 'open' as const : 'closed' as const,
     outcome: outcome ? { status: outcome.status, assessed_at: outcome.assessed_at,
-      counted_in_deadline_status: Date.parse(outcome.assessed_at) < Date.parse(assignment.followup_ends_at) } : null,
+      counted_in_deadline_status: deadline!==null&&Date.parse(outcome.assessed_at) < Date.parse(deadline) } : null,
     runs, next_actions: next };
 }
