@@ -1,0 +1,82 @@
+{
+  "schema_version": 2,
+  "id": "pilot-1",
+  "project_id": "project-1",
+  "team_id": "team-1",
+  "mode": "randomized_task",
+  "purpose": "functional_pilot",
+  "protocol_version": "example-protocol-v1",
+  "eligibility_version": "example-eligibility-v1",
+  "classification_version": "example-classification-v1",
+  "participants": [
+    "user-1"
+  ],
+  "environment_ids": [
+    "environment-1"
+  ],
+  "variant_ids": [
+    "variant-a",
+    "variant-b"
+  ],
+  "recruitment_start": "2099-01-01T00:00:00Z",
+  "recruitment_end": "2099-01-08T00:00:00Z",
+  "allocation_method": "balanced_blocks",
+  "allocation_version": "balanced-blocks-v1",
+  "allocation_ratio": [
+    1,
+    1
+  ],
+  "block_size": 2,
+  "strata": [
+    {
+      "id": "stratum-1",
+      "assignees": [
+        "user-1"
+      ],
+      "types": [
+        "feature"
+      ],
+      "sizes": [
+        "small"
+      ],
+      "allocator_id": "allocator-1"
+    }
+  ],
+  "primary_metric": "standardized_cost",
+  "quality_metric": "criterion_fulfillment",
+  "sample_plan": {
+    "target_tasks": 4,
+    "planning_basis_id": "example-feasibility-budget"
+  },
+  "followup_seconds": 86400,
+  "stopping_rule": {
+    "kind": "fixed_recruitment",
+    "version": "example-stop-v1"
+  },
+  "missingness_policy": {
+    "version": "example-missingness-v1",
+    "max_usage_missing_rate": 0.5,
+    "max_outcome_missing_rate": 0.5
+  },
+  "deviation_policy": {
+    "mismatch": "stop",
+    "unknown": "stop",
+    "version_drift": "stop"
+  },
+  "analysis_plan_version": "descriptive-only-v1",
+  "sensitivity_plan_ids": [
+    "example-descriptive-sensitivity"
+  ],
+  "price_table_id": "prices-1",
+  "estimand": "registered_task_mean",
+  "runtime_policy": "flexible",
+  "source_profiles": [
+    {
+      "product": "codex",
+      "product_version": "0.160.0",
+      "profile_id": "codex-workflow-own-response-v1"
+    }
+  ],
+  "planning_basis_id": "example-feasibility-budget",
+  "collaboration_policy_id": "single-owner-v1"
+}

@@ -1,5 +1,8 @@
 # Local measurement
 
+This is the legacy generic file-collection path. For first assigned A/B work, use
+[the task procedure](workflow-quickstart.md) ([한국어](workflow-quickstart.ko.md)).
+
 See the [Codex exact-version admission and partial measurement workflow](codex-version-admission.md) for 0.158.0 and subsequent candidate versions.
 
 

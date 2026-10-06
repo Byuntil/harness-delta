@@ -1,5 +1,10 @@
 # Nested-session candidate readiness
 
+This record describes the earlier candidate stage. Later, the separate fresh-root/
+single-child workflow was admitted; see [current direct-child evidence](codex-workflow-01600-direct-child-source-readiness.md)
+and [current workflow limits](../runbooks/task-native-workflow.md#single-direct-child-launch-and-durable-collection).
+The earlier offline connection summary below is historical. Family resume remains unsupported.
+
 This internal candidate covers explicitly mapped parent/child request metadata.
 It implements bounded preparation and observation for a pinned Codex CLI 0.160.0
 root with one direct child. It is absent from the public CLI, package exports,
@@ -14,9 +19,9 @@ checkpoints across database reopen. Child request identity collisions roll back
 the whole tick; previous partial usage remains. Root and child models/effort come
 from their own request metadata. The family path rejects fork/history-base,
 compaction and deeper-child evidence, and never follows inherited source paths.
-The separate `codex-workflow-direct-child-v1` profile is absent from the production
-registry, so production family input fails before selected instructions or source
-contents are accessed. Launch/resume remains root-only. This is an implemented
+At that stage, the separate `codex-workflow-direct-child-v1` profile was absent from the production
+registry, so production family input failed before selected instructions or source
+contents were accessed. Launch/resume was root-only. This was an implemented
 offline connection, not admitted native child support; historical qualification
 of the candidate is not qualification of this new workflow connection.
 
@@ -137,12 +142,12 @@ settings, fresh direct-child source/initial-context guards, shared own-request
 collection and durable child checkpoints are implemented in the shared engine.
 The actual CLI root-to-child resume/replay route and a separately intent-bound
 one-shot family qualification entry are verified with synthetic processes. See
-[the workflow contract and manual qualification boundary](../runbooks/task-native-workflow.md#direct-child-adapter-connection-offline-verified-not-admitted).
+[the current direct-child workflow contract](../runbooks/task-native-workflow.md#single-direct-child-launch-and-durable-collection).
 
-This is implemented adapter/CLI wiring with offline evidence. It is not new native
-qualification or production admission. Historical parent/child observations belong
-to the preceding candidate lane and cannot qualify this changed engine. The child
-profile is still absent from the production registry; root qualification consent
-cannot be reused for it. A new directly approved family run must verify the actual
-hook/source sequence and observed usage before any admission decision. Claude
-native collection and whole-task cost coverage remain separate blockers.
+At this historical candidate stage, the adapter/CLI wiring had offline evidence
+without child admission. Earlier observations could not qualify the changed engine
+and root consent could not authorize a family run. A later separately approved
+family qualification admitted the limited fresh-root/single-child profile; see
+[the admission record](codex-workflow-01600-direct-child-source-readiness.md).
+Family resume remains unadmitted. Claude general workflow and whole-task cost
+coverage remain separate blockers.

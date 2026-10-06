@@ -1,5 +1,8 @@
 # Continue one task across explicit sessions
 
+This page covers legacy collection and internal candidate evidence. For assigned
+Codex 0.160.0 tasks, use [the task procedure](workflow-quickstart.md#7-resume-or-use-another-session).
+
 A development task is the durable unit; a product session is one explicitly
 linked source. Closing a product CLI or starting a new session does not require
 another measurement task when the completion criteria are unchanged. Keep the
@@ -83,7 +86,7 @@ validation boundaries. The [assigned Codex 0.160.0 root workflow](task-native-wo
 now admits partial own-response collection and v2 allocation with explicit frozen
 user inputs. Whole-task cost and inference remain gated. Actual source evidence
 covers the shared start/resume/replay engine; coordinator and sticky assignment
-checks are offline. Neither that admission nor candidate observations add 0.160.0
+checks have synthetic coverage and later bounded root functional observations. Neither that admission nor candidate observations add 0.160.0
 to the ordinary `session link` or `collect` allowlist. Use `workflow codex` instead.
 
 Ordinary sequential collection excludes forked histories and observed child

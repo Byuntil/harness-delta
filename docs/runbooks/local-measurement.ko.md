@@ -1,6 +1,9 @@
 # 로컬 측정 사용 안내
 
-See the [Codex exact-version admission and partial measurement workflow](codex-version-admission.md) for 0.158.0 and subsequent candidate versions.
+기존 generic 파일 수집 경로입니다. 처음 배정된 A/B 작업은
+[작업 절차](workflow-quickstart.ko.md)를 사용하세요.
+
+0.158.0과 후속 후보 버전의 개발 검증은 [정확한 버전 admission](codex-version-admission.md)을 참고하세요.
 
 
 [English](local-measurement.md)
@@ -140,6 +143,10 @@ node node_modules/.cache/conformance/scripts/conformance/runner.js --out "$PWD/.
 
 `npm run check`로 CLI 흐름, 민감 정보 대체 문자열의 유출 방지, 트랜잭션 롤백,
 일시정지·재시작, 보고서에 대한 합성 인수 테스트를 실행할 수 있습니다.
-현재 실제 검증 범위는 macOS arm64, Codex CLI 0.156.1, Claude Code 2.1.283입니다.
+이 일반 수집기의 검증 범위는 macOS arm64, Codex CLI 0.156.1/0.158.0, Claude Code 2.1.283입니다.
 앱 세션, 부모·자식 세션의 완전한 합산, 0이 아닌 추론 토큰의 의미, 다른 버전과 플랫폼은
-별도 검증이 필요합니다. 현재 버전을 실제 실험이나 통계적 추론을 통한 도입 결정에 사용하지 마세요.
+별도 검증이 필요합니다. 이 일반 수집기로 실제 실험이나 통계적 추론을 통한 도입 결정을 하지 마세요.
+
+V2 자유 모델 workflow·명시적 가격·독립 게이트는 [작업 절차](workflow-quickstart.ko.md)를 참고하세요.
+별도 Codex 0.160.0 workflow의 부분 수집 승인은 일반 수집기의 버전 allowlist를 바꾸지 않습니다.
+전체 비용과 추론은 제공하지 않습니다.

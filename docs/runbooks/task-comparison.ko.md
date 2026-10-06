@@ -4,8 +4,10 @@
 
 첫 번째 구현 단계에서는 합성 작업을 사용해 구성 등록, 영구 배정,
 수동 적용 증거와 사람이 평가한 결과를 검증할 수 있습니다.
-**실제 무작위 실험의 배정은 비활성화되어 있습니다.** 합성 데이터의 배정 기준 보고서는 지원됩니다. 전체 팀 워크플로,
-파일 교환과 검증된 통계적 추론은 이후 단계의 승인 조건을 충족해야 합니다.
+**V1 실제 무작위 실험 배정은 비활성화되어 있습니다.** V2는 명시적 입력과
+부분 사용량의 제한된 [Codex 0.160.0 workflow](workflow-quickstart.ko.md)를 지원합니다.
+전체 비용·추론·실제 팀 데이터 교환은 미지원입니다. 별도
+[합성 파일 교환](team-file-exchange.ko.md)은 구현되어 있습니다.
 기존 로컬 측정은 별도의 [실행 가이드](local-measurement.ko.md)를 따릅니다.
 [ADR 008](../decisions/008-task-comparison-workflow.md)과
 [요구사항 R09/R10](../requirements.md#r09---randomized-task-comparisons)을 참고하세요.
@@ -284,7 +286,8 @@ node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison sna
 기존 작업 보고서는 계속 누락되거나 부분적으로 관측된 사용량을 표시하며,
 완전한 무작위 비교 결과 지표나 도입 판단 결과를 제공하지 않습니다.
 관측값을 주입하지 않은 합성 작업의 사용량은 0이 아니라 누락 상태입니다.
-아래 절의 합성 배정 보고서는 지원됩니다. 팀 간 교환, 네트워크 전송, 검증된 통계적 추론과 실제 실험 배정은 제공하지 않습니다.
+위 절의 합성 배정 보고서와 별도 합성 팀 교환은 지원됩니다. 실제 데이터 공유·
+네트워크 전송·검증된 추론·V1 실제 배정은 제공하지 않습니다.
 
 ```sh
 node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite delete task task-1
@@ -296,4 +299,8 @@ node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison sho
 남아 있는 작업은 일반적인 수명주기에 따라 완료할 수 있습니다.
 프로젝트 삭제는 해당 비교 데이터를 제거합니다.
 명시적으로 설정한 보존 기간 정책도 동일한 삭제 경로를 사용합니다.
-삭제로 이미 내보낸 사본까지 지울 수는 없습니다. 내보내기 기능 자체는 아직 구현되지 않았습니다.
+삭제로 이미 내보낸 사본까지 지울 수는 없습니다. 별도 합성 교환 경로의 삭제 알림은
+V1 예제에 실제 데이터 공유를 추가하지 않습니다.
+
+자유 모델/effort의 V2 workflow와 두 Codex 0.160.0 프로필은
+[작업 절차](workflow-quickstart.ko.md)를 참고하세요. 전체 비용과 추론은 미지원입니다.

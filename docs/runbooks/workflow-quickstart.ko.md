@@ -1,185 +1,393 @@
-# 첫 A/B 워크플로 실행
+# 배정된 개발 작업 하나를 측정하기
 
-[English](workflow-quickstart.md)
+[English](workflow-quickstart.md) · [문서 탐색](../../README.md#documentation)
 
-이 문서는 승인된 Codex 0.160.0 루트 프로필(`codex-workflow-own-response-v1`)로
-배정된 작업 하나를 준비부터 보고서까지 진행하는 순서와 각 출력의 의미를 설명합니다.
-세부 계약과 한계는 [네이티브 워크플로 런북](task-native-workflow.md),
-[유연 비교 런북](flexible-comparison.md), [기능 파일럿 안내](functional-task-pilot.md)를
-따릅니다. 사용량은 항상 부분 관찰이며, 여기의 어떤 명령도 전체 작업 비용, 절감 주장,
-도입 결정을 만들지 않습니다.
+부분 비용을 기술하는 작은 **기능 파일럿**에 이 절차를 사용하세요.
+대상은 Codex 0.160.0의 `codex-workflow-own-response-v1`입니다.
+논리적 작업마다 하나의 A/B 배정을 유지합니다.
+모델과 effort는 실행마다 선택합니다. 새 세션을 열어도 배정은 바뀌지 않습니다.
 
-실제 제품 실행은 매번 해당 실행에 대한 명시적 승인이 필요합니다. 파일 준비,
-`workflow status`, `workflow task`는 제품을 실행하지 않습니다.
+## 지원 범위와 실행 비용
 
-## 판정이 집계되는지를 정하는 타임라인
+| 경로 | 지원 범위 |
+| --- | --- |
+| Codex 0.160.0 루트 workflow | launch, 같은 세션 resume, 명시적 독립 루트 link, 전경 collect, stop, recover; 부분 사용량 |
+| Codex 0.160.0 직계 자식 workflow | 별도 프로필: 새 루트와 새 자식 1개, 고정 macOS arm64/Node24, read-only; family resume·외부 자식 link 미지원 |
+| 기존 파일 수집기 | Codex 0.156.1/0.158.0, Claude Code 2.1.283만 지원; [로컬 측정](local-measurement.ko.md) 참고 |
+| Claude Code 2.1.288 | 제한된 내부 동기식 probe 검증 완료; 일반 배정 workflow는 미승인 |
+| App/IDE/MCP, fork, compaction, 더 깊은 자식 | 이 절차에서 미지원 |
+| 작업 전체 비용, 실제 청구액, 절감·도입 추론 | 제공하지 않음 |
+| 팀 파일 교환 | 합성 검증 전용; 기능 파일럿 결과는 이 경로로 교환할 수 없음 |
 
-```text
-배정/launch ──► 작업 (launch, resume, collect) ──► finish ──► followup_ends_at ──► report
-                                                   │                                │
-                                    반드시 기한 "전"에 실행            cutoff는 기한 "이후"로
-```
+**실행 주의:** native launch/resume는 기존 인증 상태를 사용하며 유료 또는 구독 사용량을 소비할 수 있습니다.
+실제 실행마다 먼저 승인하세요. timeout과 stop은 제공자의 지출 상한이 아닙니다.
+입력 준비·등록·상태 조회는 제품을 실행하지 않습니다.
 
-- 배정 시점에 고정된 `followup_ends_at` = 배정 시각 + 프로토콜의 `followup_seconds`가
-  정해집니다. 일시정지, 재개, 재작업은 이 기한을 바꾸지 않습니다.
-- `workflow finish`는 `followup_ends_at` **이전**에 실행해야 합니다. 이후의 판정도 저장되지만
-  보고서에서는 해당 작업이 `outcome_missing`(기한 전에 시작하지 않았다면 `not_started`)으로 표시되고, 판정은 `late_outcome`에 따로
-  표시됩니다. 이 경우 `finish`가 `assessment_after_followup_deadline` 경고를 출력합니다.
-- cutoff가 기한 **이전**인 보고서는 완료된 작업도 `followup_pending`으로 표시합니다.
-  최종 판정을 보려면 기한이 지난 뒤, 기한 이후의 cutoff로 보고서를 만드세요.
-  cutoff는 미래 시각일 수 없습니다.
+초기 admission 검증은 read-only였습니다. 이후 제한된 workspace-write 기능 실행에서 파일이 생성되었습니다.
+첫 실행은 native 시작 중 영구 trust 설정이 생성되어 설정 범위 검증에 실패했습니다.
+후속 실행은 명시적 `project_trust: "untrusted"`로 감시한 설정 범위 검증을 통과했습니다.
+이 관찰은 모든 native·managed 설정이 유지된다는 보장이 아닙니다.
+이 옵션은 해당 실행의 프로젝트 로컬 Codex 설정·hooks·rules를 비활성화합니다.
+그 효과가 의도된 경우에만 사용하세요. 새 루트 launch에만 적용되며 resume/link/collect·자식 launch에는 적용되지 않습니다.
+[실행 상세와 한계](task-native-workflow.md)를 참고하세요.
 
-작업과 사람의 검토가 모두 들어갈 만큼 `followup_seconds`를 넉넉히 정하세요.
+## 1. 저장소에서 설치하기
 
-## 0. 준비
+준비물은 Node.js 24, npm, 기존의 고정 Codex 0.160.0 바이너리입니다.
+로컬 검증 환경은 macOS arm64입니다. 다른 플랫폼은 미검증입니다.
+패키지는 private 상태이며 공개 패키지 설치 절차는 없습니다.
 
-- Node.js 24 선택 후 이 체크아웃에서 `npm ci`, `npm run build`.
-- 바이너리 SHA-256이 [`examples/workflow/launch.json`](../../examples/workflow/launch.json)의
-  고정 값과 같은 Codex 0.160.0.
-- 전용 실제 데이터베이스(예: `.harness-delta/pilot/local.sqlite`). 데이터베이스, 프롬프트,
-  지시 파일은 Git에서 제외되는 `.harness-delta/` 아래에 두세요.
+1. 버전 관리자로 Node 24를 선택하세요.
+2. 저장소 루트에서 고정 의존성을 설치하세요.
 
-아래에서 `hm`은 `node dist/cli.js --db .harness-delta/pilot/local.sqlite`를 뜻합니다.
+   ```sh
+   npm ci
+   ```
 
-## 1. 프로토콜 1회 설정
+3. CLI를 빌드하세요.
 
-가격표, 두 변형, v2 프로토콜을 [유연 비교](flexible-comparison.md)에 따라 작성하고,
-소스 프로필은
-`{"product":"codex","product_version":"0.160.0","profile_id":"codex-workflow-own-response-v1"}`로 둡니다.
+   ```sh
+   npm run build
+   ```
+
+4. workflow 도움말을 확인하세요.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow --help
+   ```
+
+예상 결과: `codex`, `status`, `task`, `begin`, `finish`, `report`가 표시됩니다.
+최상위 `comparison` 도움말에는 이전 synthetic 경로 설명이 남아 있습니다. 4단계의 `workflow status`로 v2 native 지원 조건을 확인하세요.
+설치가 실패하면 Node 24와 [CONTRIBUTING의 SQLite 빌드 준비물](../../CONTRIBUTING.md#development-environment)을 확인하세요.
+설치는 로컬 Git hooks도 설치합니다. 수집을 시작하거나 제품 인증을 바꾸지는 않습니다.
+아래 명령은 모두 저장소 루트에서 실행하며 데이터베이스를 명시합니다.
+로컬 패키지를 설치하면 `hm`을 사용할 수 있지만 `npm ci`만으로 셸 PATH에 생기지는 않습니다.
+
+## 2. 파일럿 입력 합의하기
+
+등록 전에 팀 담당자가 아래 입력을 선택해야 합니다.
+제품은 실험 가격·기간·표본 수·누락 허용치를 채워 주지 않습니다.
+
+| 결정 | 기록 위치 |
+| --- | --- |
+| 공통 프로젝트 요구사항과 작은 A/B 지시 차이 | `variant-a.md`, `variant-b.md`; 양쪽에 공통 지시 유지 |
+| 작업 산출물·허용 편집·사람의 완료 기준 | 비공개 prompt 파일; 기준 ID는 `workflow.json` |
+| 참가자·환경·담당자별 층·배정자 소유권 | `protocol.json`; 각 층에는 담당자 1명 |
+| 모집 날짜·판정 기간·표본 예산·중단/이탈 규칙 | `protocol.json`; 모집 전에 freeze |
+| 명시적 기준 가격과 기존 입력 비용 가정 | `prices.json`과 [비용 안내](observed-cost.ko.md) |
+| 실행 모델/effort·sandbox·timeout·실행 횟수·종료 | `runtime.json`, execution 파일, 실제 실행 승인 |
+
+작업과 **사람의 검토**를 모두 포함할 만큼 판정 기간을 선택하세요.
+배정 시 `followup_ends_at`이 고정됩니다. pause·resume·재작업으로 늘어나지 않습니다.
+finish는 이 기한 전에 실행해야 합니다. 늦은 결과는 별도 저장되지만 기한 내 상태를 수정하지 않습니다.
+최종 보고서 cutoff는 기한 이상이며 결과 평가 시각보다 뒤여야 합니다.
+미래 시각은 cutoff로 사용할 수 없습니다.
+
+기능 확인에는 `purpose: functional_pilot`을 사용하세요.
+`minimum_effect`, `quality_margin`, `confidence_level`은 넣지 마세요. 이 목적의 스키마는 해당 필드를 거부합니다.
+보고서는 `functional_only`, 도입 상태는 `not_applicable`입니다.
+같은 논리적 작업을 양쪽 변형에서 한 번씩 수행하지 마세요. 새 요구사항에는 새 작업이 필요합니다.
+후속 배치 준비는 서로 다른 작업 4개·담당자 1명·균형 블록 2개로 제한할 수 있습니다.
+이 값들은 담당자가 선택해야 하며 통계적 검정력을 입증하지 않습니다.
+
+## 3. 전체 입력 세트 준비하기
+
+1. Git에서 제외되는 파일럿 디렉터리를 만드세요.
+
+   ```sh
+   mkdir -p .harness-delta/pilot
+   ```
+
+2. [합성 예제 세트](../../examples/workflow/)를 복사하세요.
+
+   ```sh
+   cp -R examples/workflow/. .harness-delta/pilot/
+   ```
+
+3. 등록 전에 예제 선택값을 바꾸세요.
+
+| 파일 | 반드시 교체할 값 |
+| --- | --- |
+| `prices.json` | 합성 가격·모델·출처·날짜를 선택한 기준으로 교체; 제공자 가격을 뜻하지 않음 |
+| `variant-a.md`, `variant-b.md` | 검토한 A/B 지시; 개인 원본을 공개 fixture에 넣지 않음 |
+| `protocol.json` | 2099년 날짜, 예제 ID, 참가자/환경/층, 판정 기간·표본·누락·중단 정책 |
+| `workflow.json` | 일치하는 ID, 논리적 작업, 기준, 환경, 실제 코드 commit, artifact 경로 |
+| `runtime.json` | 선택한 모델·effort 또는 미지정 `null`; 진단용 모델은 필수가 아님 |
+| `launch.json`, `resume.json` | 정규 절대 binary/home/recorder/prompt 경로, 승인된 sandbox·timeout |
+| `link.json`, `collect.json` | 같은 정규 설정; 필요한 정확한 연결 세션 UUID·source 경로 |
+
+JSON 예제는 전체 스키마 입력이지만 선택값은 합성입니다.
+prompt·승인된 실행 요청·DB는 Git에서 제외되는 로컬 저장소에 보관하세요.
+일반 산출물은 측정 데이터와 분리하세요.
+native 바이너리 SHA는 예제의 고정값과 같아야 합니다.
+별도 결정 없이 예제 실행을 위해 제품 설치·로그인·업데이트를 하지 마세요.
+
+**산출물 주의:** 측정 CLI는 일반 native stdout을 버립니다.
+파일 생성 작업은 비공개 prompt에 저장 위치와 허용 편집을 명시하세요.
+산출물 작성이 필요하면 루트 `workspace-write`를 승인하세요.
+read-only 분석 답변은 이 CLI를 통해 표시되지 않습니다.
+
+4. 양쪽 지시를 편집한 뒤 등록 전에 manifest를 갱신하세요.
+
+   ```sh
+   node --input-type=module <<'JS'
+   import { readFileSync, writeFileSync } from 'node:fs';
+   import { createHash } from 'node:crypto';
+   const sha = value => createHash('sha256').update(value).digest('hex');
+   for (const arm of ['a', 'b']) {
+     const path = `.harness-delta/pilot/variant-${arm}`;
+     const config = JSON.parse(readFileSync(`${path}.json`, 'utf8'));
+     config.instruction_manifest_hash = sha(JSON.stringify([
+       { artifact_id: 'instructions', sha256: sha(readFileSync(`${path}.md`)) }
+     ]));
+     writeFileSync(`${path}.json`, `${JSON.stringify(config, null, 2)}\n`);
+   }
+   JS
+   ```
+
+예상 결과: 각 variant JSON에 검토한 지시 파일의 manifest hash가 기록됩니다.
+이 예제는 변형마다 artifact 1개를 사용합니다. 여러 artifact는 ID순으로 정렬한 같은 `{artifact_id, sha256}` 공식을 사용합니다.
+artifact 경로는 config 위치가 아니라 명령의 실행 디렉터리 기준입니다.
+등록은 변경할 수 없습니다. 미완성 초안은 별도 임시 저장소에 두세요.
+등록 입력을 바꿔야 한다면 새 ID와 합의된 미래 프로토콜을 사용하세요.
+
+## 4. 한 번 등록하고 freeze하기
+
+이 파일럿에는 새 전용 DB를 사용하세요. 합성 시험은 다른 DB에 보관하세요.
+아래 순서대로 각 명령을 따로 실행하세요.
+프로젝트 루트는 정규 절대 경로로 교체하세요.
 
 ```sh
-hm project add project-1 --root /absolute/path/to/project
-hm price-table register --config prices.json
-hm variant register --config variant-a.json
-hm variant register --config variant-b.json
-hm comparison register --config protocol.json
-hm comparison freeze pilot-1
-hm workflow status pilot-1
+node dist/cli.js --db .harness-delta/pilot/local.sqlite project add project-1 --root /absolute/path/to/project
+node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table register --config .harness-delta/pilot/prices.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite variant register --config .harness-delta/pilot/variant-a.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite variant register --config .harness-delta/pilot/variant-b.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison register --config .harness-delta/pilot/protocol.json
+node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison freeze pilot-1
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow status pilot-1
 ```
 
-`workflow status`의 `native_source_unqualified` 또는 `native_adapter_not_wired`는 아직
-네이티브 실행을 시작할 수 없다는 뜻입니다. `whole_task_cost_unconfirmed`,
-`analysis_unverified`는 예상된 항목이며 실행을 막지 않습니다.
+예상 결과: 합의된 전체 입력과 승인된 루트 프로필에는 `native_execution: true`가 표시됩니다.
+`whole_task_cost_unconfirmed`, `analysis_unverified`는 예상되는 한계입니다.
+`native_source_unqualified`, `native_adapter_not_wired`가 있으면 launch 전에 중단하세요.
+freeze가 실패하면 필수 필드와 모집 시작 전인지 확인하세요.
+설정 플래그를 바꿔서 미지원 소스를 승인할 수는 없습니다.
 
-## 2. 작업별 파일
+## 5. 작업을 배정하고 launch하기
 
-[예시 파일](../../examples/workflow/)을 복사해 수정합니다.
+사전 조건: 합의된 입력·동결된 프로토콜·정확한 바이너리·이번 실제 실행 승인.
+`launch.json`에는 새 `run_id`를 쓰고 확인 ID도 새 값을 사용하세요.
 
-| 파일 | 용도 | 작업마다 바꾸나요? |
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex launch \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/launch.json --confirmation confirmation-1
+```
+
+launch가 작업을 배정하고 시작합니다. 이 v2 배정에 `task register`를 실행하지 마세요.
+`workflow begin`은 제품 실행 없이 배정/시작을 준비합니다. 그 자체로 harness를 적용하지 않습니다.
+preflight는 배정/시작 전에 binary·recorder·prompt·home을 확인합니다.
+preflight 실패는 배정이나 활성 구간을 만들지 않습니다.
+이후 spawn 전 실패에서는 활성화한 작업을 다시 pause할 수 있으며 receipt에 `activation_reverted: true`가 표시됩니다.
+
+예상 receipt: 정규 작업 ID, 선택한 변형, 세션 ID, `adapter_result`.
+이후 명령에는 반환된 정규 작업 ID를 사용하세요.
+`completed`는 실행 종료를 뜻합니다. 사람의 성공 판정이나 사용량 전체 관측을 뜻하지 않습니다.
+`failed`이면 `reason`, `diagnostic`을 확인하세요. 이전의 적격 사용량은 부분적으로 남을 수 있습니다.
+`stopped`이면 계속하기 전에 작업 상태를 확인하세요. 유료 launch를 자동 재시도하지 마세요.
+receipt의 지시 검증은 발신 실행 설정을 확인하며 native의 최종 harness 적용을 보증하지 않습니다.
+
+## 6. 확인·stop·pause하기
+
+1. 작업 상태·기한·실행·`next_actions`를 확인하세요.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow task task-1
+   ```
+
+2. 실행이 살아 있으면 stop을 요청하세요.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex stop run-1
+   ```
+
+3. 실행이 `running`이 아닐 때까지 작업을 다시 확인하세요.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow task task-1
+   ```
+
+4. 쉬려는 작업이 active이면 작업을 pause하세요.
+
+   ```sh
+   node dist/cli.js --db .harness-delta/pilot/local.sqlite task pause task-1
+   ```
+
+예상 결과: `stop`은 실행/수집을 끝내고 `pause`는 작업 활성 시간 구간을 닫습니다.
+실행이 completed 또는 stopped여도 작업은 active로 남습니다. 활성 시간은 사람의 노동 시간이 아닙니다.
+
+수집기가 사라졌지만 실행이 `running`이면 pause 또는 finish 전에 recover하세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex recover run-1
+```
+
+recover는 실패 `abandoned`와 관측 공백을 기록하며 사용량을 추가하지 않습니다.
+작업이 비활성이면 공백 대신 `gap_warning: task_not_active`가 표시됩니다.
+recover는 남은 native 프로세스에 종료 신호를 보내지 못합니다. 다음 실행 전에 남은 제품 프로세스를 직접 종료하세요.
+
+## 7. resume 또는 다른 세션 사용하기
+
+각 동작에는 새 실행·확인 ID를 사용하세요.
+원래 논리적 작업·DB·프로젝트·기준·배정을 유지하세요.
+모델/effort 변경은 작업을 재배정하지 않습니다.
+launch/resume는 새 확인으로 paused 작업을 다시 활성화합니다.
+
+같은 세션은 receipt의 정확한 `session_id`를 `resume.json`에 넣으세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex resume \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/resume.json --confirmation confirmation-2
+```
+
+다른 독립 루트는 같은 workflow 파일을 유지하고 `launch.json`의 `run_id`, prompt를 새 값으로 바꾸세요.
+새 확인 ID로 5단계의 launch 명령을 실행하세요.
+외부에서 시작한 루트는 정확한 UUID와 정규 source 경로를 명시해 연결하세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex link \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/link.json --confirmation confirmation-3
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex collect \
+  --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
+  --execution .harness-delta/pilot/collect.json --confirmation confirmation-4
+```
+
+예상 결과: link/collect는 `external_unverified`를 표시합니다. 배정된 harness 적용이나 제품 실행은 하지 않습니다.
+외부 작업은 해당 세션을 사용하기 전에 선택한 지시의 적용을 별도로 확인하세요.
+첫 수집 기준점이 설정된 뒤 새 turn을 시작하세요. 작업 중에는 수집기를 전경에서 유지하세요.
+이전·paused·offline 사용량은 제외되며 저장된 관측값은 source 파일이 없어져도 남습니다.
+자동 발견·`--last`·과거 backfill·자동 재시도는 없습니다.
+native append와 읽기가 겹치면 아무것도 수집하지 않고 다음 poll에서 재시도합니다. 연속 20회 또는 실행 기한까지입니다.
+identity·잘림·prefix 변경은 계속 거부합니다.
+Codex 0.160.0에 일반 `session link`/`collect` 명령으로 대체하지 마세요.
+별도 직계 자식 프로필은 family resume를 지원하지 않습니다. pause 후에는 새 루트/자식 쌍을 사용하세요.
+
+## 8. 사람이 결과 판정하기
+
+사전 조건: 수집이 끝났고 실행이 남아 있지 않으며 산출물을 검토했습니다.
+`followup_ends_at` 전에 충족한 기준 ID를 모두 기록하세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow finish task-1 --outcome success --met criterion-1
+```
+
+예상 결과: 기한 전에 평가하면 `counted_in_deadline_status: true`입니다.
+`success`는 모든 기준이 필요합니다. `failed`, `aborted`는 일부 기준을 받을 수 있습니다.
+최종 판정은 변경할 수 없습니다. 테스트 통과·프로세스 종료·양의 사용량이 작업을 자동 완료하지 않습니다.
+첫 완료·평가·재작업을 별도로 기록할 때만 해당 lifecycle 명령을 사용하세요. [로컬 측정](local-measurement.ko.md)을 참고하세요.
+검토가 늦었더라도 실제 결과를 기록하세요. `assessment_after_followup_deadline`은 저장되지만 기한 내 상태에서 제외된다는 경고입니다.
+
+## 9. 보고서를 만들고 읽기
+
+판정 기한과 평가 시각이 지난 뒤 현재 UTC cutoff를 저장하세요.
+
+```sh
+reportCutoff=$(node -p 'new Date().toISOString()')
+```
+
+고정 스냅샷을 만드세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow report pilot-1 \
+  --id report-1 --cutoff "$reportCutoff" --reason initial
+```
+
+사람이 읽는 표를 확인하세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison report report-1 --format markdown-readable
+```
+
+예상 결과: 원래 A/B 배정·사람의 결과·부분 비용·명시적 한계.
+cutoff가 기한 전이면 완료 작업도 `followup_pending`입니다.
+`deadline_status`는 `success`, `failed`, `aborted`, `outcome_missing`, `not_started`, `followup_pending` 중 하나입니다.
+늦은 평가는 새 `flexible-cost-descriptive-2` 보고서의 `late_outcome`에 표시됩니다.
+저장된 version-1 스냅샷은 원래 형식을 유지합니다.
+추가 증거가 도착하면 적절한 revision reason과 새 보고서 ID로 생성하세요. 기존 스냅샷은 바뀌지 않습니다.
+
+명시적 기준 가격으로 같은 작업의 관측 성분을 추정하세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-task task-1 \
+  --price-table prices-1 --cutoff "$reportCutoff" --input-basis output-only-v1
+```
+
+입력 비용 가정을 선택하거나 추정값을 비교하기 전에 [비용 안내](observed-cost.ko.md)를 읽으세요.
+cached input을 total input에, reasoning output을 total output에 다시 더하지 마세요.
+부분 금액은 청구액이 아닙니다. 가격 없는 모델은 unavailable로 남기며 다른 모델 가격으로 대체하지 마세요.
+
+| 값/상태 | 뜻 |
+| --- | --- |
+| 관측된 `0` | 적격 관측에서 0이 측정됨 |
+| Missing | 적격 값이 관측되지 않음 |
+| Error | 소스 또는 관측 실패 |
+| Excluded | 허용 범위 밖의 구간/값 |
+| Unmeasurable | 이 소스로 요청값을 확정할 수 없음 |
+| `partial_amount: null` | 적격 가격 금액 없음; 0이 아님 |
+| `complete_amount: null` | 부분 가격 계산이 되어도 작업 전체 비용은 미확정 |
+
+## 10. 오류 해결 또는 로컬 데이터 삭제하기
+
+CLI는 고정 코드와 일반 오류의 `hint:`를 출력합니다.
+원시 producer 메시지·비공개 경로·지시 내용을 출력하지 않습니다.
+
+| 코드 | 다음 행동 |
+| --- | --- |
+| `invalid_command: ...` | 해당 명령의 `--help`를 읽고 필수 인수/옵션 입력 |
+| `*_file_unreadable`, `*_file_invalid_json`, `invalid_execution` | 경로/JSON 수정 후 예제 operation과 비교 |
+| `binary_mismatch`, `binary_unreadable` | 정확한 고정 바이너리·정규 경로 사용; 몰래 업데이트하지 않음 |
+| `invalid_hook_recorder`, `invalid_prompt`, `unsafe_home` | 원본 recorder·UTF-8 prompt(≤1 MiB)·기존 home 수정 |
+| `confirmation_conflict` | 새 `--confirmation` ID 입력 |
+| `workflow_run_active` | 기존 실행 기다리기·stop·recover |
+| `real_experiment_disabled` | freeze와 `workflow status` 확인; purpose 표기와 소스 승인은 별도 |
+| `workflow_manifest_mismatch` | 중단; 등록 지시 변경을 해결하고 이후 입력에 합의 |
+| `invalid_transition` | `workflow task`를 읽고 현재 상태가 허용하는 동작 수행 |
+| `invalid_criteria` | `success`에는 충족한 모든 기준 ID 입력 |
+| `invalid_cutoff` | 현재 이하의 유효한 UTC 시각 저장 |
+
+범위 상실·미지원 topology/버전·충돌 사용량·종료 실패·개인정보 노출 시 중단하세요.
+실패/중단 결과와 이전 적격 부분 관측값을 보존하세요. 재배정하거나 backfill하지 마세요.
+
+로컬 작업 삭제가 의도된 경우 실행하세요.
+
+```sh
+node dist/cli.js --db .harness-delta/pilot/local.sqlite delete task task-1
+```
+
+삭제는 종속 보고서를 무효화하고 ID 재사용을 막습니다.
+원래 제품 transcript·산출물·내보낸 사본은 삭제하지 않습니다.
+보존 기간 적용은 선택 사항입니다. [로컬 삭제·보존 안내](local-measurement.ko.md)를 참고하세요.
+
+## 용어와 추가 자료
+
+| English | 한국어 | 뜻 |
 | --- | --- | --- |
-| `workflow.json` | 배정(작업, 프로토콜, 기준)과 A/B 지시 파일 | 아니요, 재사용 |
-| `runtime.json` | 이번 실행의 모델과 effort, `null`은 미지정 | 바꿀 때만 |
-| `launch.json`, `resume.json`, `collect.json` | 바이너리, Codex home, recorder, 프롬프트, sandbox, 시간 제한 | 매번 새 `run_id` |
+| Task | 작업 | 고정된 사람의 기준을 가진 지속 단위 |
+| Run | 실행 | 실행 1회; 사람의 결과가 아님 |
+| Session | 세션 | 명시적으로 연결한 제품 소스 1개 |
+| Assignment | 배정 | 실행 간 유지하는 원래 A/B 선택 |
+| Stop | 실행 중지 | 실행/수집 끝내기 |
+| Pause | 작업 일시중단 | 작업 활성 시간 닫기 |
+| Follow-up deadline | 판정 기한 | 결과 집계의 고정 기한 |
+| Partial cost estimate | 부분 비용 추정 | 명시적 기준 가격의 관측 가능한 성분 |
 
-`workflow.json`의 artifact 경로는 파일 위치가 아니라 명령을 실행하는 디렉터리 기준입니다.
-`confirmation_id`는 작업마다 새 값이어야 합니다. `workflow.json`을 고치는 대신
-명령마다 `--confirmation <새-id>`를 붙이세요.
+설정 계약은 [flexible comparison](flexible-comparison.md), 고급 source/자식 경계는 [native workflow](task-native-workflow.md)를 참고하세요.
+[v1 합성 비교](task-comparison.ko.md), [합성 교환](team-file-exchange.ko.md), [방법 검증](comparison-analysis-validation.md)은 명시된 개발 범위에서만 사용하세요.
+기존 기능 파일럿 준비 안내는 2–5단계와 flexible 설정 참조에 통합했습니다.
 
-## 3. 실행(launch)
-
-```sh
-hm workflow codex launch --config workflow.json --runtime runtime.json \
-  --execution launch.json --confirmation confirmation-1
-```
-
-배정 전에 CLI가 바이너리 해시, hook recorder, 프롬프트 파일, Codex home을 먼저 검사합니다.
-하나라도 실패하면 `binary_mismatch` 같은 코드와 힌트를 출력하고, 작업은 배정되지도 시작되지도
-않으며 시간도 측정되지 않습니다. 파일을 고친 뒤 같은 명령을 다시 실행하세요.
-
-이 검사 이후에 발견된 이유로 제품을 실행하지 못했고 이 명령이 작업을 시작한 경우,
-활성 시간이 쌓이지 않도록 작업이 다시 일시정지되고 영수증에 `activation_reverted: true`가 표시됩니다.
-
-영수증에는 ID와 해시, 그리고 `adapter_result`만 출력됩니다.
-
-- `state: completed`: 실행이 끝났고 자체 사용량을 수집했습니다.
-- `state: failed`: `reason`과 `diagnostic`을 확인하세요. 명령은 `codex_workflow_failed`로 끝납니다.
-- `state: stopped`: 요청에 따라 중지되었습니다.
-
-## 4. 언제든 작업 상태 확인
-
-```sh
-hm workflow task task-1
-```
-
-상태, `followup_ends_at`, 기한이 아직 `open`인지, 판정과 집계 여부, 모든 실행 기록,
-`next_actions`를 보여줍니다.
-
-| 다음 행동 | 의미 |
-| --- | --- |
-| `launch` | 배정되었지만 시작 전 |
-| `continue_with_launch_or_resume` | 일시정지됨(예: 실행 실패 후). 다음 launch 또는 resume이 다시 활성화 |
-| `finish_before_followup_deadline` | 작업을 계속하고 기한 전에 판정 기록 |
-| `finish_now_outcome_excluded_after_deadline` | 기한이 지남. 판정은 저장되지만 집계되지 않음 |
-| `stop_or_recover_running_run` | 아직 running으로 남은 실행이 있음(6단계) |
-| `report_after_followup_deadline` | 완료됨. 최종 보고서는 기한 이후에 |
-| `create_report` | 완료됐고 기한도 지남 |
-
-## 5. 같은 작업 이어가기
-
-매번 새 `run_id`와 confirmation ID를 쓰세요. 배정은 바뀌지 않습니다.
-
-```sh
-hm workflow codex resume --config workflow.json --runtime runtime.json \
-  --execution resume.json --confirmation confirmation-2
-```
-
-`resume.json`에는 launch 영수증의 `session_id`가 필요합니다. CLI 밖에서 시작한 세션에는
-`link`와 `collect`를 씁니다. [네이티브 워크플로 런북](task-native-workflow.md)을 보세요.
-
-## 6. 실행 중지 또는 복구
-
-```sh
-hm workflow codex stop run-3      # 살아 있는 실행에 중지 요청
-hm workflow codex recover run-3   # 프로세스가 사라짐(크래시, 강제 종료, 재부팅)
-```
-
-수집기가 사라진 뒤 `running`으로 남은 실행은 새 실행을 `workflow_run_active`로 막습니다.
-`recover`는 이를 사유 `abandoned`의 `failed`로 표시하고, 관찰하지 못한 시간을 관찰 공백으로
-기록합니다. 사용량을 추가하지는 않습니다. 작업을 일시정지하거나 완료하기 전에 recover하세요.
-비활성 작업에는 공백을 기록할 수 없으며, 이때 결과에 `gap_warning: task_not_active`가 표시됩니다.
-살아 있는 harness-delta 수집기는 다음 검사에서 멈춥니다. Codex 프로세스 자체는 별도 프로세스
-그룹에서 실행되어 수집기가 강제 종료된 뒤에도 남을 수 있고 `recover`는 이를 종료할 수 없으므로,
-남은 Codex 프로세스는 직접 종료하세요.
-
-## 7. 완료 판정
-
-```sh
-hm workflow finish task-1 --outcome success --met criterion-1
-```
-
-`success`는 모든 기준 ID가 필요하고, `failed`와 `aborted`는 일부만 허용합니다. 결과에
-`followup_ends_at`과 `counted_in_deadline_status`가 표시됩니다.
-
-## 8. 보고서
-
-`followup_ends_at`이 지난 뒤:
-
-```sh
-hm workflow report pilot-1 --id report-1 --cutoff 2026-10-12T00:00:00Z --reason initial
-```
-
-작업별 `deadline_status`는 `success`, `failed`, `aborted`, `outcome_missing`, `not_started`,
-`followup_pending` 중 하나입니다. 서술 버전 `flexible-cost-descriptive-2` 보고서에서는 기한 이후
-판정이 `late_outcome`에 표시됩니다. 비용은 관찰된 부분 사용량의 표준화 추정치이며 실제 청구액이
-아닙니다.
-
-## 자주 보는 오류 코드
-
-CLI는 실패마다 코드 하나와, 자주 나오는 코드에는 `hint:` 줄을 출력합니다. 경로, 파일 내용,
-제품 메시지는 출력하지 않으며, 그 밖의 실패는 `input_or_state_error`로 표시됩니다.
-
-| 코드 | 할 일 |
-| --- | --- |
-| `invalid_command: ...` | 필수 옵션이나 인자가 빠짐. `--help`로 사용법 확인 |
-| `config_file_unreadable`, `*_file_invalid_json` | 해당 파일의 경로와 JSON 문법 확인 |
-| `invalid_execution` | execution 파일이 작업 종류와 맞지 않음. 예시와 비교 |
-| `binary_mismatch`, `binary_unreadable` | 정확한 Codex 0.160.0 바이너리와 절대·정규 경로 사용 |
-| `invalid_hook_recorder` | `hook_recorder`를 이 체크아웃의 수정되지 않은 recorder로 지정 |
-| `invalid_prompt`, `unsafe_home` | 1 MiB 이하 UTF-8 프롬프트 파일과 존재하는 Codex home 사용 |
-| `confirmation_conflict` | 새 `--confirmation` ID 전달 |
-| `workflow_run_active` | 실행 중인 run을 기다리거나 stop 또는 recover |
-| `real_experiment_disabled` | 프로토콜을 freeze하고 `workflow status` 확인 |
-| `workflow_manifest_mismatch` | 변형 등록 뒤 지시 파일이 바뀜 |
-| `invalid_transition` | 현재 작업 상태에서 허용되지 않음. `workflow task` 확인 |
-| `invalid_criteria` | `success`는 `--met`에 모든 기준 ID가 필요 |
-| `invalid_cutoff` | 미래가 아닌 UTC cutoff 사용 |
+영어 절차는 **STE-inspired** 형식을 참고했습니다. ASD-STE100 전체 준수 평가나 ASD 인증을 받지 않았습니다.
+한국어판은 같은 정보 구조·용어를 적용한 대응판이며 ASD-STE100 준수 언어판이 아닙니다.
+[공식 현재 FAQ](https://asd-ste100.org/STE_faq.html)와 [공식 Issue 9 표준](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf)을 참고하세요.
+표준은 무료로 받을 수 있지만 저작권은 복제를 제한합니다. 링크로 안내하고 본문·사전을 여기에 재배포하지 마세요.
