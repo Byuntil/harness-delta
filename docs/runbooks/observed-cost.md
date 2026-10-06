@@ -8,6 +8,11 @@ It reads database events, not session files. It starts no product or model reque
 Linked root/child/rework events contribute only when their source and interval are eligible.
 This report cannot qualify a source or prove that parent/child counters do not overlap.
 
+For the normal flow, use the [supplied reference catalog](reference-price-catalog.md):
+`estimate-task` no longer requires `--price-table`. Assigned V2 tasks retain their
+frozen comparison table; standalone tasks use the current catalog. The procedure
+below is the advanced explicit-table path and remains available for historical estimates.
+
 ## 1. Select the rate table
 
 Use the same database as the measured task. Select the table explicitly.

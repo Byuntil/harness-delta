@@ -5,6 +5,7 @@ import { describeCliError } from './cli-errors.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerComparisonCommands } from './comparison-cli.js';
+import { registerLocalWebCommand } from './local-web-main.js';
 import { registerTaskWorkflowCommands, type WorkflowCommandDependencies } from './task-workflow-cli.js';
 import { Store } from './store.js';
 import { Lifecycle, type Outcome } from './lifecycle.js';
@@ -84,6 +85,7 @@ export async function main(argv: string[], workflowDependencies:WorkflowCommandD
   registerComparisonCommands(program, db, print);
   registerTaskWorkflowCommands(program, db, print, workflowDependencies);
   registerExchangeCommands(program, db, print);
+  registerLocalWebCommand(program, db, print);
   try {
     await program.parseAsync(argv, { from: 'user' });
     return 0;
