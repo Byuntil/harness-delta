@@ -15,6 +15,10 @@ export const productionSourceEvidence:readonly SourceReadinessEvidence[]=Object.
 }),Object.freeze({
   id:'codex-workflow-01600-direct-child-native-v1',product:'codex',product_version:'0.160.0',profile_id:'codex-workflow-direct-child-v1',
   semantics_digest:'f60bfac70ddc3c4054d0f104386a07d438dab5d2bc4a1ebbfb297a9fbc6a839b',validation_kind:'real_operations',complete_cost:false,
+}),Object.freeze({
+  // Parent-only fresh launch; child execution and native resume are not covered.
+  id:'claude-workflow-02188-root-native-v1',product:'claude_code',product_version:'2.1.288',profile_id:'claude-workflow-own-trace-v1',
+  semantics_digest:'4cc9688995d6f2a95b9220db9b694ecff0d33a52e9f8672426212bee9daa57ad',validation_kind:'real_operations',complete_cost:false,
 })]);
 export const productionAnalysisEvidence:readonly string[]=Object.freeze([]);
 export const syntheticSourceEvidence:readonly SourceReadinessEvidence[]=Object.freeze([Object.freeze({id:'synthetic-flexible-v1',product:'synthetic',product_version:'1.0.0',profile_id:'synthetic-flexible-v1',

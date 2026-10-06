@@ -16,8 +16,8 @@ no product executable or model request. The production registry admits two separ
 Both collect partial own-response usage and have no complete cost. The child
 profile requires read-only permissions and does not support family resume.
 A v2 protocol accepts one profile per product/version, so choose one Codex profile
-for that protocol. Claude general workflow remains unqualified despite its
-separately verified bounded internal synchronous probe. Candidate parsers for Codex CLI 0.158.0 and Claude Code 2.1.283 are
+for that protocol. Claude Code 2.1.288 is admitted for parent-only launch
+(`claude-workflow-own-trace-v1`); its child execution remains unqualified. Candidate parsers for Codex CLI 0.158.0 and Claude Code 2.1.283 are
 synthetic test candidates, not admitted sources. The existing v1 partial adapters
 remain separate. No desktop/app support or complete usage is inferred.
 

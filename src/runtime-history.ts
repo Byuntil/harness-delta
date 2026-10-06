@@ -50,6 +50,18 @@ export function recordAbandonedRunGap(store: Store, taskId: string, sessionId: s
   const from = last ? new Date(Math.min(Date.parse(now), Date.parse(last) + 1)).toISOString() : runStartedAt;
   try { recordObservationGap(store, taskId, sessionId, from, now, 'incomplete', now); return true; } catch { return false; }
 }
+/** A pause or finish revokes scope while a workflow run may still have a request in
+ * flight; its adapter can no longer write. Mark that interval while the task is active. */
+export function recordInFlightWorkflowGaps(store: Store, taskId: string, now: string): void {
+  const runs = [
+    ...store.all<{ session_id: string; started_at: string }>("SELECT session_id,started_at FROM claude_workflow_runs WHERE task_id=? AND state='running'", [taskId])
+      .map(run => ({ started_at: run.started_at, sessions: [run.session_id, ...store.all<{ id: string }>('SELECT id FROM sessions WHERE parent_id=?', [run.session_id]).map(row => row.id)] })),
+    ...store.all<{ id: string; session_id: string | null; started_at: string }>("SELECT id,session_id,started_at FROM codex_workflow_runs WHERE task_id=? AND state='running'", [taskId])
+      .map(run => ({ started_at: run.started_at, sessions: [run.session_id, ...store.all<{ session_id: string }>('SELECT session_id FROM codex_workflow_children WHERE run_id=?', [run.id]).map(row => row.session_id)]
+        .filter((id): id is string => id !== null) })),
+  ];
+  for (const run of runs) for (const session of run.sessions) recordAbandonedRunGap(store, taskId, session, run.started_at, now);
+}
 export function recordObservationGap(store: Store, taskId: string, sessionId: string, start: string, end: string | null, reason: string, recordedAt: string = new Date().toISOString()): void {
   const startedAt = parseComparison(TimestampSchema, start);
   const endedAt = end === null ? null : parseComparison(TimestampSchema, end);

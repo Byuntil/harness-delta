@@ -134,3 +134,13 @@ const hook = (name, fields = {}) => post('/v1/hooks', { hook_event_name: name, s
     await expect(prepared.run()).rejects.toThrow('claude_probe_already_reserved');
   } finally { f.cleanup(); }
 });
+test('the internal probe keeps its 120 s window while an assigned workflow may use one hour', async () => {
+  const f = fixture(); try {
+    await expect(prepareClaudeProbeSupervisor({ ...f.options, durationMs: 120001 })).rejects.toThrow('claude_probe_invalid_supervisor');
+    const workflow = { synthetic: false, prompt: 'SYNTHETIC', model: null, effort: null, instructions: 'SYNTHETIC', maxTurns: 1, requestLimit: 1, durationMs: 3600001,
+      permissions: 'read-only' as const, assertActive: () => undefined, onChildBound: () => undefined, stopRequested: () => false };
+    await expect(prepareClaudeProbeSupervisor({ ...f.options, durationMs: 3600001, workflow })).rejects.toThrow('claude_probe_invalid_supervisor');
+    const prepared = await prepareClaudeProbeSupervisor({ ...f.options, durationMs: 600000, workflow: { ...workflow, durationMs: 600000 } });
+    expect(prepared.manifest.limits.wallTimeMs).toBe(600000); await prepared.dispose();
+  } finally { f.cleanup(); }
+});

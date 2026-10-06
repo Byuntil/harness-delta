@@ -3,11 +3,12 @@ import { spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { createClaudeWorkflowAdapter, createSyntheticClaudeWorkflowAdapter, recoverClaudeWorkflow } from '../src/claude-workflow-adapter.js';
+import { ClaudeWorkflowExecutionSchema, createClaudeWorkflowAdapter, createSyntheticClaudeWorkflowAdapter, recoverClaudeWorkflow } from '../src/claude-workflow-adapter.js';
 import { registerPriceTable } from '../src/pricing.js';
 import { makeFlexibleFixture } from './helpers/flexible-fixture.js';
 import { readObservedCostReport } from '../src/observed-cost-report.js';
 import { runAssignedWorkflow } from '../src/task-workflow.js';
+import { Lifecycle } from '../src/lifecycle.js';
 import { codexWorkflowFixture } from './helpers/codex-workflow-fixture.js';
 import { compiledWorker } from './helpers/compiled-worker.js';
 
@@ -103,6 +104,49 @@ test('a recovered Claude run keeps its abandoned state after its live process st
     expect(recoverClaudeWorkflow(f.store,'claude-run')).toMatchObject({state:'failed',reason:'abandoned'});
     await launched;
     expect(f.store.get('SELECT state,reason FROM claude_workflow_runs WHERE id=?',['claude-run'])).toEqual({state:'failed',reason:'abandoned'});
+  }finally{f.cleanup();}
+},20000);
+
+test('the native Claude adapter is parent-only and rejects a child before assignment',()=>{
+  const f=fixture('child');try{
+    expect(()=>createClaudeWorkflowAdapter(f.store,f.execution).preflight?.({model:null,effort:null})).toThrow(/^claude_workflow_child_unadmitted$/);
+    expect(()=>createClaudeWorkflowAdapter(f.store,{...f.execution,child_runtime:undefined}).preflight?.({model:null,effort:null})).not.toThrow();
+    expect(f.store.all('SELECT * FROM comparison_assignments')).toHaveLength(0);
+  }finally{f.cleanup();}
+});
+test('Claude execution limits follow the one-hour workflow bound and default to read-only',()=>{
+  const f=fixture('root');try{
+    const parsed=ClaudeWorkflowExecutionSchema.parse({...f.execution,timeout_ms:3600000,max_turns:1024,request_limit:1024});
+    expect(parsed).toMatchObject({permissions:'read-only'});expect(parsed.max_budget_usd).toBeUndefined();
+    for(const bad of [{timeout_ms:3600001},{request_limit:1025},{max_turns:1025},{permissions:'bash'},{max_budget_usd:0},{max_budget_usd:0.001}])
+      expect(ClaudeWorkflowExecutionSchema.safeParse({...f.execution,...bad}).success).toBe(false);
+  }finally{f.cleanup();}
+});
+test('pausing the task during a Claude run ends that run instead of leaving it running',async()=>{
+  const f=fixture('wait');try{
+    const launched=runAssignedWorkflow(f.store,f.input,createSyntheticClaudeWorkflowAdapter(f.store,f.execution),{model:null,effort:null});
+    const deadline=Date.now()+12000;while(f.store.eventCount()!==1&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,20));expect(f.store.eventCount()).toBe(1);
+    const taskId=f.store.get<{task_id:string}>('SELECT task_id FROM claude_workflow_runs WHERE id=?',['claude-run'])!.task_id;
+    new Lifecycle(f.store).pause(taskId);
+    // Pausing revokes the measurement scope; the shared orchestrator reports that, not an adapter failure.
+    await expect(launched).rejects.toThrow(/^workflow_scope_revoked$/);
+    // Either scope-loss detector (supervisor poll or gateway authorization) may end it first.
+    const run=f.store.get<{state:string;reason:string}>('SELECT state,reason FROM claude_workflow_runs WHERE id=?',['claude-run'])!;
+    expect(run.state).toBe('stopped');expect(['workflow_scope_revoked','claude_probe_observation_stopped']).toContain(run.reason);
+    expect(f.store.eventCount()).toBe(1);
+    // The in-flight interval after the last stored usage is marked at the pause itself.
+    const usageAt=f.store.get<{at:string}>('SELECT max(occurred_at) AS at FROM events')!.at;
+    const gaps=f.store.all<{reason:string;started_at:string}>("SELECT reason,started_at FROM observation_gaps WHERE reason='incomplete'");
+    expect(gaps).toHaveLength(1);expect(Date.parse(gaps[0]!.started_at)).toBeGreaterThan(Date.parse(usageAt));
+  }finally{f.cleanup();}
+},20000);
+test('a second Claude launch on the same task can reuse the workspace directory',async()=>{
+  const f=fixture('root');try{
+    const first=await runAssignedWorkflow(f.store,f.input,createSyntheticClaudeWorkflowAdapter(f.store,f.execution),{model:null,effort:null});
+    expect(first.adapter_result).toMatchObject({state:'completed'});
+    const second=await runAssignedWorkflow(f.store,{...f.input,confirmation_id:'confirmation-2'},createSyntheticClaudeWorkflowAdapter(f.store,{...f.execution,run_id:'claude-run-2'}),{model:null,effort:'low'});
+    expect(second).toMatchObject({task_id:first.task_id,assigned_variant_id:first.assigned_variant_id,adapter_result:{state:'completed'}});
+    expect(f.store.all('SELECT id FROM claude_workflow_runs')).toHaveLength(2);
   }finally{f.cleanup();}
 },20000);
 

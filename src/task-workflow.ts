@@ -12,6 +12,7 @@ import { comparisonReadiness } from './readiness-store.js';
 import { productionSourceEvidence, syntheticSourceEvidence } from './readiness.js';
 import type { Store } from './store.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId } from './codex-workflow-journal.js';
+import { claudeWorkflowProfileId } from './claude-workflow-adapter.js';
 
 const artifactSchema = z.strictObject({ artifact_id: IdSchema, path: z.string().min(1).max(4096) });
 export const AssignedWorkflowInputSchema = z.strictObject({ schema_version: z.literal(1),
@@ -36,7 +37,7 @@ export interface WorkflowAdapter {
   product: 'synthetic' | 'codex' | 'claude_code'; productVersion: string; profileId: string;
   /** Local file and qualification checks before assignment or task activation.
    * Never launches a product, reads session sources or writes measurement data. */
-  preflight?(runtime: WorkflowRuntime): void | Promise<void>;
+  preflight?(runtime: WorkflowRuntime, scope?: { projectRoot: string | null }): void | Promise<void>;
   /** Throwing means no native process was started; return a result otherwise. */
   run(context: WorkflowExecutionContext): Promise<void | WorkflowAdapterResult>;
 }
@@ -53,7 +54,7 @@ export interface WorkflowAdapterResult {
 const workflowAdapterCodes = new Set(['binary_mismatch', 'binary_unreadable', 'invalid_hook_recorder', 'invalid_prompt', 'unsafe_home',
   'invalid_execution', 'codex_workflow_source_unqualified', 'codex_workflow_child_operation_unsupported', 'codex_workflow_child_binding_invalid',
   'synthetic_store_required', 'workflow_run_active', 'claude_probe_executable_mismatch', 'claude_workflow_prompt_failed',
-  'claude_workflow_effort_unsupported', 'claude_workflow_already_reserved', 'claude_workflow_private_workspace_required', 'claude_workflow_source_conflict', 'candidate_mixed_sources']);
+  'claude_workflow_effort_unsupported', 'claude_workflow_already_reserved', 'claude_workflow_child_unadmitted', 'claude_workflow_harness_inside_project', 'claude_workflow_private_workspace_required', 'claude_workflow_source_conflict', 'candidate_mixed_sources']);
 function workflowAdapterCode(error: unknown, fallback: string): string {
   try { return error instanceof Error && workflowAdapterCodes.has(error.message) ? error.message : fallback; }
   catch { return fallback; }
@@ -129,7 +130,8 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
       (protocol.purpose === 'synthetic_validation' && adapter.product !== 'synthetic')) throw new Error('workflow_adapter_mismatch');
   // Environment checks precede assignment so a broken binary, recorder or prompt
   // never enrolls the task, starts its first attempt or opens an active interval.
-  try { await adapter.preflight?.(runtime); }
+  const registeredRoot = store.get<{ local_root: string | null }>('SELECT local_root FROM projects WHERE id=?', [config.assignment.project_id])?.local_root ?? null;
+  try { await adapter.preflight?.(runtime, { projectRoot: registeredRoot }); }
   // Only allowlisted fixed codes survive; producer text and paths are dropped.
   // eslint-disable-next-line preserve-caught-error
   catch (error) { throw new Error(workflowAdapterCode(error, 'workflow_preflight_failed')); }
@@ -197,7 +199,8 @@ export function finishAssignedWorkflow(store: Store, taskId: string, outcome: Ou
 
 export function workflowStatus(store: Store, protocolId: string, at = utcNow()) {
   const protocol = workflowProtocol(store, protocolId); const readiness = comparisonReadiness(store, protocolId, at);
-  const implemented=protocol.source_profiles.some(p=>p.product==='codex'&&p.product_version==='0.160.0'&&[codexWorkflowProfileId,codexWorkflowChildProfileId].includes(p.profile_id));
+  const implemented=protocol.source_profiles.some(p=>p.product==='codex'&&p.product_version==='0.160.0'&&[codexWorkflowProfileId,codexWorkflowChildProfileId].includes(p.profile_id)||
+    p.product==='claude_code'&&p.product_version==='2.1.288'&&p.profile_id===claudeWorkflowProfileId);
   return { schema_version: 1, protocol_id: protocol.id, purpose: protocol.purpose, readiness,
     native_execution: implemented&&readiness.real_allocation, codex_adapter_implemented:true, claude_adapter_implemented:true, common_coordinator: true, selected_instructions: 'transient_per_invocation_boundary',
     blockers: [...(protocol.purpose !== 'synthetic_validation' && !readiness.real_allocation ? ['native_source_unqualified'] : []),

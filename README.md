@@ -3,8 +3,8 @@
 Measure metadata for an assigned development task across explicitly linked sessions.
 
 **Preview: partial local measurement.** Codex 0.160.0 has two separately admitted
-workflow profiles. Complete task cost, actual billing and inferential adoption
-remain unavailable. Claude's bounded internal probe is not general workflow support.
+workflow profiles, and Claude Code 2.1.288 has a parent-only launch profile.
+Complete task cost, actual billing and inferential adoption remain unavailable.
 Installation does not start collection. The package is private and uses Node.js 24.
 
 처음 설치하는 팀 사용자는 아래 작업 절차를 읽으세요.

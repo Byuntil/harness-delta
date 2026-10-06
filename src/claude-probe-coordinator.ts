@@ -41,13 +41,13 @@ function validAttributes(value: unknown): boolean {
   }
   return true;
 }
-function validLogs(input: unknown): boolean {
+function validLogs(input: unknown, batchLimit: number): boolean {
   if (!object(input) || !Array.isArray(input.resourceLogs) || input.resourceLogs.length > 32) return false;
   for (const resource of input.resourceLogs) {
     if (!object(resource) || resource.resource !== undefined && (!object(resource.resource) || !validAttributes(resource.resource.attributes)) ||
       !Array.isArray(resource.scopeLogs) || resource.scopeLogs.length > 32) return false;
     for (const scope of resource.scopeLogs) {
-      if (!object(scope) || !Array.isArray(scope.logRecords) || scope.logRecords.length > 128) return false;
+      if (!object(scope) || !Array.isArray(scope.logRecords) || scope.logRecords.length > batchLimit) return false;
       if (scope.logRecords.some(r => !object(r) || !validAttributes(r.attributes))) return false;
     }
   }
@@ -63,7 +63,7 @@ export interface ClaudeProbeOptions {
   rootScope: CandidateScope; child: { sessionId: string; sourceId: string; agentType: string };
   generation: number; startedAt: string; model: string | null; effort: string | null; clock: Clock;
   /** Internal workflow mode; public CLI cannot supply synthetic admission. */
-  workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void };
+  workflow?: { synthetic: boolean; childEnabled: boolean; childRuntime?: {model:string;effort:string}|undefined; requestLimit:number; durationMs:number; assertActive:()=>void; onChildBound:(sessionId:string)=>void };
   /** Caller owns a durable one-use reservation; a failure must hold, never retry. */
   reserveChild: () => void;
 }
@@ -93,7 +93,8 @@ export class ClaudeProbeCoordinator {
       !IdSchema.safeParse(options.child.sourceId).success || !IdSchema.safeParse(options.child.agentType).success ||
       (options.model !== null && !IdSchema.safeParse(options.model).success) ||
       (!options.workflow && (options.model === null || options.effort !== 'high')) ||
-      (options.workflow && (options.effort !== null && !['low','medium','high','xhigh','max'].includes(options.effort) || !Number.isSafeInteger(options.workflow.requestLimit) || options.workflow.requestLimit < 1 || options.workflow.requestLimit > 128)) ||
+      (options.workflow && (options.effort !== null && !['low','medium','high','xhigh','max'].includes(options.effort) || !Number.isSafeInteger(options.workflow.requestLimit) || options.workflow.requestLimit < 1 || options.workflow.requestLimit > 1024 ||
+        !Number.isSafeInteger(options.workflow.durationMs) || options.workflow.durationMs < 1 || options.workflow.durationMs > 3600000)) ||
       !TimestampSchema.safeParse(options.startedAt).success ||
       options.child.sessionId === options.rootScope.sessions[0]?.sessionId ||
       options.child.sourceId === options.rootScope.sessions[0]?.sourceId ||
@@ -120,7 +121,7 @@ export class ClaudeProbeCoordinator {
     catch { this.revoked = true; fail('claude_trace_scope_revoked'); }
     const now = this.options.clock();
     if (!TimestampSchema.safeParse(now).success || Date.parse(now) < Date.parse(this.options.startedAt) ||
-      Date.parse(now) - Date.parse(this.options.startedAt) > 120000) this.stop('claude_probe_deadline', 'incomplete');
+      Date.parse(now) - Date.parse(this.options.startedAt) > (this.options.workflow?.durationMs ?? 120000)) this.stop('claude_probe_deadline', 'incomplete');
   }
   private read(token: string, callback: () => unknown): unknown {
     this.authorize(token);
@@ -201,9 +202,12 @@ export class ClaudeProbeCoordinator {
     // SessionStart and log startup are independent prerequisites for usage; no
     // raw early trace is queued or admitted while either prerequisite is missing.
     const raw = this.read(token, readBody);
-    if (!validLogs(raw)) this.stop('claude_probe_invalid_logs', 'source_error');
+    // Workflow runs see native exporter batches (default 512) and keep every
+    // sequence key for exact replay detection, bounded per invocation.
+    const batchLimit = this.options.workflow ? 512 : 128; const keyLimit = this.options.workflow ? 65536 : 128;
+    if (!validLogs(raw, batchLimit)) this.stop('claude_probe_invalid_logs', 'source_error');
     const records = decodeLogsRequest(raw);
-    if (records === null || records.length === 0 || records.length > 128) this.stop('claude_probe_invalid_logs', 'source_error');
+    if (records === null || records.length === 0 || records.length > batchLimit) this.stop('claude_probe_invalid_logs', 'source_error');
     const root = this.scope.sessions[0]!; const keys = new Map(this.sequenceKeys); let sequence = this.lastSequence;
     let accepted = 0; let replayed = 0;
     for (const record of records) {
@@ -224,7 +228,7 @@ export class ClaudeProbeCoordinator {
         if (previous !== key) this.stop('claude_probe_log_conflict'); replayed++; continue;
       }
       if (number !== sequence + 1 || sequence === -1 && (name !== 'managed_settings_resolved' || !noPolicy || trigger !== 'startup')) this.stop('claude_probe_log_gap', 'incomplete');
-      if (keys.size >= 128) this.stop('claude_probe_log_limit', 'incomplete');
+      if (keys.size >= keyLimit) this.stop('claude_probe_log_limit', 'incomplete');
       keys.set(number, key); sequence = number; accepted++;
     }
     this.authorize(token); this.sequenceKeys = keys; this.lastSequence = sequence; return { accepted, replayed };
@@ -240,7 +244,7 @@ export class ClaudeProbeCoordinator {
       for (const scope of resource.scopeSpans) {
         if (!object(scope) || !Array.isArray(scope.spans)) this.stop('claude_probe_invalid_traces', 'source_error');
         for (const span of scope.spans) {
-          if (++count > 128 || !object(span)) this.stop('claude_probe_invalid_traces', 'source_error');
+          if (++count > (this.options.workflow ? 512 : 128) || !object(span)) this.stop('claude_probe_invalid_traces', 'source_error');
           if (!Array.isArray(span.attributes)) this.stop('claude_probe_invalid_traces', 'source_error');
           const attrs = new Map<string, unknown>();
           for (const item of span.attributes) {

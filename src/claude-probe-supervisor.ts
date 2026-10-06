@@ -14,7 +14,8 @@ export interface ClaudeProbeSupervisorOptions {
   store: Store; rootScope: CandidateScope;
   child: { sessionId: string; sourceId: string; agentType: string }; generation: number;
   workspace: string; cwd: string; binary: ClaudeNativeProbeOptions['binary']; mediatorPath: string;
-  /** A test/caller may shorten the window, never extend the 120-second maximum. */
+  /** A test/caller may shorten the window, never extend the maximum: 120 s for the
+   * internal probe, one hour for an assigned workflow invocation. */
   durationMs?: number;
   workflow?: ClaudeWorkflowInvocation & {synthetic:boolean;prompt:string;assertActive:()=>void;onChildBound:(sessionId:string)=>void;stopRequested:()=>boolean};
 }
@@ -42,7 +43,7 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
   const options = { ...input, rootScope: structuredClone(input.rootScope), binary: { ...input.binary }, child: { ...input.child } };
   const durationMs = options.durationMs ?? 120000;
   if (process.platform === 'win32' || Number(process.versions.node.split('.')[0]) !== 24 ||
-      !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 120000) throw new Error('claude_probe_invalid_supervisor');
+      !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > (options.workflow ? 3600000 : 120000)) throw new Error('claude_probe_invalid_supervisor');
   verifyClaudeProbeBinary(options.binary);
   const cwd = realpathSync(options.cwd);
   const root = options.rootScope.sessions[0];
@@ -51,7 +52,7 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
   const startedAt = utcNow(); const until = Date.now() + durationMs;
   const coordinator = new ClaudeProbeCoordinator(options.store, { rootScope: options.rootScope, child: options.child,
     generation: options.generation, startedAt, model: options.workflow ? options.workflow.model : 'claude-sonnet-5-5', effort: options.workflow ? options.workflow.effort : 'high', clock: utcNow,
-    ...(options.workflow ? {workflow:{synthetic:options.workflow.synthetic,childEnabled:options.workflow.childRuntime !== undefined,childRuntime:options.workflow.childRuntime,requestLimit:options.workflow.requestLimit,assertActive:options.workflow.assertActive,onChildBound:options.workflow.onChildBound}} : {}),
+    ...(options.workflow ? {workflow:{synthetic:options.workflow.synthetic,childEnabled:options.workflow.childRuntime !== undefined,childRuntime:options.workflow.childRuntime,requestLimit:options.workflow.requestLimit,durationMs,assertActive:options.workflow.assertActive,onChildBound:options.workflow.onChildBound}} : {}),
     reserveChild: () => reserveClaudeProbeAction(options.workspace, 'child', root.processId!) });
   const token = coordinator.exporterHeaders()['x-harness-delta-token']!;
   const abort = new AbortController(); let stopReason: string | null = null;

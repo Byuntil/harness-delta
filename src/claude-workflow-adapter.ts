@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, mkdirSync, lstatSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync, realpathSync, mkdirSync, lstatSync } from 'node:fs';
+import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
 import { IdSchema, ModelSchema } from './contracts.js';
 import { bindConfigurationToSession } from './config-confirmation.js';
@@ -10,15 +11,19 @@ import type { CandidateScope } from './nested-candidate.js';
 import type { Store } from './store.js';
 import type { WorkflowAdapter, WorkflowAdapterResult } from './task-workflow.js';
 
-/** Deliberately absent from the code-owned native qualification registry. */
+/** Admitted parent-only in the code-owned registry (claude-workflow-02188-root-native-v1). */
 export const claudeWorkflowProfileId = 'claude-workflow-own-trace-v1';
 const effort = z.enum(['low','medium','high','xhigh','max']);
 export const ClaudeWorkflowExecutionSchema = z.strictObject({
   operation:z.literal('launch'), run_id:IdSchema,
   binary:z.strictObject({path:z.string().min(1).max(4096),version:z.literal('2.1.288'),sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
   workspace:z.string().min(1).max(4096), mediator_path:z.string().min(1).max(4096), prompt_file:z.string().min(1).max(4096),
-  timeout_ms:z.number().int().min(1).max(120000), max_turns:z.number().int().min(1).max(64),
-  request_limit:z.number().int().min(1).max(128),
+  timeout_ms:z.number().int().min(1).max(3600000), max_turns:z.number().int().min(1).max(1024),
+  request_limit:z.number().int().min(1).max(1024),
+  /** read-only: Read/Glob/Grep. workspace-edit adds Edit/Write; never Bash. */
+  permissions:z.enum(['read-only','workspace-edit']).default('read-only'),
+  /** Passed to the CLI's own estimate; not a provider or subscription spending cap. */
+  max_budget_usd:z.number().min(0.01).max(1000).optional(),
   child_runtime:z.strictObject({model:ModelSchema,effort}).optional(),
 });
 
@@ -33,6 +38,19 @@ function readPrompt(path:string):string {
   }catch{throw new Error('claude_workflow_prompt_failed');}
   finally{if(fd!==undefined)closeSync(fd);}
 }
+/** With edit tools, any file the harness executes or trusts must be unreachable:
+ * an edited hook mediator (or its sibling modules) would run model-written code. */
+function harnessOutsideProject(projectRoot:string|null,paths:string[]):void {
+  // native realpath returns the on-disk spelling, so case-insensitive aliases compare equal.
+  const real=(path:string):string=>existsSync(path)?realpathSync.native(path):join(real(dirname(path)),basename(path));
+  let root:string;
+  try{if(projectRoot===null)throw new Error('missing');root=realpathSync.native(projectRoot);}
+  catch{throw new Error('claude_workflow_harness_inside_project');}
+  for(const path of paths){
+    const resolved=real(path);
+    if(resolved===root||resolved.startsWith(root+sep))throw new Error('claude_workflow_harness_inside_project');
+  }
+}
 export function createClaudeWorkflowAdapter(store:Store,input:unknown):WorkflowAdapter { return adapter(store,input,false); }
 /** Test-only trusted dependency, with a synthetic workspace and synthetic usage.
  * Never exposed as a public flag, binary option, profile, or admission override.
@@ -43,11 +61,15 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
   const admitted=(requested:string|null)=>{
     if(requested!==null&&!effort.safeParse(requested).success)throw new Error('claude_workflow_effort_unsupported');
     if(store.get('SELECT 1 FROM claude_workflow_runs WHERE id=?',[e.run_id]))throw new Error('claude_workflow_already_reserved');
+    // The admitted native profile is parent-only; child execution has no native qualification.
+    if(!synthetic&&e.child_runtime)throw new Error('claude_workflow_child_unadmitted');
   };
   return {product:synthetic?'synthetic':'claude_code',productVersion:synthetic?'1.0.0':'2.1.288',
     profileId:synthetic?'synthetic-flexible-v1':claudeWorkflowProfileId,
-    preflight(runtime){
+    preflight(runtime,scope){
       admitted(runtime.effort);
+      if(e.permissions==='workspace-edit')harnessOutsideProject(scope?.projectRoot??null,[e.workspace,e.mediator_path,dirname(e.mediator_path),e.prompt_file,e.binary.path,process.execPath,
+        ...(store.filename&&store.filename!==':memory:'?[store.filename]:[])]);
       // Supervisor preparation verifies the binary again before any launch.
       verifyClaudeProbeBinary(e.binary);readPrompt(e.prompt_file);
     },
@@ -74,10 +96,13 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
         c.assertActive();const prompt=readPrompt(e.prompt_file);c.assertActive();
         mkdirSync(e.workspace,{recursive:true,mode:0o700});
         if(realpathSync(e.workspace)!==e.workspace||!lstatSync(e.workspace).isDirectory()||(lstatSync(e.workspace).mode&0o077)!==0)throw new Error('claude_workflow_private_workspace_required');
+        // One private subdirectory per run: the probe manifest and reservations are one-use.
+        const runWorkspace=join(e.workspace,e.run_id);
+        try{mkdirSync(runWorkspace,{mode:0o700});}catch{throw new Error('claude_workflow_private_workspace_required');}
         supervisor=await prepareClaudeProbeSupervisor({store,rootScope:scope,generation:c.generation,
-          child:{sessionId:randomUUID(),sourceId:randomUUID(),agentType:'qualification-child'},workspace:e.workspace,cwd:c.projectRoot,
+          child:{sessionId:randomUUID(),sourceId:randomUUID(),agentType:'qualification-child'},workspace:runWorkspace,cwd:c.projectRoot,
           binary:e.binary,mediatorPath:e.mediator_path,durationMs:e.timeout_ms,
-          workflow:{synthetic,model:c.runtime.model,effort:c.runtime.effort,childRuntime:e.child_runtime,
+          workflow:{synthetic,model:c.runtime.model,effort:c.runtime.effort,childRuntime:e.child_runtime,permissions:e.permissions,maxBudgetUsd:e.max_budget_usd,
             instructions:c.instructions.map(row=>row.content).join('\n\n'),maxTurns:e.max_turns,requestLimit:e.request_limit,durationMs:e.timeout_ms,prompt,
             assertActive:()=>c.assertActive(),onChildBound:id=>bindConfigurationToSession(store,c.confirmationId,id),
             stopRequested:()=>store.get<{stop_requested:number}>('SELECT stop_requested FROM claude_workflow_runs WHERE id=?',[e.run_id])?.stop_requested!==0,
@@ -96,10 +121,10 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
           // Deletion/revocation must never restore a journal, event or session.
           if(!store.get('SELECT 1 FROM claude_workflow_runs WHERE id=?',[e.run_id]))return;
           observed=store.get<{count:number}>("SELECT count(*) AS count FROM events WHERE task_id=? AND session_id IN (SELECT id FROM sessions WHERE id=? OR parent_id=?) AND json_extract(payload,'$.kind')='usage'",[c.taskId,sessionId,sessionId])!.count;
-          if(state!=='completed'){
+          if(state!=='completed'){try{
             const last=store.get<{at:string|null}>("SELECT max(occurred_at) AS at FROM events WHERE task_id=? AND session_id IN (SELECT id FROM sessions WHERE id=? OR parent_id=?)",[c.taskId,sessionId,sessionId])?.at;
             recordObservationGap(store,c.taskId,sessionId,last?new Date(Math.min(Date.parse(endedAt),Date.parse(last)+1)).toISOString():startedAt,endedAt,'incomplete',endedAt);
-          }
+          }catch{/* Scope loss (pause, finish) forbids further measurement writes; the run still ends. */}}
           // A recovered (abandoned) run keeps its human-recorded terminal state.
           store.execute("UPDATE claude_workflow_runs SET state=?,ended_at=?,reason=?,observed_requests=? WHERE id=? AND state='running'",[state,endedAt,reason,observed,e.run_id]);
         });

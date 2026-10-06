@@ -22,7 +22,7 @@ const envelopeSchema = z.looseObject({ resourceSpans: z.array(z.looseObject({
     name: z.string(), traceId: z.unknown().optional(), spanId: z.unknown().optional(),
     startTimeUnixNano: z.unknown().optional(), endTimeUnixNano: z.unknown().optional(),
     attributes: attributes.optional(), status: z.unknown().optional(),
-  })).max(128) })).max(32),
+  })).max(512) })).max(32),
 })).max(32) });
 function map(input: { key: string; value: unknown }[] | undefined): Map<string, unknown> {
   const result = new Map<string, unknown>();
@@ -110,7 +110,7 @@ export function ingestClaudeTraceBatch(store: Store, inputScope: CandidateScope,
     for (const resourceSpans of parsed.data.resourceSpans) {
       const resource = map(resourceSpans.resource?.attributes);
       for (const scoped of resourceSpans.scopeSpans) for (const span of scoped.spans) {
-        if (++count > 128) invalid();
+        if (++count > 512) invalid(); // Native exporter default batch size.
         if (span.name !== 'claude_code.llm_request') continue;
         const record = map(span.attributes);
         const processId = agreed(record, resource, 'harness_delta.process_id');

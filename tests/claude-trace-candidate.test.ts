@@ -146,3 +146,11 @@ test('ambiguous OTLP AnyValue leaf types are rejected rather than resolved by pr
     expect(() => ingest(traces([{ ...s, attributes }]))).toThrow('claude_trace_invalid_metadata'); expect(store.eventCount()).toBe(0);
   } finally { store.close(); }
 });
+test('a trace batch accepts up to the native exporter batch size of 512 spans', () => {
+  const { store, ingest } = fixture(); try {
+    const other = { ...span(), name: 'claude_code.tool' };
+    expect(ingest(traces([span(), ...Array.from({ length: 511 }, () => other)]))).toMatchObject({ requests: 1, inserted: 1 });
+    expect(() => ingest(traces([span(true), ...Array.from({ length: 512 }, () => other)]))).toThrow('claude_trace_invalid_metadata');
+    expect(store.eventCount()).toBe(1);
+  } finally { store.close(); }
+});
