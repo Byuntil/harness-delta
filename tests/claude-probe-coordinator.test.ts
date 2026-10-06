@@ -1,17 +1,17 @@
 import { expect, test } from 'vitest';
-import { ClaudeProbeCoordinator } from '../src/claude-probe-coordinator.js';
+import { ClaudeProbeCoordinator, type ClaudeProbeOptions } from '../src/claude-probe-coordinator.js';
 import { Store } from '../src/store.js';
 import { attrs, receivedAt, span, startedAt, traceScope, traces } from './helpers/claude-trace-fixture.js';
 
 const rootScope = { ...traceScope, sessions: traceScope.sessions.slice(0, 1) };
-function fixture() {
+function fixture(workflow?: ClaudeProbeOptions['workflow']) {
   const store = new Store(':memory:');
   store.execute("INSERT INTO projects(id) VALUES ('project-1')", []);
   store.execute("INSERT INTO tasks(id,project_id,state) VALUES ('task-1','project-1','active')", []);
   store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES ('root','project-1','task-1','claude_code','2.1.288')", []);
   let now = startedAt; let reservations = 0;
   const probe = new ClaudeProbeCoordinator(store, { rootScope, child: { sessionId: 'child', sourceId: 'source-child', agentType: 'qualification-child' },
-    generation: 0, startedAt, model: 'root-model', effort: 'high', clock: () => now, reserveChild: () => { reservations++; } });
+    generation: 0, startedAt, model: 'root-model', effort: 'high', clock: () => now, reserveChild: () => { reservations++; }, ...(workflow ? { workflow } : {}) });
   const token = probe.exporterHeaders()['x-harness-delta-token']!;
   const hook = (name: string, patch: Record<string, unknown> = {}) => probe.acceptHook(token, () => ({ hook_event_name: name, session_id: 'native-root', ...patch }));
   const logs = (records: unknown[]) => probe.ingestLogs(token, () => ({ resourceLogs: [{ resource: { attributes: attrs({ 'harness_delta.process_id': 'process-1' }) }, scopeLogs: [{ logRecords: records }] }] }));
@@ -199,6 +199,22 @@ test('a probe bounds unique log keys while exact replay does not consume the lim
     expect(() => f.logs([f.log(128)])).toThrow('claude_probe_log_limit');
     expect(f.probe.state()).toMatchObject({ lastSequence: 127, revoked: true }); expect(f.store.eventCount()).toBe(0);
   } finally { f.store.close(); }
+});
+test('a workflow run accepts exporter-sized batches, more keys and its own longer window', () => {
+  const f = fixture({ synthetic: false, childEnabled: false, requestLimit: 1024, durationMs: 600000, assertActive: () => undefined, onChildBound: () => undefined });
+  const at = (ms: number) => new Date(Date.parse(startedAt) + ms).toISOString();
+  try {
+    f.hook('SessionStart', { source: 'startup' }); f.logs([f.startup()]);
+    f.logs(Array.from({ length: 400 }, (_, i) => f.log(i + 1)));
+    f.set(at(300000)); expect(f.logs(Array.from({ length: 400 }, (_, i) => f.log(i + 401)))).toEqual({ accepted: 400, replayed: 0 });
+    expect(f.probe.state()).toMatchObject({ lastSequence: 800, revoked: false });
+    expect(() => f.logs(Array.from({ length: 513 }, (_, i) => f.log(i + 801)))).toThrow('claude_probe_invalid_logs');
+  } finally { f.store.close(); }
+  const late = fixture({ synthetic: false, childEnabled: false, requestLimit: 1024, durationMs: 600000, assertActive: () => undefined, onChildBound: () => undefined });
+  try {
+    late.hook('SessionStart', { source: 'startup' }); late.set(at(600001));
+    expect(() => late.logs([late.startup()])).toThrow('claude_probe_deadline');
+  } finally { late.store.close(); }
 });
 test('model-less native SessionStart starts the root; a present mismatched model still stops', () => {
   const f = fixture(); try {

@@ -17,7 +17,7 @@ export interface ClaudeNativeProbeOptions {
 export interface ClaudeProbeManifest {
   schemaVersion: 1; processId: string; nativeSessionId: string; binary: ClaudeNativeProbeOptions['binary'];
   model: string | null; effort: string | null; nativeSchemaQualified: false;
-  limits: { plannedRequests: number; wallTimeMs: number; estimatedBudgetUsd: string; hardBillingBound: null };
+  limits: { plannedRequests: number; wallTimeMs: number; estimatedBudgetUsd: string | null; hardBillingBound: null };
 }
 export interface PreparedClaudeNativeProbe {
   manifest: ClaudeProbeManifest; manifestPath: string; settingsPath: string; argv: readonly string[];
@@ -32,6 +32,7 @@ const invalid = (): never => { throw new Error('claude_probe_invalid_preparation
 export interface ClaudeWorkflowInvocation {
   model:string|null; effort:string|null; childRuntime?:{model:string;effort:string}|undefined;
   instructions:string; maxTurns:number; requestLimit:number; durationMs:number;
+  permissions:'read-only'|'workspace-edit'; maxBudgetUsd?:number|undefined;
 }
 export async function prepareClaudeNativeProbe(options: ClaudeNativeProbeOptions, workflow?:ClaudeWorkflowInvocation): Promise<PreparedClaudeNativeProbe> {
   if (options.binary.version !== '2.1.288' || !/^[a-f0-9]{64}$/.test(options.binary.sha256) ||
@@ -39,7 +40,9 @@ export async function prepareClaudeNativeProbe(options: ClaudeNativeProbeOptions
     options.model !== 'claude-sonnet-5-5' || options.effort !== 'high' ||
     !/^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/.test(options.nativeSessionId) ||
     options.hookCommand.length === 0 || options.hookCommand.length > 4096 || /[\n\r\0]/.test(options.hookCommand)) invalid();
-  if (workflow && (workflow.instructions.length === 0 || workflow.instructions.length > 1048576 || !Number.isSafeInteger(workflow.maxTurns) || workflow.maxTurns < 1 || workflow.maxTurns > 64)) invalid();
+  if (workflow && (workflow.instructions.length === 0 || workflow.instructions.length > 1048576 || !Number.isSafeInteger(workflow.maxTurns) || workflow.maxTurns < 1 || workflow.maxTurns > 1024 ||
+    !['read-only', 'workspace-edit'].includes(workflow.permissions) ||
+    workflow.maxBudgetUsd !== undefined && !(Number.isFinite(workflow.maxBudgetUsd) && workflow.maxBudgetUsd > 0 && workflow.maxBudgetUsd <= 1000))) invalid();
   const env = { ...claudeTelemetryEnv(options.destination),
     CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1', ENABLE_ENHANCED_TELEMETRY_BETA: '1', OTEL_TRACES_EXPORTER: 'otlp',
     OTEL_LOGS_EXPORT_INTERVAL: '1000', OTEL_TRACES_EXPORT_INTERVAL: '1000', DISABLE_AUTOUPDATER: '1',
@@ -51,7 +54,8 @@ export async function prepareClaudeNativeProbe(options: ClaudeNativeProbeOptions
   if (lstatSync(workspace).isSymbolicLink() || !lstatSync(workspace).isDirectory()) invalid();
   const manifest: ClaudeProbeManifest = { schemaVersion: 1, processId: options.destination.processId,
     nativeSessionId: options.nativeSessionId, binary: { ...options.binary }, model: workflow ? workflow.model : options.model, effort: workflow ? workflow.effort : options.effort,
-    nativeSchemaQualified: false, limits: { plannedRequests: workflow?.requestLimit ?? 3, wallTimeMs: workflow?.durationMs ?? 120000, estimatedBudgetUsd: '0.10', hardBillingBound: null } };
+    nativeSchemaQualified: false, limits: { plannedRequests: workflow?.requestLimit ?? 3, wallTimeMs: workflow?.durationMs ?? 120000,
+      estimatedBudgetUsd: workflow ? workflow.maxBudgetUsd === undefined ? null : String(workflow.maxBudgetUsd) : '0.10', hardBillingBound: null } };
   const manifestPath = join(workspace, 'claude-probe-manifest.json');
   const serialized = JSON.stringify(manifest);
   let manifestExists = false; let manifestFailed = false;
@@ -88,10 +92,13 @@ export async function prepareClaudeNativeProbe(options: ClaudeNativeProbeOptions
     '--session-id', options.nativeSessionId, '--no-session-persistence', '--no-chrome', '--disable-slash-commands',
     '--prompt-suggestions', 'false', '--output-format', 'stream-json', '--verbose'];
   if (workflow) {
+    // dontAsk denies anything not listed; Bash is never listed.
+    const tools = ['Read', 'Glob', 'Grep', ...(workflow.permissions === 'workspace-edit' ? ['Edit', 'Write'] : []), ...(workflow.childRuntime ? ['Agent'] : [])].join(',');
     argv.splice(0,argv.length,...['-p', ...(workflow.model !== null ? ['--model',workflow.model] : []),
-      ...(workflow.effort !== null ? ['--effort',workflow.effort] : []), '--max-turns',String(workflow.maxTurns),'--max-budget-usd','0.10',
-      '--restricted','--permission-mode','dontAsk','--permission-prompts','none','--tools',workflow.childRuntime ? 'Read,Glob,Grep,Agent' : 'Read,Glob,Grep',
-      '--allowedTools',workflow.childRuntime ? 'Read,Glob,Grep,Agent' : 'Read,Glob,Grep','--strict-mcp-config','--mcp-config',mcpPath,
+      ...(workflow.effort !== null ? ['--effort',workflow.effort] : []), '--max-turns',String(workflow.maxTurns),
+      ...(workflow.maxBudgetUsd !== undefined ? ['--max-budget-usd',String(workflow.maxBudgetUsd)] : []),
+      '--restricted','--permission-mode','dontAsk','--permission-prompts','none','--tools',tools,
+      '--allowedTools',tools,'--strict-mcp-config','--mcp-config',mcpPath,
       '--setting-sources','','--settings',settingsPath,...(workflow.childRuntime ? ['--agents',agentsPath] : []),
       '--append-system-prompt-file',instructionPath,...(workflow.childRuntime ? ['--append-subagent-system-prompt-file',instructionPath] : []),
       '--session-id',options.nativeSessionId,'--no-session-persistence','--no-chrome','--disable-slash-commands',

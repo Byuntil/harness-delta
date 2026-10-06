@@ -135,11 +135,12 @@ test('another in-progress run prevents pausing; a paused task suggests continuin
     const failed = (id: string): WorkflowAdapterResult => ({ run_id: id, session_id: null, state: 'failed', reason: 'binary_mismatch', observed_requests: 0, harness_application: 'unapplied', process_started: false });
     const racing: WorkflowAdapter = { ...stub(), run: () => { journalRun(f, 'other-live', 'running', null, new Date().toISOString()); return Promise.resolve(failed('mine')); } };
     expect(await runAssignedWorkflow(f.store, f.input, racing, runtime)).toMatchObject({ state: 'active', activation_reverted: false });
-    // Recovering after a pause cannot record a gap; the result says so.
+    // The pause itself marks the stranded run's interval; recover afterwards cannot add another and says so.
     const { Lifecycle } = await import('../src/lifecycle.js');
     f.store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) SELECT 'stranded-session',project_id,id,'synthetic','1.0.0' FROM tasks", []);
     f.store.execute("UPDATE codex_workflow_runs SET session_id='stranded-session' WHERE id='other-live'", []);
     new Lifecycle(f.store).pause('task-1');
+    expect(f.store.all("SELECT reason FROM observation_gaps WHERE session_id='stranded-session'")).toEqual([{ reason: 'incomplete' }]);
     expect(recoverCodexWorkflow(f.store, 'other-live')).toMatchObject({ observation_gaps: 0, gaps_not_recorded: 1, gap_warning: 'task_not_active' });
     const status = workflowTaskStatus(f.store, 'task-1', new Date().toISOString());
     expect(status).toMatchObject({ state: 'paused', next_actions: ['continue_with_launch_or_resume', 'finish_before_followup_deadline'] });

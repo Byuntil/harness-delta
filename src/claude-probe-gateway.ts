@@ -48,7 +48,7 @@ export async function startClaudeProbeGateway(coordinator: ClaudeProbeGatewayCoo
   const maxBodyBytes = options.maxBodyBytes ?? 4 * 1024 * 1024;
   const durationMs = options.durationMs ?? 120000;
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1 || maxBodyBytes > 4 * 1024 * 1024 ||
-      !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 120000) throw new Error('claude_probe_gateway_invalid_limits');
+      !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > 3600000) throw new Error('claude_probe_gateway_invalid_limits');
   const header = 'x-harness-delta-token'; const initialToken = coordinator.exporterHeaders()[header];
   if (typeof initialToken !== 'string') throw new Error('claude_probe_gateway_invalid_token');
   coordinator.authorizeRequest(initialToken); // Scope precedes listening.

@@ -1,0 +1,12 @@
+{
+  "run_id": "claude-run-1",
+  "operation": "launch",
+  "binary": { "path": "/absolute/path/to/claude/versions/2.1.288", "version": "2.1.288", "sha256": "bbe93063f7a0879a1021b2891e5c9354e5b3b98433e32efe6750f7710afed750" },
+  "workspace": "/absolute/path/to/private-claude-workspace",
+  "mediator_path": "/absolute/path/to/harness-delta/dist/claude-probe-hook-mediator.js",
+  "prompt_file": "/absolute/path/to/private-task-prompt.txt",
+  "permissions": "workspace-edit",
+  "timeout_ms": 1800000,
+  "max_turns": 200,
+  "request_limit": 400
+}

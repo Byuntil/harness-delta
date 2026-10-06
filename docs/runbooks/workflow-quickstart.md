@@ -3,7 +3,8 @@
 [한국어](workflow-quickstart.ko.md) · [Documentation map](../../README.md#documentation)
 
 Use this procedure for a small **functional pilot** with descriptive partial costs.
-It covers Codex 0.160.0 and `codex-workflow-own-response-v1`.
+It covers Codex 0.160.0 (`codex-workflow-own-response-v1`) and
+Claude Code 2.1.288 parent-only launch (`claude-workflow-own-trace-v1`).
 Use one persistent A/B assignment for each logical task.
 Choose model and effort per invocation; a new session does not change the assignment.
 
@@ -14,7 +15,7 @@ Choose model and effort per invocation; a new session does not change the assign
 | Codex 0.160.0 root workflow | Launch, same-session resume, explicit independent-root link, foreground collect, stop and recover; partial usage |
 | Codex 0.160.0 direct-child workflow | Separate profile: fresh root and one fresh child, pinned macOS arm64/Node24, read-only; no family resume or external child link |
 | Legacy file collector | Codex 0.156.1/0.158.0 and Claude Code 2.1.283 only; use [local measurement](local-measurement.md) |
-| Claude Code 2.1.288 | Bounded internal synchronous probe verified; general assigned workflow remains unadmitted |
+| Claude Code 2.1.288 parent-only workflow | Fresh launch per run (read-only or `workspace-edit`), another launch on the same task, stop and recover; partial usage. No child, native resume or other version |
 | App/IDE/MCP, forks, compaction, deeper descendants | Unsupported for this procedure |
 | Complete task cost, actual billing, savings or adoption inference | Unavailable |
 | Team file exchange | Synthetic validation only; functional-pilot results cannot use that exchange |
@@ -33,7 +34,7 @@ See [execution details and limits](task-native-workflow.md).
 
 ## 1. Install from the checkout
 
-Prerequisites: Node.js 24, npm and the existing pinned Codex 0.160.0 binary.
+Prerequisites: Node.js 24, npm and the existing pinned Codex 0.160.0 or Claude Code 2.1.288 binary.
 Local validation covers macOS arm64. Other platforms remain unverified.
 The package is private; there is no published-package installation procedure.
 
@@ -56,7 +57,7 @@ The package is private; there is no published-package installation procedure.
    node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow --help
    ```
 
-Expected: the help lists `codex`, `status`, `task`, `begin`, `finish` and `report`.
+Expected: the help lists `codex`, `claude`, `status`, `task`, `begin`, `finish` and `report`.
 The top-level `comparison` help still describes the legacy synthetic path. Use `workflow status` in step 4 to check the v2 native gate.
 If installation fails, check Node 24 and the SQLite native-build prerequisites in [CONTRIBUTING](../../CONTRIBUTING.md#development-environment).
 Installation also installs local Git hooks. It does not start collection or change product authentication.
@@ -115,6 +116,17 @@ Those values require the owner's choice; they do not establish statistical power
 | `runtime.json` | User-selected model and effort, or `null` for unspecified; no diagnostic model is required |
 | `launch.json`, `resume.json` | Canonical absolute binary/home/recorder/prompt paths, approved sandbox and timeout |
 | `link.json`, `collect.json` | The same canonical setup; exact linked session UUID and source path where required |
+| `claude-launch.json` (Claude only) | Pinned 2.1.288 binary path/SHA, private mode-0700 workspace, built mediator, prompt, `permissions`, limits |
+
+For Claude Code, also set `product: "claude_code"`, `product_version: "2.1.288"` in
+`workflow.json`, and the `claude_code / 2.1.288 / claude-workflow-own-trace-v1`
+source profile in `protocol.json`. Point `binary.path` at the exact 2.1.288 file
+(for a native install, under `~/.local/share/claude/versions/`), not the `claude` launcher.
+If that file is missing or changed, preflight fails with `claude_probe_executable_mismatch`
+before assignment.
+With `permissions: "workspace-edit"`, keep the workspace, harness-delta build (mediator), prompt, binary and
+database outside the measured project root; otherwise preflight fails with `claude_workflow_harness_inside_project`.
+A `workspace` can be reused across launches; each run uses its own subdirectory.
 
 All JSON examples are complete schema inputs, but their choices are synthetic.
 Keep prompts, approved execution requests and databases under ignored local storage.
@@ -184,9 +196,12 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex launch \
   --execution .harness-delta/pilot/launch.json --confirmation confirmation-1
 ```
 
+For Claude Code, run `workflow claude launch` with the same options and `claude-launch.json`.
+`child_runtime` is rejected before assignment (`claude_workflow_child_unadmitted`).
+
 Launch assigns and starts the task. Do not run `task register` for this v2 assignment.
 `workflow begin` prepares assignment/start without product execution; it does not apply a harness by itself.
-Preflight checks binary, recorder, prompt and home before assignment/start.
+Preflight checks binary, recorder, prompt and home before assignment/start (Claude: binary, prompt, effort, child scope and harness location; the workspace is checked at launch).
 A preflight failure creates no assignment or active interval.
 A later pre-spawn failure can pause an activated task again; its receipt shows `activation_reverted: true`.
 
@@ -224,6 +239,8 @@ The receipt's instruction verification covers outgoing invocation settings, not 
    ```
 
 Expected: `stop` ends the run/collection; `pause` closes the task's active-time interval.
+Use `workflow claude stop` and `workflow claude recover` for Claude runs.
+Pausing during a run also ends it: the launch reports `workflow_scope_revoked` and the in-flight interval is recorded as an `incomplete` gap.
 A completed or stopped run alone leaves the task active. Active time is not human labor.
 
 If the collector disappeared while a run stays `running`, recover before pausing or finishing:
@@ -233,7 +250,7 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex recover r
 ```
 
 Recover records failure `abandoned` and an observation gap; it adds no usage.
-An inactive task reports `gap_warning: task_not_active` instead of recording that gap.
+An inactive task reports `gap_warning: task_not_active` instead of recording that gap. If the task was paused or finished while the run was `running`, that transition already recorded the gap.
 Recover cannot signal an orphaned native process. End any leftover product process yourself before another run.
 
 ## 7. Resume or use another session
@@ -250,6 +267,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex resume \
   --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
   --execution .harness-delta/pilot/resume.json --confirmation confirmation-2
 ```
+
+Claude Code has no resume or link operation here; continue with another `workflow claude launch`
+on the same task, using a new `run_id` and confirmation ID. The new session starts without the earlier conversation.
 
 For another independent root, use a new `run_id` and prompt in `launch.json` with the same workflow file.
 Run the launch command from step 5 with a new confirmation ID.

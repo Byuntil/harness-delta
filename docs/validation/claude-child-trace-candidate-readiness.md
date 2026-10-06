@@ -3,13 +3,14 @@
 The internal Claude trace candidate connects synthetic OTLP HTTP/JSON request
 spans to the PR25 parent/child usage projector and durable request deduplication.
 It adds no production adapter, public export, measurement CLI command, or product
-launcher. Claude Code 2.1.288 remains unadmitted. Existing 2.1.283 partial file
+launcher. Claude Code 2.1.288 child traces remain unadmitted; only the parent-only
+workflow profile is admitted ([evidence](claude-workflow-02188-source-readiness.md)). Existing 2.1.283 partial file
 collection and the production OTel receiver are unchanged.
 
 This document describes the candidate lane. A later separately approved bounded
 2.1.288 native probe succeeded with two root and one direct-child usage records;
 see the [current probe evidence and support contract](claude-native-probe-preparation.md#verified-bounded-native-probe-and-current-support-contract).
-That result does not admit the general workflow profile or establish completeness.
+That result does not admit child execution or establish completeness.
 
 Applicable requirements are [R01, R02, R04, R05 and R07](../requirements.md).
 See [ADR 006](../decisions/006-otel-usage-source.md) and

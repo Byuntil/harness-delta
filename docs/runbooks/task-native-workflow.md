@@ -22,7 +22,12 @@ The admission run validates the shared execution engine. Coordinator/CLI coverag
 includes synthetic tests and later bounded actual root functional observations; see
 [the evidence distinction](../validation/codex-workflow-01600-source-readiness.md#later-bounded-functional-observations). Only the bounded direct-child flow below is admitted;
 fork/compaction, deeper children, app support, complete cost and inference
-remain unavailable. Claude trace candidates are not production admissions.
+remain unavailable.
+
+**Claude Code 2.1.288 parent-only launch is admitted** as
+`claude-workflow-own-trace-v1`, with `complete_cost: false`. Child execution,
+native resume and other Claude versions are not admitted; see
+[Claude parent-only workflow](#claude-parent-only-workflow).
 
 ```sh
 node dist/cli.js --db .harness-delta/local.sqlite workflow status protocol-1
@@ -178,7 +183,7 @@ process disappeared (crash, kill or reboot), which otherwise blocks the task wit
 an `incomplete` observation gap after the last retained usage of each bound
 session, and never adds usage; a harness-delta collector that is still alive stops
 at its next guard. Recover before pausing or finishing: an inactive task cannot
-record the gap, and the result reports `gap_warning: task_not_active`. Codex and
+record the gap, and the result reports `gap_warning: task_not_active`; a pause or finish while the run was `running` already recorded it. Codex and
 Claude Code processes run in their own process groups and can outlive a killed
 collector; no process ID is persisted, so `recover` cannot signal them and they
 must be ended manually. `workflow task` prints the task state, follow-up deadline, run states
@@ -312,57 +317,67 @@ report are separate durable operations so a report error cannot undo or silently
 repeat a human outcome. All linked eligible sessions and rework remain under the
 original assignment. Missing coverage or prices keep complete cost unavailable;
 synthetic local checks cannot prove billing, native support or an adoption decision.
-## Claude workflow wiring: offline only, bounded native probe verified
+## Claude parent-only workflow
 
-The shared workflow CLI also implements `workflow claude launch` and
-`workflow claude stop <run-id>`. Launch uses the existing assignment, selected
-artifact hashes and explicit configuration confirmation. Each fresh root and
-its optional single direct child are linked to that same logical task before
-request traces are decoded. Runtime model and effort remain invocation choices.
+`workflow claude launch`, `stop <run-id>` and `recover <run-id>` use the same
+assignment, selected-artifact confirmation and task lifecycle as Codex. The code-owned
+registry admits `claude_code / 2.1.288 / claude-workflow-own-trace-v1` for a fresh
+root session only. See [the admission evidence](../validation/claude-workflow-02188-source-readiness.md).
 
-`claude-workflow-own-trace-v1` is deliberately absent from the production source
-registry. Public launch therefore fails before assignment, instruction access,
-gateway startup or executable access until native qualification and a separate
-source admission decision establish the supported scope. The synthetic adapter
-is a trusted test dependency, never a CLI switch or a native admission override.
+| Boundary | Supported behavior |
+| --- | --- |
+| Product | Pinned Claude Code 2.1.288 binary path and SHA-256; existing login |
+| Session | Fresh print-mode root per launch; no native resume, discovery or external link |
+| Continuation | Another `launch` on the same task keeps the original assignment; use a new `run_id` and confirmation ID. The `workspace` may be reused: each run gets its own subdirectory |
+| Child execution | Not admitted; `child_runtime` fails with `claude_workflow_child_unadmitted` before assignment |
+| Tools | `permissions: "read-only"` (default): Read, Glob, Grep. `"workspace-edit"`: adds Edit and Write. Bash, MCP, slash commands and user settings are never loaded |
+| Limits | `timeout_ms` ≤ 3,600,000; `max_turns` and `request_limit` ≤ 1024; optional `max_budget_usd` |
+| Usage | One record per successful `claude_code.llm_request` trace; cache read and cache creation stay separate |
 
-The separately approved exact 2.1.288 synchronous probe completed with
-Sonnet5.5/high, two root usage rows and one direct-child row under the same task.
-This verifies that internal probe's request/runtime attribution and observed
-counter components, not this ordinary workflow's asynchronous child behavior.
-See the [bounded probe support contract](../validation/claude-native-probe-preparation.md#verified-bounded-native-probe-and-current-support-contract).
-Native exporter replay did not occur; replay idempotence is offline evidence.
-The workflow terminal check accepts positive root usage without proving that all
-requests were delivered. General request-loss detection, terminal flush and
-2.1.289 remain unverified; the production source gate stays closed.
+The execution document specifies `operation: "launch"`, `run_id`, the pinned binary
+path/version/SHA, a private `workspace` (canonical, mode 0700), the built
+`mediator_path` (`dist/claude-probe-hook-mediator.js`), `prompt_file`, `permissions`,
+`timeout_ms`, `max_turns` and `request_limit`. See
+[the example](../../examples/workflow/claude-launch.json). The protocol's
+`source_profiles` and `workflow.json` use `product: "claude_code"` and
+`product_version: "2.1.288"`. Runtime model and effort remain invocation choices;
+supported effort values are `low`, `medium`, `high`, `xhigh` and `max`.
 
-The execution document specifies `operation: "launch"`, `run_id`, the pinned
-2.1.288 binary path/version/SHA, a private `workspace`, built `mediator_path`,
-`prompt_file`, `timeout_ms` (at most 120000), `max_turns` and `request_limit`.
-An optional `child_runtime` chooses that one child's model and effort. Supported
-effort values here are `low`, `medium`, `high`, `xhigh` and `max`; model support
-still requires native evidence. There is no automatic resume, discovery or retry.
+```sh
+node dist/cli.js --db .harness-delta/local.sqlite workflow claude launch \
+  --config workflow.json --runtime runtime.json --execution claude-launch.json --confirmation confirmation-1
+node dist/cli.js --db .harness-delta/local.sqlite workflow claude stop claude-run-1
+node dist/cli.js --db .harness-delta/local.sqlite workflow claude recover claude-run-1
+```
 
-The readonly invocation applies selected instructions through temporary root
-and child system-prompt files and uses the existing authenticated hook/log/trace
-gateway. Logs check ordering and policy; only successful, completed, first-attempt
-`claude_code.llm_request` traces contribute usage. Root traces can arrive before
-child creation, after both startup prerequisites. Duplicate request traces add
-nothing; API logs and metrics add no usage. Cache read and creation tokens remain
-separate billing components. A task cannot acquire a second file, managed or OTel
-log usage owner after trace ownership is reserved, including after a stopped run.
+With `workspace-edit`, preflight rejects (`claude_workflow_harness_inside_project`,
+before assignment) a `workspace`, mediator directory, prompt, Claude binary, Node
+executable or database inside the project root: an edited hook mediator would run
+model-written code. Keep the harness-delta build outside the measured project.
 
-Missing terminal hooks, failed or unfinished requests, unknown agent ancestry,
-sequence gaps, scope revocation and deadlines stop observation. Earlier verified
-request usage remains a partial observed estimate. A successful process exit and
-SessionEnd are not a trace-delivery watermark or proof of whole-task cost.
-Request/turn limits and the CLI USD estimate cannot enforce a provider or
-subscription spending cap. The bounded probe confirmed authenticated execution
-and the observed format for that invocation. General workflow child behavior and
-export flushing require separate evidence before this workflow can be admitted.
+The invocation runs with `--permission-mode dontAsk`: any tool or path the
+invocation does not allow is denied, never prompted. Offline checks with the pinned
+binary showed Write and Edit succeed inside the project root and are denied in its
+parent directory and in `/tmp`. Native stdout is discarded, so state the output file
+in the private prompt and use `workspace-edit` when the task must produce one.
+`max_budget_usd` is passed to the product's own estimate; it is not a provider or
+subscription spending cap, and neither are timeouts, turn or request limits.
 
-Offline integration evidence exercises the actual main CLI with a synthetic
-executable, including sticky assignment, applied artifact content, early root
-traces, direct-child attribution, duplicate log/trace exports, interruption,
-missing termination, partial estimates and cross-channel rejection. Synthetic
-results do not qualify the installed native product.
+Selected instructions are applied through a temporary appended system-prompt file.
+Logs check ordering, policy and replay; only request traces create usage. Exact
+log or trace re-delivery adds nothing, and a request ID already stored anywhere in
+the database stops the run as a conflict. A task cannot acquire a second file,
+managed or OTel log usage owner after trace ownership is reserved.
+
+Stop, timeout, scope loss and abnormal exits end the native process group and
+record an `incomplete` gap after the last verified usage; earlier usage remains a
+partial observed estimate. Pausing or finishing the task during a run records that
+gap inside the same transaction, before the task becomes inactive, and the launch
+command then reports `workflow_scope_revoked`. The same applies to running Codex
+workflow runs. Every trace
+batch also records a `not_available` gap: Claude exposes no trace sequence or
+terminal watermark, so a run's usage is never complete. In the native admission
+run, every native `api_request` log request ID had a stored usage record after a
+normal exit; an abnormal exit (budget stop, kill) can lose the final request, which
+the `incomplete` gap marks.
+

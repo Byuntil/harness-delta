@@ -24,15 +24,11 @@ request universe or a terminal export watermark. No natural exporter re-delivery
 occurred in this native run; replay idempotence was verified separately offline
 using the pinned binary with a localhost stub API.
 
-This is an internal probe contract, not production workflow admission.
-`nativeSchemaQualified` remains false and `completeCost` remains null. The public
-`claude-workflow-own-trace-v1` profile is absent from the production registry:
-ordinary assigned launch/stop, selected instructions and partial estimates are
-verified offline only. Workflow mode retains native asynchronous child behavior,
-which this synchronous probe did not qualify. Its terminal condition can accept
-positive root usage without establishing that every request was delivered.
-General workflow loss detection, terminal flushing, other runtime choices and
-2.1.289 remain unverified. Complete cost and inference gates stay closed.
+This is an internal probe contract. The ordinary assigned workflow was later admitted
+separately as parent-only `claude-workflow-own-trace-v1`; see
+[its admission evidence](claude-workflow-02188-source-readiness.md). That admission
+does not qualify this probe's child topology, asynchronous children in workflow mode,
+other versions, complete cost or inference.
 
 ## Preparation and admission interfaces
 
@@ -49,7 +45,7 @@ Launch arguments pin `--permission-mode dontAsk` in both probe and workflow mode
 another model. The two-root/one-child probe also sets
 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, because 2.1.288 otherwise launches the
 Agent child asynchronously and adds a root request. Workflow mode keeps native
-background behavior; its async child association is not natively verified.
+background behavior; the admitted workflow profile is parent-only, so that path is not used natively.
 
 `reserveClaudeProbeAction` creates exclusive one-use launch and child reservations
 bound to the manifest's process ID. It fsyncs the file and containing directory

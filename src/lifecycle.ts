@@ -10,6 +10,7 @@ import type { Store } from './store.js';
 import { interruptManagedRuns } from './managed-journal.js';
 import { authorizeCandidateScope } from './nested-candidate.js';
 import { revokeOtelProcesses } from './otel-journal.js';
+import { recordInFlightWorkflowGaps } from './runtime-history.js';
 
 export type TaskState = 'registered' | 'active' | 'paused' | 'finalized';
 export type Outcome = 'success' | 'failed' | 'aborted';
@@ -67,6 +68,7 @@ export class Lifecycle {
       parseTaskMetadata(JSON.parse(task.metadata) as unknown);
       const now = this.now(task);
       if (to === 'active') requireConfigurationConfirmation(this.store, taskId, now);
+      if (from === 'active') recordInFlightWorkflowGaps(this.store, taskId, now);
       this.store.execute('UPDATE tasks SET state = ?, started_at = COALESCE(started_at, ?), generation = generation + 1, last_transition_at = ? WHERE id = ?',
         [to, now, now, taskId]);
       if (to === 'active') {
@@ -127,6 +129,7 @@ export class Lifecycle {
         this.store.execute('INSERT INTO comparison_deviations(id,task_id,occurred_at,recorded_at,reason_code) VALUES (?,?,?,?,?)',
           [randomUUID(), taskId, now, now, 'cancellation']);
       }
+      if (task.state === 'active') recordInFlightWorkflowGaps(this.store, taskId, now);
       interruptManagedRuns(this.store, taskId, 'finalize', now);
       revokeOtelProcesses(this.store, taskId, 'finalize', now);
       this.store.execute('INSERT INTO outcomes(task_id,status,criteria_met,first_success,assessed_at) VALUES (?,?,?,?,?)',

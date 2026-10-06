@@ -68,8 +68,26 @@ test('workflow launch also pins a classifier-free permission mode', async () => 
   const root = mkdtempSync(join(tmpdir(), 'claude-probe-workflow-'));
   try {
     const prepared = await prepareClaudeNativeProbe(options(root), { model: 'claude-sonnet-5-5', effort: 'high', childRuntime: { model: 'claude-sonnet-5-5', effort: 'high' },
-      instructions: 'Synthetic instructions.', maxTurns: 4, requestLimit: 8, durationMs: 120000 });
+      instructions: 'Synthetic instructions.', maxTurns: 4, requestLimit: 8, durationMs: 120000, permissions: 'read-only' });
     expect(prepared.argv.join(' ')).toContain('--permission-mode dontAsk');
     await prepared.dispose();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test('workflow permissions choose a Bash-free toolset and pass a budget only when requested', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'claude-probe-workflow-'));
+  const flag = (argv: readonly string[], name: string) => argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined;
+  const base = { model: null, effort: null, instructions: 'Synthetic instructions.', maxTurns: 300, requestLimit: 600, durationMs: 3600000 };
+  try {
+    const readOnly = await prepareClaudeNativeProbe(options(join(root, 'a')), { ...base, permissions: 'read-only' });
+    expect([flag(readOnly.argv, '--tools'), flag(readOnly.argv, '--allowedTools')]).toEqual(['Read,Glob,Grep', 'Read,Glob,Grep']);
+    expect(readOnly.argv).not.toContain('--max-budget-usd');
+    expect(readOnly.manifest.limits).toMatchObject({ wallTimeMs: 3600000, plannedRequests: 600, estimatedBudgetUsd: null });
+    await readOnly.dispose();
+    const edit = await prepareClaudeNativeProbe(options(join(root, 'b')), { ...base, permissions: 'workspace-edit', maxBudgetUsd: 5 });
+    expect([flag(edit.argv, '--tools'), flag(edit.argv, '--allowedTools')]).toEqual(['Read,Glob,Grep,Edit,Write', 'Read,Glob,Grep,Edit,Write']);
+    expect(flag(edit.argv, '--max-budget-usd')).toBe('5');
+    expect(edit.argv.join(' ')).not.toMatch(/Bash/);
+    await edit.dispose();
+    await expect(prepareClaudeNativeProbe(options(join(root, 'c')), { ...base, permissions: 'bypass' as 'read-only' })).rejects.toThrow('claude_probe_invalid_preparation');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

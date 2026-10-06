@@ -3,7 +3,8 @@
 [English](workflow-quickstart.md) · [문서 탐색](../../README.md#documentation)
 
 부분 비용을 기술하는 작은 **기능 파일럿**에 이 절차를 사용하세요.
-대상은 Codex 0.160.0의 `codex-workflow-own-response-v1`입니다.
+대상은 Codex 0.160.0(`codex-workflow-own-response-v1`)과
+Claude Code 2.1.288 부모 전용 launch(`claude-workflow-own-trace-v1`)입니다.
 논리적 작업마다 하나의 A/B 배정을 유지합니다.
 모델과 effort는 실행마다 선택합니다. 새 세션을 열어도 배정은 바뀌지 않습니다.
 
@@ -14,7 +15,7 @@
 | Codex 0.160.0 루트 workflow | launch, 같은 세션 resume, 명시적 독립 루트 link, 전경 collect, stop, recover; 부분 사용량 |
 | Codex 0.160.0 직계 자식 workflow | 별도 프로필: 새 루트와 새 자식 1개, 고정 macOS arm64/Node24, read-only; family resume·외부 자식 link 미지원 |
 | 기존 파일 수집기 | Codex 0.156.1/0.158.0, Claude Code 2.1.283만 지원; [로컬 측정](local-measurement.ko.md) 참고 |
-| Claude Code 2.1.288 | 제한된 내부 동기식 probe 검증 완료; 일반 배정 workflow는 미승인 |
+| Claude Code 2.1.288 부모 전용 workflow | 실행마다 새 launch(read-only 또는 `workspace-edit`), 같은 작업의 추가 launch, stop, recover; 부분 사용량. 자식·native resume·다른 버전 미지원 |
 | App/IDE/MCP, fork, compaction, 더 깊은 자식 | 이 절차에서 미지원 |
 | 작업 전체 비용, 실제 청구액, 절감·도입 추론 | 제공하지 않음 |
 | 팀 파일 교환 | 합성 검증 전용; 기능 파일럿 결과는 이 경로로 교환할 수 없음 |
@@ -33,7 +34,7 @@
 
 ## 1. 저장소에서 설치하기
 
-준비물은 Node.js 24, npm, 기존의 고정 Codex 0.160.0 바이너리입니다.
+준비물은 Node.js 24, npm, 기존의 고정 Codex 0.160.0 또는 Claude Code 2.1.288 바이너리입니다.
 로컬 검증 환경은 macOS arm64입니다. 다른 플랫폼은 미검증입니다.
 패키지는 private 상태이며 공개 패키지 설치 절차는 없습니다.
 
@@ -56,7 +57,7 @@
    node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow --help
    ```
 
-예상 결과: `codex`, `status`, `task`, `begin`, `finish`, `report`가 표시됩니다.
+예상 결과: `codex`, `claude`, `status`, `task`, `begin`, `finish`, `report`가 표시됩니다.
 최상위 `comparison` 도움말에는 이전 synthetic 경로 설명이 남아 있습니다. 4단계의 `workflow status`로 v2 native 지원 조건을 확인하세요.
 설치가 실패하면 Node 24와 [CONTRIBUTING의 SQLite 빌드 준비물](../../CONTRIBUTING.md#development-environment)을 확인하세요.
 설치는 로컬 Git hooks도 설치합니다. 수집을 시작하거나 제품 인증을 바꾸지는 않습니다.
@@ -115,6 +116,16 @@ finish는 이 기한 전에 실행해야 합니다. 늦은 결과는 별도 저�
 | `runtime.json` | 선택한 모델·effort 또는 미지정 `null`; 진단용 모델은 필수가 아님 |
 | `launch.json`, `resume.json` | 정규 절대 binary/home/recorder/prompt 경로, 승인된 sandbox·timeout |
 | `link.json`, `collect.json` | 같은 정규 설정; 필요한 정확한 연결 세션 UUID·source 경로 |
+| `claude-launch.json` (Claude 전용) | 고정 2.1.288 바이너리 경로/SHA, mode 0700 비공개 workspace, 빌드된 mediator, prompt, `permissions`, 한도 |
+
+Claude Code를 쓰면 `workflow.json`의 `product: "claude_code"`, `product_version: "2.1.288"`과
+`protocol.json`의 `claude_code / 2.1.288 / claude-workflow-own-trace-v1` source profile도 설정하세요.
+`binary.path`는 `claude` 실행기 대신 정확한 2.1.288 파일을 가리켜야 합니다
+(native 설치는 `~/.local/share/claude/versions/` 아래).
+그 파일이 없거나 바뀌면 배정 전 preflight가 `claude_probe_executable_mismatch`로 실패합니다.
+`permissions: "workspace-edit"`를 쓰면 workspace·harness-delta 빌드(mediator)·prompt·바이너리·데이터베이스를
+측정 대상 프로젝트 루트 밖에 두세요. 안에 있으면 preflight가 `claude_workflow_harness_inside_project`로 실패합니다.
+`workspace`는 여러 launch에서 재사용할 수 있으며 실행마다 별도 하위 디렉터리를 씁니다.
 
 JSON 예제는 전체 스키마 입력이지만 선택값은 합성입니다.
 prompt·승인된 실행 요청·DB는 Git에서 제외되는 로컬 저장소에 보관하세요.
@@ -184,9 +195,12 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex launch \
   --execution .harness-delta/pilot/launch.json --confirmation confirmation-1
 ```
 
+Claude Code는 같은 옵션과 `claude-launch.json`으로 `workflow claude launch`를 실행하세요.
+`child_runtime`은 배정 전에 거부됩니다(`claude_workflow_child_unadmitted`).
+
 launch가 작업을 배정하고 시작합니다. 이 v2 배정에 `task register`를 실행하지 마세요.
 `workflow begin`은 제품 실행 없이 배정/시작을 준비합니다. 그 자체로 harness를 적용하지 않습니다.
-preflight는 배정/시작 전에 binary·recorder·prompt·home을 확인합니다.
+preflight는 배정/시작 전에 binary·recorder·prompt·home을 확인합니다(Claude: binary·prompt·effort·자식 범위·harness 위치; workspace는 launch 시 확인).
 preflight 실패는 배정이나 활성 구간을 만들지 않습니다.
 이후 spawn 전 실패에서는 활성화한 작업을 다시 pause할 수 있으며 receipt에 `activation_reverted: true`가 표시됩니다.
 
@@ -224,6 +238,8 @@ receipt의 지시 검증은 발신 실행 설정을 확인하며 native의 최�
    ```
 
 예상 결과: `stop`은 실행/수집을 끝내고 `pause`는 작업 활성 시간 구간을 닫습니다.
+Claude 실행에는 `workflow claude stop`, `workflow claude recover`를 사용하세요.
+실행 중 pause해도 실행은 끝납니다. launch는 `workflow_scope_revoked`를 보고하고 진행 중이던 구간은 `incomplete` 공백으로 기록됩니다.
 실행이 completed 또는 stopped여도 작업은 active로 남습니다. 활성 시간은 사람의 노동 시간이 아닙니다.
 
 수집기가 사라졌지만 실행이 `running`이면 pause 또는 finish 전에 recover하세요.
@@ -233,7 +249,7 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex recover r
 ```
 
 recover는 실패 `abandoned`와 관측 공백을 기록하며 사용량을 추가하지 않습니다.
-작업이 비활성이면 공백 대신 `gap_warning: task_not_active`가 표시됩니다.
+작업이 비활성이면 공백 대신 `gap_warning: task_not_active`가 표시됩니다. 실행이 `running`인 동안 pause 또는 finish했다면 그 전환에서 이미 공백이 기록되었습니다.
 recover는 남은 native 프로세스에 종료 신호를 보내지 못합니다. 다음 실행 전에 남은 제품 프로세스를 직접 종료하세요.
 
 ## 7. resume 또는 다른 세션 사용하기
@@ -250,6 +266,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex resume \
   --config .harness-delta/pilot/workflow.json --runtime .harness-delta/pilot/runtime.json \
   --execution .harness-delta/pilot/resume.json --confirmation confirmation-2
 ```
+
+Claude Code에는 이 절차의 resume·link가 없습니다. 같은 작업에서 새 `run_id`와 확인 ID로
+`workflow claude launch`를 다시 실행해 이어가세요. 새 세션에는 이전 대화가 없습니다.
 
 다른 독립 루트는 같은 workflow 파일을 유지하고 `launch.json`의 `run_id`, prompt를 새 값으로 바꾸세요.
 새 확인 ID로 5단계의 launch 명령을 실행하세요.

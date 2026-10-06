@@ -8,6 +8,9 @@ type EventRow = Omit<Event, 'payload'> & { payload: string };
 export class Store {
   private readonly db: Database.Database;
 
+  /** Database file path; ':memory:' for an in-memory store. */
+  get filename(): string { return this.db.name; }
+
   constructor(path: string, private readonly receiptClock: () => string = () => new Date().toISOString()) {
     this.db = new Database(path);
     try {
