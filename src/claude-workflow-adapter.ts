@@ -8,15 +8,17 @@ import { authorizeClaudeTraceScope } from './claude-trace-candidate.js';
 import { prepareClaudeProbeSupervisor, verifyClaudeProbeBinary } from './claude-probe-supervisor.js';
 import { recordAbandonedRunGap, recordObservationGap } from './runtime-history.js';
 import type { CandidateScope } from './nested-candidate.js';
+import { claudeWorkflowProductVersions, claudeWorkflowProfileId } from './claude-workflow-versions.js';
 import type { Store } from './store.js';
 import type { WorkflowAdapter, WorkflowAdapterResult } from './task-workflow.js';
 
-/** Admitted parent-only in the code-owned registry (claude-workflow-02188-root-native-v1). */
-export const claudeWorkflowProfileId = 'claude-workflow-own-trace-v1';
+/** Admitted parent-only in the code-owned registry (claude-workflow-02191-root-native-v1).
+ * The version comes from the pinned binary and must match the configured product version. */
+export { claudeWorkflowProfileId };
 const effort = z.enum(['low','medium','high','xhigh','max']);
 export const ClaudeWorkflowExecutionSchema = z.strictObject({
   operation:z.literal('launch'), run_id:IdSchema,
-  binary:z.strictObject({path:z.string().min(1).max(4096),version:z.literal('2.1.288'),sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
+  binary:z.strictObject({path:z.string().min(1).max(4096),version:z.enum(claudeWorkflowProductVersions),sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
   workspace:z.string().min(1).max(4096), mediator_path:z.string().min(1).max(4096), prompt_file:z.string().min(1).max(4096),
   timeout_ms:z.number().int().min(1).max(3600000), max_turns:z.number().int().min(1).max(1024),
   request_limit:z.number().int().min(1).max(1024),
@@ -64,14 +66,14 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
     // The admitted native profile is parent-only; child execution has no native qualification.
     if(!synthetic&&e.child_runtime)throw new Error('claude_workflow_child_unadmitted');
   };
-  return {product:synthetic?'synthetic':'claude_code',productVersion:synthetic?'1.0.0':'2.1.288',
+  return {product:synthetic?'synthetic':'claude_code',productVersion:synthetic?'1.0.0':e.binary.version,
     profileId:synthetic?'synthetic-flexible-v1':claudeWorkflowProfileId,
     preflight(runtime,scope){
       admitted(runtime.effort);
       if(e.permissions==='workspace-edit')harnessOutsideProject(scope?.projectRoot??null,[e.workspace,e.mediator_path,dirname(e.mediator_path),e.prompt_file,e.binary.path,process.execPath,
         ...(store.filename&&store.filename!==':memory:'?[store.filename]:[])]);
       // Supervisor preparation verifies the binary again before any launch.
-      verifyClaudeProbeBinary(e.binary);readPrompt(e.prompt_file);
+      verifyClaudeProbeBinary(e.binary,claudeWorkflowProductVersions);readPrompt(e.prompt_file);
     },
     async run(c){
       c.assertActive();
@@ -85,7 +87,7 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
       store.immediateTransaction(()=>{
         c.assertActive();
         if(store.get("SELECT 1 FROM codex_workflow_runs WHERE task_id=? AND state='running' UNION ALL SELECT 1 FROM claude_workflow_runs WHERE task_id=? AND state='running'",[c.taskId,c.taskId]))throw new Error('workflow_run_active');
-        store.execute('INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES (?,?,?,?,?)',[sessionId,c.projectId,c.taskId,synthetic?'synthetic':'claude_code',synthetic?'1.0.0':'2.1.288']);
+        store.execute('INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES (?,?,?,?,?)',[sessionId,c.projectId,c.taskId,synthetic?'synthetic':'claude_code',synthetic?'1.0.0':e.binary.version]);
         bindConfigurationToSession(store,c.confirmationId,sessionId);
         authorizeClaudeTraceScope(store,scope,c.generation,synthetic);
         store.execute("INSERT INTO claude_workflow_runs(id,task_id,project_id,session_id,confirmation_id,generation,instruction_manifest_hash,state,started_at) VALUES (?,?,?,?,?,?,?,'running',?)",[e.run_id,c.taskId,c.projectId,sessionId,c.confirmationId,c.generation,c.instructionManifestHash,startedAt]);

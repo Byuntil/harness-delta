@@ -12,7 +12,7 @@ import { Lifecycle } from '../src/lifecycle.js';
 import { codexWorkflowFixture } from './helpers/codex-workflow-fixture.js';
 import { compiledWorker } from './helpers/compiled-worker.js';
 
-function fixture(mode='child') {
+function fixture(mode='child',version='2.1.291',appVersion=version) {
   const f=codexWorkflowFixture();const compiled=compiledWorker(f.root);const binary=join(f.root,'fake-claude');
   writeFileSync(binary,`#!${process.execPath}
 const fs=require('node:fs');const cp=require('node:child_process');
@@ -25,7 +25,7 @@ if(args.includes('--agents')&&fs.readFileSync(get('--append-subagent-system-prom
 const attrs=o=>Object.entries(o).filter(([,v])=>v!==undefined).map(([key,v])=>({key,value:typeof v==='string'?{stringValue:v}:typeof v==='boolean'?{boolValue:v}:{intValue:String(v)}}));
 const post=async(route,body)=>{const res=await fetch(endpoint+route,{method:'POST',headers:{...token,'content-type':'application/json'},body:JSON.stringify(body)});if(!res.ok)process.exit(5);};
 const hook=(name,extra={})=>{const cmd=settings.hooks[name][0].hooks[0].command;const res=cp.spawnSync('/bin/sh',['-c',cmd],{input:JSON.stringify({hook_event_name:name,session_id:native,cwd:process.cwd(),...extra})});if(res.status!==0||JSON.parse(res.stdout.toString()||'{}').continue===false)process.exit(6);};
-const now=()=>new Date().toISOString();const base={'harness_delta.process_id':pid,'session.id':native,'app.version':'2.1.288'};
+const now=()=>new Date().toISOString();const base={'harness_delta.process_id':pid,'session.id':native,'app.version':${JSON.stringify(appVersion)}};
 const log=(seq,name,extra={})=>({resourceLogs:[{scopeLogs:[{logRecords:[{attributes:attrs({...base,'event.name':name,'event.sequence':seq,'event.timestamp':now(),...extra})}]}]}]});
 const startup=log(0,'managed_settings_resolved',{'managed_settings.trigger':'startup'});startup.resourceLogs[0].scopeLogs[0].logRecords[0].attributes.push({key:'managed_settings.sources',value:{arrayValue:{values:[]}}});
 await post('/v1/logs',startup);
@@ -42,7 +42,7 @@ if(${JSON.stringify(mode)}!=='missing-end')hook('SessionEnd');process.exit(0);
 })().catch(()=>process.exit(8));
 `);chmodSync(binary,0o700);
   registerPriceTable(f.store,{...makeFlexibleFixture().priceTable,id:'claude-prices',entries:['root-model','child-model','inherited-model'].flatMap(model=>([['ordinary_input','2'],['cache_read','1'],['cache_write','3'],['output','4']] as const).map(([component,price_per_unit])=>({product:'synthetic',model,component,price_per_unit})))});
-  const execution={operation:'launch',run_id:'claude-run',binary:{path:binary,version:'2.1.288',sha256:createHash('sha256').update(readFileSync(binary)).digest('hex')},workspace:join(f.root,'claude-workspace'),mediator_path:join(compiled,'claude-probe-hook-mediator.js'),prompt_file:f.prompt,timeout_ms:12000,max_turns:3,request_limit:4,...(mode==='child'?{child_runtime:{model:'child-model',effort:'low'}}:{})};
+  const execution={operation:'launch',run_id:'claude-run',binary:{path:binary,version,sha256:createHash('sha256').update(readFileSync(binary)).digest('hex')},workspace:join(f.root,'claude-workspace'),mediator_path:join(compiled,'claude-probe-hook-mediator.js'),prompt_file:f.prompt,timeout_ms:12000,max_turns:3,request_limit:4,...(mode==='child'?{child_runtime:{model:'child-model',effort:'low'}}:{})};
   return {...f,compiled,execution};
 }
 
@@ -163,3 +163,13 @@ test('an already owned collection channel prevents Claude trace ownership before
     expect(f.store.all('SELECT * FROM claude_workflow_runs')).toHaveLength(0);expect(f.store.eventCount()).toBe(0);
   }finally{f.cleanup();}
 });
+test('a 2.1.291 binary runs the shared workflow when its telemetry reports 2.1.291 and stops on another version',async()=>{
+  const ok=fixture('root','2.1.291');try{
+    const result=await runAssignedWorkflow(ok.store,ok.input,createSyntheticClaudeWorkflowAdapter(ok.store,ok.execution),{model:'root-model',effort:'high'});
+    expect(result.adapter_result).toMatchObject({state:'completed',observed_requests:1});expect(ok.store.eventCount()).toBe(1);
+  }finally{ok.cleanup();}
+  const drift=fixture('root','2.1.291','2.1.288');try{
+    const result=await runAssignedWorkflow(drift.store,drift.input,createSyntheticClaudeWorkflowAdapter(drift.store,drift.execution),{model:'root-model',effort:'high'});
+    expect(result.adapter_result).toMatchObject({state:'stopped',observed_requests:0});expect(drift.store.eventCount()).toBe(0);
+  }finally{drift.cleanup();}
+},20000);

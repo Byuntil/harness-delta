@@ -4,6 +4,7 @@ import { addTokens, IdSchema, ModelSchema, TimestampSchema, TokenSchema, type Re
 import { CostCoverageEvidenceSchema, CostFactsSchema, EventV2Schema, RuntimeEvidenceSchema, type CostCoverageEvidence, type EventV2, type RuntimeEvidence } from './flexible-contracts.js';
 import { putUsageWithEvidence, requireActiveScope } from './runtime-history.js';
 import type { Store } from './store.js';
+import { claudeProbeProductVersion, claudeWorkflowProductVersions, type ClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 
 /** Internal OFFLINE candidate only. Inputs are predecoded metadata, never raw OTLP,
  * native rollout discovery or source authorization derived from session contents.
@@ -11,9 +12,18 @@ import type { Store } from './store.js';
  * protocol/src/protocol.rs TokenUsageRecord, SessionMeta and TurnContextItem;
  * core/src/session/mod.rs record_observed_response_completed (best effort).
  * Claude source: https://code.claude.com/docs/en/monitoring-usage (mutable).
- * Exact Claude 2.1.288 schema qualification and native integration remain pending.
+ * Claude traces use the exact workflow versions in claude-workflow-versions.ts; only the
+ * versions with a production registry entry are admitted (see validation docs).
  * This module is deliberately absent from index.ts and production defaults.
  */
+/** Versions a Claude trace may carry: the pinned probe version plus the workflow list, read at call time. */
+export type ClaudeTraceProductVersion = ClaudeWorkflowProductVersion | typeof claudeProbeProductVersion;
+export function claudeTraceProductVersions(): readonly ClaudeTraceProductVersion[] {
+  return [...new Set<ClaudeTraceProductVersion>([claudeProbeProductVersion, ...claudeWorkflowProductVersions])];
+}
+export function isClaudeTraceProductVersion(value: unknown): value is ClaudeTraceProductVersion {
+  return value === claudeProbeProductVersion || (claudeWorkflowProductVersions as readonly unknown[]).includes(value);
+}
 const mappingSchema = z.strictObject({
   sessionId: IdSchema, rootSessionId: IdSchema, parentSessionId: IdSchema.nullable(), sourceId: IdSchema,
   product: z.enum(['codex', 'claude_code']), nativeSessionId: IdSchema,
@@ -84,7 +94,7 @@ const codexSchema = z.object({ kind: z.literal('codex_response'), occurredAt: Ti
 const claudeUsageSchema = z.object({ model: ModelSchema, effort: optionalId, request_id: IdSchema,
   client_request_id: optionalId, input_tokens: TokenSchema.nullish(), cache_read_tokens: TokenSchema.nullish(),
   cache_creation_tokens: TokenSchema.nullish(), output_tokens: TokenSchema.nullish() });
-const claudeSchema = z.object({ kind: z.literal('claude_trace'), productVersion: z.literal('2.1.288'),
+const claudeSchema = z.object({ kind: z.literal('claude_trace'), productVersion: z.string().refine(isClaudeTraceProductVersion),
   processId: IdSchema, nativeSessionId: IdSchema, occurredAt: TimestampSchema, completed: z.boolean(),
   span: claudeUsageSchema.extend({ name: z.literal('claude_code.llm_request'), agent_id: optionalId, parent_agent_id: optionalId,
     success: z.boolean(), attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
@@ -98,13 +108,13 @@ const missing = (): Reading => ({ status: 'missing', value: null, reason: 'not_a
 function checkedSum(values: readonly number[]): number {
   try { return addTokens(values); } catch { throw new Error('candidate_invalid_metadata'); }
 }
-function usageProjection(scope: CandidateScope, mapping: Mapping, at: string, recordedAt: string,
+function usageProjection(scope: CandidateScope, mapping: Mapping, version: string, at: string, recordedAt: string,
   requestId: string, turnId: string | null, model: string, effort: string | null,
   boundaryIdentity: readonly unknown[], readings: { input: Reading; cache: Reading; output: Reading; reasoning: Reading },
   components: EventV2['payload']['billing_components']): CandidateProjection {
-  const version = mapping.product === 'codex' ? '0.160.0' : '2.1.288';
   // Provider response/request IDs are globally keyed per product/version, deliberately
-  // WITHOUT local task/session/source prefixes. Cross-thread collisions fail closed.
+  // WITHOUT local task/session/source prefixes. Cross-thread collisions fail closed; the
+  // same Claude request ID under another workflow version is refused in ingestCandidateObservation.
   const key = hash(['offline-nested-candidate-v1', mapping.product, version, requestId]);
   const runtime = parse(RuntimeEvidenceSchema, { id: hash(['runtime', key]), task_id: scope.taskId,
     session_id: mapping.sessionId, turn_id: turnId, request_id: requestId, model, effort,
@@ -166,7 +176,7 @@ function projectCodex(scope: CandidateScope, mapping: Mapping, input: unknown, r
   const cached = checkedSum([usage.cached_input_tokens, usage.cache_write_input_tokens]);
   if (cached > usage.input_tokens || usage.reasoning_output_tokens > usage.output_tokens ||
     checkedSum([usage.input_tokens, usage.output_tokens]) !== usage.total_tokens) throw new Error('candidate_invalid_metadata');
-  return usageProjection(scope, mapping, data.occurredAt, recordedAt, record.response_id, record.turn_id,
+  return usageProjection(scope, mapping, '0.160.0', data.occurredAt, recordedAt, record.response_id, record.turn_id,
     turn.model, turn.effort ?? null, [record.session_id, record.turn_id, record.root_turn_id],
     { input: observed(usage.input_tokens), cache: observed(usage.cached_input_tokens), output: observed(usage.output_tokens), reasoning: observed(usage.reasoning_output_tokens) },
     [{ kind: 'ordinary_input', reading: observed(usage.input_tokens - cached) }, { kind: 'cache_read', reading: observed(usage.cached_input_tokens) },
@@ -189,7 +199,7 @@ function projectClaude(scope: CandidateScope, mapping: Mapping, input: unknown, 
   const inputs = [span.input_tokens, span.cache_read_tokens, span.cache_creation_tokens];
   const inputReading = inputs.every((v): v is number => v != null) ? observed(checkedSum(inputs)) : missing();
   const reading = (value: number | null | undefined) => value == null ? missing() : observed(value);
-  return usageProjection(scope, mapping, data.occurredAt, recordedAt, span.request_id, null,
+  return usageProjection(scope, mapping, data.productVersion, data.occurredAt, recordedAt, span.request_id, null,
     span.model, span.effort ?? null, [data.processId, data.nativeSessionId, span.client_request_id],
     { input: inputReading, cache: reading(span.cache_read_tokens), output: reading(span.output_tokens), reasoning: missing() },
     [{ kind: 'ordinary_input', reading: reading(span.input_tokens) }, { kind: 'cache_read', reading: reading(span.cache_read_tokens) },
@@ -211,7 +221,7 @@ export function authorizeCandidateScope(store: Store, scope: CandidateScope): vo
     catch { throw new Error('candidate_inactive_scope'); }
     const linked = store.get<{ parent_id: string | null; product_version: string | null }>('SELECT parent_id,product_version FROM sessions WHERE id=?', [s.sessionId]);
     if (active.project_id !== scope.projectId || active.product !== s.product || linked?.parent_id !== s.parentSessionId ||
-      linked.product_version !== (s.product === 'codex' ? '0.160.0' : '2.1.288')) throw new Error('candidate_scope_mismatch');
+      (s.product === 'codex' ? linked.product_version !== '0.160.0' : !isClaudeTraceProductVersion(linked.product_version))) throw new Error('candidate_scope_mismatch');
   }
   // A candidate task cannot share usage accounting with production channels.
   // No new registration/migration is introduced for this offline-only guard.
@@ -239,6 +249,13 @@ export function ingestCandidateObservation(store: Store, inputScope: CandidateSc
     authorizeCandidateScope(store, scope);
     const projection = projectCandidateObservation(scope, sourceId, metadata, recordedAt);
     if (projection.kind !== 'usage') return projection;
+    // Usage carries the version its source reported; it must be the linked session's version.
+    if (store.get<{ product_version: string | null }>('SELECT product_version FROM sessions WHERE id=?', [projection.event.session_id])?.product_version !==
+      projection.event.payload.product_version) throw new Error('candidate_scope_mismatch');
+    // The key includes the version, so one native request must not also exist under another
+    // accepted version label. Primary-key lookups over the current trace versions only.
+    if (projection.event.payload.product === 'claude_code' && claudeTraceProductVersions().some(version => version !== projection.event.payload.product_version &&
+      store.get('SELECT 1 FROM events WHERE id=?', [hash(['offline-nested-candidate-v1', 'claude_code', version, projection.runtime.request_id])]))) throw new Error('candidate_conflict');
     let failure: string;
     try { return { ...projection, inserted: putUsageWithEvidence(store, projection.event, projection.runtime) }; }
     catch (error) {

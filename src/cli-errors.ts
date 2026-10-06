@@ -44,6 +44,7 @@ const hints: Record<string, string> = {
   invalid_cutoff: 'the cutoff must be a UTC time no later than now',
   unknown_codex_workflow_run: 'no Codex run with this ID; check run IDs with `workflow task <task-id>`',
   claude_workflow_run_missing: 'no Claude run with this ID; check run IDs with `workflow task <task-id>`',
+  claude_workflow_version_not_latest: 'a new protocol may list one claude_code workflow source profile, only at the newest admitted Claude Code version (none while no version is admitted); a registered protocol keeps its version until that version is retired, then its tasks cannot launch and need a new protocol',
   claude_workflow_child_unadmitted: 'Claude child execution is not admitted; remove child_runtime (parent-only workflow)',
   claude_workflow_harness_inside_project: 'with workspace-edit, the workspace, harness-delta build, prompt, Claude binary and database must be verifiably outside the registered project root',
   claude_workflow_private_workspace_required: 'the Claude workspace must be a canonical directory with mode 0700',

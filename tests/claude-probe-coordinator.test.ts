@@ -5,18 +5,20 @@ import { attrs, receivedAt, span, startedAt, traceScope, traces } from './helper
 
 const rootScope = { ...traceScope, sessions: traceScope.sessions.slice(0, 1) };
 function fixture(workflow?: ClaudeProbeOptions['workflow']) {
+  // A workflow run uses the admitted workflow version; the internal probe stays on 2.1.288.
+  const version = workflow ? '2.1.291' : '2.1.288';
   const store = new Store(':memory:');
   store.execute("INSERT INTO projects(id) VALUES ('project-1')", []);
   store.execute("INSERT INTO tasks(id,project_id,state) VALUES ('task-1','project-1','active')", []);
-  store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES ('root','project-1','task-1','claude_code','2.1.288')", []);
+  store.execute("INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES ('root','project-1','task-1','claude_code',?)", [version]);
   let now = startedAt; let reservations = 0;
   const probe = new ClaudeProbeCoordinator(store, { rootScope, child: { sessionId: 'child', sourceId: 'source-child', agentType: 'qualification-child' },
-    generation: 0, startedAt, model: 'root-model', effort: 'high', clock: () => now, reserveChild: () => { reservations++; }, ...(workflow ? { workflow } : {}) });
+    generation: 0, startedAt, model: 'root-model', effort: 'high', clock: () => now, reserveChild: () => { reservations++; }, ...(workflow ? { workflow, productVersion: version } : {}) });
   const token = probe.exporterHeaders()['x-harness-delta-token']!;
   const hook = (name: string, patch: Record<string, unknown> = {}) => probe.acceptHook(token, () => ({ hook_event_name: name, session_id: 'native-root', ...patch }));
   const logs = (records: unknown[]) => probe.ingestLogs(token, () => ({ resourceLogs: [{ resource: { attributes: attrs({ 'harness_delta.process_id': 'process-1' }) }, scopeLogs: [{ logRecords: records }] }] }));
   const log = (sequence: number, name = 'api_request', patch: Record<string, unknown> = {}) => ({ attributes: attrs({ 'event.name': name, 'event.sequence': sequence, 'event.timestamp': startedAt,
-    'session.id': 'native-root', 'app.version': '2.1.288', 'managed_settings.trigger': 'startup', ...patch }) });
+    'session.id': 'native-root', 'app.version': version, 'managed_settings.trigger': 'startup', ...patch }) });
   const startup = () => ({ ...log(0, 'managed_settings_resolved'), attributes: [...log(0, 'managed_settings_resolved').attributes, { key: 'managed_settings.sources', value: { arrayValue: { values: [] } } }] });
   const ready = () => { hook('SessionStart', { source: 'startup', model: 'root-model' }); logs([startup()]); now = receivedAt; };
   const child = () => { hook('PreToolUse', { tool_name: 'Agent', tool_use_id: 'tool-child', tool_input: { subagent_type: 'qualification-child', prompt: 'PRIVATE_SENTINEL' } }); hook('SubagentStart', { agent_id: 'agent-child', agent_type: 'qualification-child', transcript_path: 'PRIVATE_SENTINEL' }); };

@@ -10,6 +10,10 @@ function options(workspace: string) {
     nativeSessionId: '00000000-0000-4000-8000-000000000001', model: 'claude-sonnet-5-5', effort: 'high' as const,
     hookCommand: 'node synthetic-hook.js' };
 }
+// The assigned workflow takes its own version list; the internal probe stays on 2.1.288.
+function workflowOptions(workspace: string) {
+  return { ...options(workspace), binary: { path: '/synthetic/claude-2.1.291', version: '2.1.291', sha256: 'a'.repeat(64) } };
+}
 test('prepare-only probe writes private ephemeral candidate settings and token-free argv/manifest', async () => {
   const root = mkdtempSync(join(tmpdir(), 'claude-probe-prepare-'));
   try {
@@ -67,7 +71,7 @@ test('reservations are bound to immutable manifest and child requires launch res
 test('workflow launch also pins a classifier-free permission mode', async () => {
   const root = mkdtempSync(join(tmpdir(), 'claude-probe-workflow-'));
   try {
-    const prepared = await prepareClaudeNativeProbe(options(root), { model: 'claude-sonnet-5-5', effort: 'high', childRuntime: { model: 'claude-sonnet-5-5', effort: 'high' },
+    const prepared = await prepareClaudeNativeProbe(workflowOptions(root), { model: 'claude-sonnet-5-5', effort: 'high', childRuntime: { model: 'claude-sonnet-5-5', effort: 'high' },
       instructions: 'Synthetic instructions.', maxTurns: 4, requestLimit: 8, durationMs: 120000, permissions: 'read-only' });
     expect(prepared.argv.join(' ')).toContain('--permission-mode dontAsk');
     await prepared.dispose();
@@ -78,12 +82,12 @@ test('workflow permissions choose a Bash-free toolset and pass a budget only whe
   const flag = (argv: readonly string[], name: string) => argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined;
   const base = { model: null, effort: null, instructions: 'Synthetic instructions.', maxTurns: 300, requestLimit: 600, durationMs: 3600000 };
   try {
-    const readOnly = await prepareClaudeNativeProbe(options(join(root, 'a')), { ...base, permissions: 'read-only' });
+    const readOnly = await prepareClaudeNativeProbe(workflowOptions(join(root, 'a')), { ...base, permissions: 'read-only' });
     expect([flag(readOnly.argv, '--tools'), flag(readOnly.argv, '--allowedTools')]).toEqual(['Read,Glob,Grep', 'Read,Glob,Grep']);
     expect(readOnly.argv).not.toContain('--max-budget-usd');
     expect(readOnly.manifest.limits).toMatchObject({ wallTimeMs: 3600000, plannedRequests: 600, estimatedBudgetUsd: null });
     await readOnly.dispose();
-    const edit = await prepareClaudeNativeProbe(options(join(root, 'b')), { ...base, permissions: 'workspace-edit', maxBudgetUsd: 5 });
+    const edit = await prepareClaudeNativeProbe(workflowOptions(join(root, 'b')), { ...base, permissions: 'workspace-edit', maxBudgetUsd: 5 });
     expect([flag(edit.argv, '--tools'), flag(edit.argv, '--allowedTools')]).toEqual(['Read,Glob,Grep,Edit,Write', 'Read,Glob,Grep,Edit,Write']);
     expect(flag(edit.argv, '--max-budget-usd')).toBe('5');
     expect(edit.argv.join(' ')).not.toMatch(/Bash/);

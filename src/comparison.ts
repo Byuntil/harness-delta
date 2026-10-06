@@ -5,6 +5,7 @@ import { IdSchema } from './contracts.js';
 import { comparisonTimestamp, parseComparison, ProtocolDraftSchema, ProtocolSchema, VariantSchema } from './comparison-contracts.js';
 import type { Protocol, Variant } from './comparison-contracts.js';
 import type { Store } from './store.js';
+import { requireLatestClaudeWorkflowProfile } from './claude-workflow-versions.js';
 import { comparisonReadiness } from './readiness-store.js';
 
 export interface ProtocolRow {
@@ -37,6 +38,9 @@ export function registerProtocol(store: Store, input: unknown): void {
       if (current.settings !== serialized) throw new Error('protocol_conflict');
       return;
     }
+    // New real-source protocols may name only the newest admitted Claude workflow version;
+    // a registered protocol keeps its version until that version is retired (ADR 007 exact admission).
+    if (config.schema_version === 2 && config.purpose !== 'synthetic_validation') requireLatestClaudeWorkflowProfile(config.source_profiles ?? []);
     store.execute('INSERT INTO comparison_protocols(id,project_id,settings) VALUES (?,?,?)', [config.id, config.project_id, serialized]);
   });
 }

@@ -6,7 +6,8 @@ import { prepareClaudeNativeProbe, reserveClaudeProbeAction } from './claude-nat
 import type { ClaudeNativeProbeOptions, ClaudeWorkflowInvocation } from './claude-native-probe.js';
 import { prepareClaudeProbeHookMediator } from './claude-probe-hook-mediator.js';
 import { startClaudeProbeGateway, type ClaudeProbeStopDiagnostic } from './claude-probe-gateway.js';
-import type { CandidateScope } from './nested-candidate.js';
+import type { CandidateScope, ClaudeTraceProductVersion } from './nested-candidate.js';
+import { claudeProbeProductVersion, claudeWorkflowProductVersions } from './claude-workflow-versions.js';
 import { utcNow } from './lifecycle.js';
 import type { Store } from './store.js';
 
@@ -19,10 +20,11 @@ export interface ClaudeProbeSupervisorOptions {
   durationMs?: number;
   workflow?: ClaudeWorkflowInvocation & {synthetic:boolean;prompt:string;assertActive:()=>void;onChildBound:(sessionId:string)=>void;stopRequested:()=>boolean};
 }
-export function verifyClaudeProbeBinary(binary: ClaudeNativeProbeOptions['binary']): void {
+/** The default keeps the internal probe on its pinned version; workflow callers pass the workflow list. */
+export function verifyClaudeProbeBinary(binary: ClaudeNativeProbeOptions['binary'], versions: readonly string[] = [claudeProbeProductVersion]): void {
   let descriptor: number | undefined;
   try {
-    if (binary.version !== '2.1.288' || !/^[a-f0-9]{64}$/.test(binary.sha256) || realpathSync(binary.path) !== binary.path) throw new Error('invalid');
+    if (!versions.includes(binary.version) || !/^[a-f0-9]{64}$/.test(binary.sha256) || realpathSync(binary.path) !== binary.path) throw new Error('invalid');
     descriptor = openSync(binary.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const before = fstatSync(descriptor);
     if (!before.isFile() || before.size < 1 || before.size > 512 * 1024 * 1024) throw new Error('invalid');
@@ -44,14 +46,16 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
   const durationMs = options.durationMs ?? 120000;
   if (process.platform === 'win32' || Number(process.versions.node.split('.')[0]) !== 24 ||
       !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > (options.workflow ? 3600000 : 120000)) throw new Error('claude_probe_invalid_supervisor');
-  verifyClaudeProbeBinary(options.binary);
+  const versions = options.workflow ? claudeWorkflowProductVersions : [claudeProbeProductVersion];
+  verifyClaudeProbeBinary(options.binary, versions);
+  const productVersion = options.binary.version as ClaudeTraceProductVersion;
   const cwd = realpathSync(options.cwd);
   const root = options.rootScope.sessions[0];
   if (cwd !== options.cwd || (!options.workflow && readdirSync(cwd).length !== 0) || !root || options.rootScope.sessions.length !== 1 ||
       root.processId === null || options.store.get<{ local_root: string }>('SELECT local_root FROM projects WHERE id=?', [options.rootScope.projectId])?.local_root !== cwd) throw new Error('claude_probe_supervisor_scope');
   const startedAt = utcNow(); const until = Date.now() + durationMs;
   const coordinator = new ClaudeProbeCoordinator(options.store, { rootScope: options.rootScope, child: options.child,
-    generation: options.generation, startedAt, model: options.workflow ? options.workflow.model : 'claude-sonnet-5-5', effort: options.workflow ? options.workflow.effort : 'high', clock: utcNow,
+    generation: options.generation, startedAt, productVersion, model: options.workflow ? options.workflow.model : 'claude-sonnet-5-5', effort: options.workflow ? options.workflow.effort : 'high', clock: utcNow,
     ...(options.workflow ? {workflow:{synthetic:options.workflow.synthetic,childEnabled:options.workflow.childRuntime !== undefined,childRuntime:options.workflow.childRuntime,requestLimit:options.workflow.requestLimit,durationMs,assertActive:options.workflow.assertActive,onChildBound:options.workflow.onChildBound}} : {}),
     reserveChild: () => reserveClaudeProbeAction(options.workspace, 'child', root.processId!) });
   const token = coordinator.exporterHeaders()['x-harness-delta-token']!;
@@ -76,7 +80,7 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
   const prepared = probe;
   const run = async () => {
     if (reserved) throw new Error('claude_probe_already_reserved');
-    verifyClaudeProbeBinary(options.binary);
+    verifyClaudeProbeBinary(options.binary, versions);
     coordinator.authorizeRequest(token);
     if (disposed || realpathSync(options.cwd) !== cwd || (!options.workflow && readdirSync(cwd).length !== 0) || Date.now() >= until) throw new Error('claude_probe_deadline');
     reserveClaudeProbeAction(options.workspace, 'launch', root.processId!); reserved = true;

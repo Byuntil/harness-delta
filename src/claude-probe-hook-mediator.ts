@@ -13,7 +13,7 @@ const events = ['SessionStart', 'PreToolUse', 'SubagentStart', 'SubagentStop', '
 export function projectClaudeProbeHook(input: unknown): Record<string, unknown> {
   if (!object(input) || typeof input.hook_event_name !== 'string' || !events.includes(input.hook_event_name)) return invalid();
   const result: Record<string, unknown> = { hook_event_name: input.hook_event_name, session_id: field(input.session_id) };
-  // Pinned 2.1.288 print-mode SessionStart carries no model; a present value is still validated.
+  // Observed 2.1.288 and 2.1.291 print-mode SessionStart carry no model; a present value is still validated.
   if (input.hook_event_name === 'SessionStart') { result.source = field(input.source); if (input.model !== undefined) result.model = field(input.model); }
   if (input.hook_event_name === 'SubagentStart' || input.hook_event_name === 'SubagentStop') {
     result.agent_id = field(input.agent_id); result.agent_type = field(input.agent_type);

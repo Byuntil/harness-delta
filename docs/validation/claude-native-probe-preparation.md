@@ -24,9 +24,10 @@ request universe or a terminal export watermark. No natural exporter re-delivery
 occurred in this native run; replay idempotence was verified separately offline
 using the pinned binary with a localhost stub API.
 
-This is an internal probe contract. The ordinary assigned workflow was later admitted
-separately as parent-only `claude-workflow-own-trace-v1`; see
-[its admission evidence](claude-workflow-02188-source-readiness.md). That admission
+This is an internal probe contract, still pinned to 2.1.288. The ordinary assigned workflow
+was later admitted separately as parent-only `claude-workflow-own-trace-v1`, first for 2.1.288
+([retired record](claude-workflow-02188-source-readiness.md)) and now for 2.1.291
+([admission evidence](claude-workflow-02191-source-readiness.md)). That admission
 does not qualify this probe's child topology, asynchronous children in workflow mode,
 other versions, complete cost or inference.
 
