@@ -3,7 +3,7 @@ import { Store } from '../src/store.js';
 import { bundledCatalogBytes,bundledPriceCatalog,digest } from '../src/price-catalog.js';
 import { preparePriceBasis,readPriceBasis,readPriceCatalogStatus } from '../src/price-catalog-store.js';
 import { preparePriceCatalogRelease } from '../src/price-catalog-release.js';
-import { readOnlinePriceCatalogStatus,refreshOnlinePriceCatalog,type TrustedPriceCatalogSource } from '../src/price-catalog-online.js';
+import { defaultPriceCatalogSource,readOnlinePriceCatalogStatus,refreshOnlinePriceCatalog,type TrustedPriceCatalogSource } from '../src/price-catalog-online.js';
 
 const now='2026-10-06T16:00:00Z';
 const source:TrustedPriceCatalogSource={publisherId:'harness-delta',manifestUrl:'https://catalog.example.invalid/prices/manifest.json'};
@@ -45,8 +45,8 @@ test('one fixed HTTPS source updates future default only and sends no local data
 });
 test('fixed GitHub latest resolves a specific tag and approved CDN; unsafe redirect never receives a request',async()=>{
   const store=new Store(':memory:');const release=preparePriceCatalogRelease(nextBytes());
-  const github:TrustedPriceCatalogSource={publisherId:'harness-delta',manifestUrl:'https://github.com/Byuntil/harness-delta/releases/latest/download/manifest.json',redirectHosts:['release-assets.githubusercontent.com']};
-  const tag='https://github.com/Byuntil/harness-delta/releases/download/reference-prices-test-v2/';
+  const github:TrustedPriceCatalogSource={publisherId:'harness-delta',manifestUrl:'https://github.com/Qello-Labs/harness-delta/releases/latest/download/manifest.json',redirectHosts:['release-assets.githubusercontent.com']};
+  const tag='https://github.com/Qello-Labs/harness-delta/releases/download/reference-prices-test-v2/';
   const manifestCdn='https://release-assets.githubusercontent.com/synthetic/manifest?signature=synthetic';
   const artifactCdn='https://release-assets.githubusercontent.com/synthetic/artifact?signature=synthetic';
   const fetch=vi.fn<typeof globalThis.fetch>().mockImplementation(url=>{
@@ -59,14 +59,34 @@ test('fixed GitHub latest resolves a specific tag and approved CDN; unsafe redir
     return Promise.reject(new Error('unexpected_synthetic_request'));
   });
   try {
+    const first=preparePriceBasis(store,now);
     expect(await refreshOnlinePriceCatalog(store,github,{fetch},now)).toMatchObject({status:'updated'});
+    expect(readPriceBasis(store,first.table.id)).toEqual(first);
     expect(fetch.mock.calls.map(call=>requestUrl(call[0]))).toEqual([github.manifestUrl,tag+'manifest.json',manifestCdn,tag+release.manifest.artifact_file,artifactCdn]);
     expect(JSON.stringify(readOnlinePriceCatalogStatus(store,github,now))).not.toContain('signature');
-    for(const location of ['http://release-assets.githubusercontent.com/file','https://user:secret@release-assets.githubusercontent.com/file','https://private.invalid/file','https://github.com/another/repo/releases/download/tag/manifest.json']) {
+    for(const location of ['http://release-assets.githubusercontent.com/file','https://user:secret@release-assets.githubusercontent.com/file','https://private.invalid/file','https://github.com/another/repo/releases/download/tag/manifest.json','https://github.com/Byuntil/harness-delta/releases/download/tag/manifest.json','https://github.com/Qello-Labs/another-repo/releases/download/tag/manifest.json']) {
       const unsafe=vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null,{status:302,headers:{location}}));
       expect(await refreshOnlinePriceCatalog(store,github,{fetch:unsafe},now)).toMatchObject({reason:'catalog_http_error'});
       expect(unsafe).toHaveBeenCalledTimes(1);expect(readPriceCatalogStatus(store).catalog_version).toBe(2);
     }
+  } finally {store.close();}
+});
+test('organization default is canonical and legacy source configuration is refused before any request',async()=>{
+  const store=new Store(':memory:');const fetch=vi.fn<typeof globalThis.fetch>();
+  try {
+    const first=preparePriceBasis(store,now);
+    expect(readOnlinePriceCatalogStatus(store,undefined,now)).toMatchObject({online_source:{publisher_id:'harness-delta',manifest_url:'https://github.com/Qello-Labs/harness-delta/releases/latest/download/manifest.json'}});
+    expect(await refreshOnlinePriceCatalog(store,{...defaultPriceCatalogSource!,manifestUrl:'https://github.com/Byuntil/harness-delta/releases/latest/download/manifest.json'},{fetch},now)).toMatchObject({status:'failed',reason:'invalid_catalog_source'});
+    expect(fetch).not.toHaveBeenCalled();expect(preparePriceBasis(store,now)).toEqual(first);
+  } finally {store.close();}
+});
+test('organization transport keeps the two-hop bound and accepted basis on an extra redirect',async()=>{
+  const store=new Store(':memory:');const target='https://github.com/Qello-Labs/harness-delta/releases/download/tag/manifest.json';
+  const fetch=vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null,{status:302,headers:{location:target}}));
+  try {
+    const first=preparePriceBasis(store,now);
+    expect(await refreshOnlinePriceCatalog(store,undefined,{fetch},now)).toMatchObject({status:'failed',reason:'catalog_http_error'});
+    expect(fetch).toHaveBeenCalledTimes(3);expect(preparePriceBasis(store,now)).toEqual(first);
   } finally {store.close();}
 });
 test('hash/schema/identity/downgrade/HTTP failures cannot replace accepted prices and reasons are sanitized',async()=>{

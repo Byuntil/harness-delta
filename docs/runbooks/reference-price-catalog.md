@@ -73,7 +73,10 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table refresh-cata
 ```
 
 Expected: `updated`/`unchanged`, or a safe failure with the accepted cache retained.
-The default source is the approved `Byuntil/harness-delta` GitHub latest release.
+The default source is the approved `Qello-Labs/harness-delta` GitHub latest release.
+After the repository transfer, update older clients to this canonical source;
+the old owner's redirect adds a hop outside the fixed download policy. The issuer
+ID `harness-delta`, release bytes and existing task price bases remain unchanged.
 The first price release passed a real download/refresh check on 2026-10-06.
 Future latest releases must carry the manifest and catalog assets; otherwise
 refresh fails and retains cached prices. An explicitly unconfigured server returns
