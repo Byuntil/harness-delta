@@ -355,3 +355,17 @@ describe('Claude usage collection', () => {
     expect(ids((await provider().readUsage(b, null, scope, { baseline: false })).records)).toEqual(['req_b']);
   });
 });
+
+
+describe('Claude agent display metadata', () => {
+  it('retains configured root names and native child types without deriving names from transcript text', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid, { agent_type: 'security-reviewer', agent_name: privateText });
+    const p = provider(); const rootIdentity = await currentIdentity(sid, p);
+    expect(rootIdentity).toMatchObject({ agentMetadata: { source: 'claude_hook', agentType: 'security-reviewer' } });
+    writeChild(sid, 'kid', [childRow(sid, 'kid', '2026-10-07T01:00:00.000Z')]);
+    runHook({ ...common(sid, 'SubagentStart'), agent_id: 'kid', agent_type: 'my-plugin:reviewer', last_assistant_message: privateText });
+    const children = await p.discoverChildren(rootIdentity);
+    expect(children.children[0]?.identity).toMatchObject({ agentMetadata: { source: 'claude_hook', agentType: 'my-plugin:reviewer' } });
+    expect(JSON.stringify(children)).not.toContain(privateText);
+  });
+});

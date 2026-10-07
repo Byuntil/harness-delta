@@ -22,7 +22,7 @@ export const receiptSchemaVersion = 1;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 // uuid + ':' + agent ID must fit the shared 128-character identifier limit.
 const agentId = /^[A-Za-z0-9_-]{1,91}$/;
-const agentType = /^[A-Za-z0-9 ._:@/-]{0,128}$/;
+const agentType = /^[^\p{Cc}\p{Cf}]{1,128}$/u;
 const toolUseId = /^[A-Za-z0-9_-]{1,128}$/;
 const maxInput = 4 * 1048576;
 const locateMaxAgeMs = 120000;
@@ -78,7 +78,7 @@ export function projectHookInput(input, env = process.env, now = new Date()) {
     const caller = input.agent_id === undefined ? null : match(input.agent_id, agentId);
     if (input.agent_id !== undefined && caller === null) return null;
     return { ...base, kind: 'connect', receipt_id: receiptId(['connect', sessionId, tool]), agent_id: caller,
-      agent_type: caller === null ? null : match(input.agent_type ?? '', agentType), agent_transcript_path: null };
+      agent_type: match(input.agent_type ?? '', agentType), agent_transcript_path: null };
   }
   if (event === 'SubagentStart' || event === 'SubagentStop') {
     const child = match(input.agent_id, agentId);

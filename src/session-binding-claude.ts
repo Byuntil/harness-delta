@@ -1,3 +1,4 @@
+import { claudeAgentMetadata } from './agent-metadata.js';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, rmSync, writeFileSync, type Stats } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
@@ -308,11 +309,12 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     }
     return { createdAt, version: null, scanned };
   }
-  #identity(native: string, agent: string | null, rootPath: string, sourcePath: string, stat: Stats, version: string, createdAt: string): VerifiedSessionIdentity {
+  #identity(native: string, agent: string | null, rootPath: string, sourcePath: string, stat: Stats, version: string, createdAt: string, agentType?: unknown): VerifiedSessionIdentity {
+    const agentMetadata = claudeAgentMetadata(agentType);
     const sessionId = agent === null ? native : `${native}:${agent}`;
     // Stable per member: repeated connects and rediscovery yield byte-identical identities.
     const evidence = agent === null ? `claude-session:${sha([native, rootPath])}` : `claude-agent:${sha([native, agent, rootPath])}`;
-    return { product: 'claude_code', productVersion: version, sessionId, sourceRef: sourcePath, sourceIdentity: this.#sourceIdentity(stat, sessionId),
+    return { ...(agentMetadata ? { agentMetadata } : {}), product: 'claude_code', productVersion: version, sessionId, sourceRef: sourcePath, sourceIdentity: this.#sourceIdentity(stat, sessionId),
       cwd: this.#options.projectRoot, identityEvidenceId: evidence, parentSessionId: agent === null ? null : native, createdAt,
       nativeMapping: { nativeSessionId: native, processId: null, agentId: agent } };
   }
@@ -345,13 +347,13 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     const root = this.#firstOwnRow(rootPath, native, null);
     if (root.version === null || root.createdAt === null) fail('claude_source_version_unobserved');
     if (!this.supportedVersion(root.version)) fail('claude_source_version_unsupported');
-    if (receipt.agent_id === null) return this.#identity(native, null, rootPath, rootPath, rootStat, root.version!, root.createdAt!);
+    if (receipt.agent_id === null) return this.#identity(native, null, rootPath, rootPath, rootStat, root.version!, root.createdAt!, receipt.agent_type);
     // A re-invocation inside a subagent resolves to that member, never a new root.
     const childPath = this.#childPath(rootPath, native, receipt.agent_id);
     const childStat = (() => { try { return checkedSourceFile(childPath); } catch { return fail('claude_child_source_unavailable'); } })();
     const child = this.#firstOwnRow(childPath, native, receipt.agent_id);
     if (child.createdAt === null) fail('claude_child_source_unavailable');
-    return this.#identity(native, receipt.agent_id, rootPath, childPath, childStat, root.version!, child.createdAt!);
+    return this.#identity(native, receipt.agent_id, rootPath, childPath, childStat, root.version!, child.createdAt!, receipt.agent_type);
   }
 
   #discover(parent: VerifiedSessionIdentity): ChildDiscovery {
@@ -392,7 +394,7 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
       // time. Complete lines without an attributable own row are reported, never dropped.
       const first = this.#firstOwnRow(expected, native, agentId);
       if (first.createdAt === null) { if (first.scanned > 0) gaps.push('ownership_unverified'); continue; }
-      const identity = this.#identity(native, agentId, parent.sourceRef, expected, stat, parent.productVersion, first.createdAt);
+      const identity = this.#identity(native, agentId, parent.sourceRef, expected, stat, parent.productVersion, first.createdAt, (list.find(r => r.kind === 'subagent_start') ?? stop)?.agent_type);
       children.push({ parentSessionId: native, relationEvidenceId: identity.identityEvidenceId, identity });
     }
     // Native member files without a hook receipt (for example, spawned before connect or

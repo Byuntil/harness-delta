@@ -69,19 +69,21 @@ test('slow exact-member metadata during teardown stays within the existing budge
  try{
   const marker=join(dir,'pids.json');const script=join(dir,'payload.mjs');const worker=join(dir,'owner.py');
   writeFileSync(script,`import{spawn}from'node:child_process';import{writeFileSync}from'node:fs';process.on('SIGTERM',()=>{});const c=Array.from({length:8},()=>spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setTimeout(()=>process.exit(0),20000)"],{stdio:'ignore',detached:true}));writeFileSync(${JSON.stringify(marker)},JSON.stringify([process.pid,...c.map(c=>c.pid)]));setTimeout(()=>process.exit(0),20000);`);
-  // Leave headroom for real OS queries; redundant scans still exceed the unchanged budget.
   // Inject latency only after successful discovery; no wrapper, product or body read.
+  // Measure in the owner: control delivery, pre-cleanup discovery and Node result
+  // scheduling are outside the production teardown budget. Keep its 5s limit.
   const source=readFileSync(fileURLToPath(new URL('../scripts/owned-cli-pty.py',import.meta.url)),'utf8');
-  writeFileSync(worker,source.replace('known = {}','known = {}\ntearing_down = False').replace('def metadata(pid):\n','def metadata(pid):\n    if tearing_down: time.sleep(.06)\n').replace('finally:\n','finally:\n    tearing_down = True\n'));
+  writeFileSync(worker,source.replace('known = {}','known = {}\ntearing_down = False').replace('def metadata(pid):\n','def metadata(pid):\n    if tearing_down: time.sleep(.06)\n').replace('finally:\n','finally:\n    tearing_down = True\n').replace("emit({'type': 'result',", "emit({'syntheticCleanupElapsedMs': (time.monotonic() - (cleanup_until - cfg['terminationMs'] / 1000)) * 1000, 'type': 'result',"));
   const cfg={command:realpathSync(process.execPath),args:[script],cwd:dir,durationMs:3000,terminationMs:5000,termGraceMs:100};
   const owner=spawn(OwnedCliInvocation.pythonExecutable(),[worker,JSON.stringify(cfg)],{stdio:['ignore','ignore','pipe','pipe']});let lines='';
   if(!owner.stderr)throw new Error('synthetic_result_stream_missing');owner.stderr.on('data',(b:Buffer)=>{lines+=b.toString();});
   const ended=new Promise<void>((resolve,reject)=>{owner.once('exit',code=>code===0?resolve():reject(new Error('synthetic_owner_failed')));});
   await expect.poll(()=>{try{pids=JSON.parse(readFileSync(marker,'utf8')) as number[];return pids.length===9;}catch{return false;}},{timeout:1500}).toBe(true);
-  await new Promise(r=>setTimeout(r,400));const began=performance.now();const control=owner.stdio[3];if(!(control instanceof Writable))throw new Error('synthetic_control_missing');control.write('stop\n');await ended;
-  const result=lines.trim().split('\n').map(s=>JSON.parse(s) as {type:string;ownedMembers:number;exitCode:number|null;terminationVerified:boolean;escapedMemberObserved:boolean}).find(r=>r.type==='result');
+  await new Promise(r=>setTimeout(r,400));const control=owner.stdio[3];if(!(control instanceof Writable))throw new Error('synthetic_control_missing');control.write('stop\n');await ended;
+  const result=lines.trim().split('\n').map(s=>JSON.parse(s) as {type:string;ownedMembers:number;exitCode:number|null;terminationVerified:boolean;escapedMemberObserved:boolean;syntheticCleanupElapsedMs:number}).find(r=>r.type==='result');
   expect(result,`Synthetic owner result: ${JSON.stringify(result)}`).toMatchObject({ownedMembers:9,terminationVerified:true,escapedMemberObserved:true});expect(result?.exitCode).not.toBeNull();
-  expect(performance.now()-began).toBeLessThan(5200);
+  expect(result?.syntheticCleanupElapsedMs).toBeGreaterThanOrEqual(0);
+  expect(result?.syntheticCleanupElapsedMs).toBeLessThanOrEqual(cfg.terminationMs);
   await expect.poll(()=>pids.every(pid=>{try{process.kill(pid,0);return false;}catch{return true;}}),{timeout:500}).toBe(true);
  }finally{for(const pid of pids)try{process.kill(pid,'SIGKILL');}catch{/* own fixture already gone */}rmSync(dir,{recursive:true,force:true});}
 },16000);
@@ -117,6 +119,25 @@ for returncode,expired in [(0,False),(1,False),(2,False),(0,True)]:
 print(json.dumps(out))`;
  const values=JSON.parse(execFileSync(OwnedCliInvocation.pythonExecutable(),['-c',code,fileURLToPath(new URL('../scripts/owned-cli-pty.py',import.meta.url))],{encoding:'utf8'})) as unknown;
  expect(values).toEqual([{returncode:0,expired:false,coverage:true,queries:1},{returncode:1,expired:false,coverage:true,queries:1},{returncode:2,expired:false,coverage:false,queries:1},{returncode:0,expired:true,coverage:false,queries:0}]);
+});
+
+test('cleanup discovery refreshes a parent without resampling known children or childless leaves',()=>{
+ // A deterministic query-count regression guard complements the real teardown:
+ // host scheduling cannot turn redundant metadata scans into a passing result.
+ const code=`import ast,json,sys,types
+tree=ast.parse(open(sys.argv[1]).read());fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='discover')
+root=(42,1,42,501,'synthetic root');children={p:(p,42,p,501,'synthetic child') for p in range(43,51)}
+records={42:root,**children};metadata_calls=[];queries=[]
+def metadata(p):
+ metadata_calls.append(p);return records[p]
+def run(args,**kwargs):
+ p=int(args[-1]);queries.append(p);return types.SimpleNamespace(returncode=0 if p==42 else 1,stdout=b'43 44 45 46 47 48 49 50' if p==42 else b'')
+ns={'known':dict(records),'absent':set(),'proofs':{42:None,**{p:root for p in children}},'pid':42,'uid':501,'escape_seen':False,'ownership_failed':False,'cleanup_until':105,'metadata':metadata,'identity_matches':lambda a,b:a==b,'note_group_change':lambda *args:None,'time':types.SimpleNamespace(monotonic=lambda:100),'subprocess':types.SimpleNamespace(run=run,SubprocessError=Exception,PIPE=-1,DEVNULL=-3)}
+exec(compile(ast.Module(body=[fn],type_ignores=[]),'<synthetic cleanup discovery>','exec'),ns)
+coverage=ns['discover']()
+print(json.dumps({'coverage':coverage,'metadata':metadata_calls,'queries':queries,'members':sorted(ns['known']),'failed':ns['ownership_failed']}))`;
+ const result=JSON.parse(execFileSync(OwnedCliInvocation.pythonExecutable(),['-c',code,fileURLToPath(new URL('../scripts/owned-cli-pty.py',import.meta.url))],{encoding:'utf8'})) as unknown;
+ expect(result).toEqual({coverage:true,metadata:[42],queries:[42,43,44,45,46,47,48,49,50],members:[42,43,44,45,46,47,48,49,50],failed:false});
 });
 
 test('ordinary interactive launch requires a terminal before any spawn', async()=>{

@@ -121,3 +121,17 @@ test('native-shaped pilot family collects native provenance, excludes pause, res
   await domain.taskAction(id,'finish-success',{});usage();expect(f.store.eventCount()).toBe(6);expect(domain.task(id)).toMatchObject({status:'success',binding:{requests:6}});
  }finally{await domain.close?.();f.cleanup();}
 },10000);
+
+test('legacy human-pilot children accept optional display metadata while changed source proof stays rejected', async () => {
+ const f=fixture();const root=f.identity();const child=f.identity(root.sessionId);
+ vi.spyOn(f.provider,'resolveCurrent').mockResolvedValue(root);vi.spyOn(f.provider,'assertRootReceipt').mockImplementation(()=>{});
+ vi.spyOn(f.provider,'readUsage').mockResolvedValue({records:[],cursor:'0',gaps:[]});
+ vi.spyOn(f.provider,'discoverChildren').mockImplementation(parent=>Promise.resolve({children:parent.sessionId===root.sessionId?
+  [{identity:child,parentSessionId:root.sessionId,relationEvidenceId:child.identityEvidenceId}]:[],gaps:[]}));
+ const service=createSessionBindingService({store:f.store,providers:[f.provider],setupFor:()=>f.setup,humanPilot:f.scope});
+ await service.connect(f.id,'codex',{receipt:randomUUID()});await service.tick(f.id);
+ child.agentMetadata={source:'codex_session_meta',nickname:'Cedar',role:'reviewer'};
+ await expect(service.tick(f.id)).resolves.toMatchObject({roots:1,children:1});
+ expect(service.status(f.id).sessions.find(s=>s.session_id===child.sessionId)?.agent_metadata).toBeNull();
+ child.sourceIdentity=randomUUID();await expect(service.tick(f.id)).rejects.toThrow('binding_identity_mismatch');
+});
