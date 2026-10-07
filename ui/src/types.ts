@@ -2,6 +2,8 @@ export type Locale = 'ko' | 'en';
 export interface Project { id: string; name: string; directory: string; baseline: string | null; setup_ids: string[] }
 export interface Setup { id: string; name: string; project_id: string; arm_a: string; arm_b: string; types: string[]; sizes: string[]; support: string }
 export interface TaskAction { code: string; enabled: boolean; reason: string | null }
+export interface BindingReading {status: 'observed'|'partial'|'missing';value:number|null;statuses:string[];reasons:string[]}
+export interface BindingSummary {requests:number|null;input_total:BindingReading;output_total:BindingReading;partial_amount:string|null;currency:string|null;unpriced_events:number;price_table_id:string|null;complete_cost:null}
 export interface Task {
  id: string; name: string; project_id: string; setup_id: string; version: string; state: string; status: string;
  measurement: { state: string; active_ms: number | null; requests: number | null; window: { started_at: string | null; ends_at: string | null } };
@@ -10,6 +12,7 @@ export interface Task {
  price: { partial_amount: string | null; currency: string; unpriced_events: number; basis: string | null };
  actions: TaskAction[]; startup: { start_command: string; ticket_id: string } | null;
  criteria: string[]; source: { handle: string; label: string } | null; reason: string | null;
+ binding?: { state: string; roots: number; children: number; requests: number | null; gaps: string[]; cost_coverage: 'partial'; support: string; sessions: (BindingSummary & {session_id:string;parent_session_id:string|null})[];summary:BindingSummary };
 }
 export interface Catalog { status: string; catalog_version: number | null; verified_at: string | null; verification_age_days?: number | null;
  online_source?: { status: string; publisher_id: string | null }; reason: string | null; can_attempt_online_refresh?: boolean }

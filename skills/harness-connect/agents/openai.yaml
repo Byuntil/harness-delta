@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harness Connect"
+  short_description: "Connect a selected session to a prepared task"
+  default_prompt: "Use $harness-connect to check support and connect my selected session to a prepared Harness Delta task."
