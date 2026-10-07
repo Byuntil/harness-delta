@@ -299,8 +299,10 @@ test('stage timing starts the bounded missing-child wait only after independentl
 },12000);
 
 test.each(['timing-no-progress','timing-unknown'])('stage timing %s stays unknown and cannot reset or extend the absolute root deadline',async mode=>{
-  const f=fixture(mode);try{const lane=await prepareCodexQualification(f.options);const result=await lane.run();
-    expect(result).toMatchObject({reason:'candidate_timed_out',registeredSessions:1,observedRequests:0});expect(result.elapsedMs).toBeGreaterThanOrEqual(4300);expect(result.elapsedMs).toBeLessThan(6500);
+  const f=fixture(mode);try{
+    // Interpreter startup is setup; keep the handoff and absolute runner deadlines unchanged.
+    await f.primeNative();const lane=await prepareCodexQualification(f.options);const result=await lane.run();
+    expect(result,JSON.stringify({result,timing:f.timing()})).toMatchObject({reason:'candidate_timed_out',registeredSessions:1,observedRequests:0});expect(result.elapsedMs).toBeGreaterThanOrEqual(4300);expect(result.elapsedMs).toBeLessThan(6500);
     expect(result.diagnostics.some(d=>d.code==='candidate_spawn_progress_observed')).toBe(false);
     expect(JSON.stringify(result)).not.toContain('PRIVATE_');await expect(lane.run()).rejects.toThrow('candidate_root_already_started');
   }finally{f.cleanup();}

@@ -69,9 +69,10 @@ test('slow exact-member metadata during teardown stays within the existing budge
  try{
   const marker=join(dir,'pids.json');const script=join(dir,'payload.mjs');const worker=join(dir,'owner.py');
   writeFileSync(script,`import{spawn}from'node:child_process';import{writeFileSync}from'node:fs';process.on('SIGTERM',()=>{});const c=Array.from({length:8},()=>spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{});setTimeout(()=>process.exit(0),20000)"],{stdio:'ignore',detached:true}));writeFileSync(${JSON.stringify(marker)},JSON.stringify([process.pid,...c.map(c=>c.pid)]));setTimeout(()=>process.exit(0),20000);`);
+  // Leave headroom for real OS queries; redundant scans still exceed the unchanged budget.
   // Inject latency only after successful discovery; no wrapper, product or body read.
   const source=readFileSync(fileURLToPath(new URL('../scripts/owned-cli-pty.py',import.meta.url)),'utf8');
-  writeFileSync(worker,source.replace('known = {}','known = {}\ntearing_down = False').replace('def metadata(pid):\n','def metadata(pid):\n    if tearing_down: time.sleep(.12)\n').replace('finally:\n','finally:\n    tearing_down = True\n'));
+  writeFileSync(worker,source.replace('known = {}','known = {}\ntearing_down = False').replace('def metadata(pid):\n','def metadata(pid):\n    if tearing_down: time.sleep(.06)\n').replace('finally:\n','finally:\n    tearing_down = True\n'));
   const cfg={command:realpathSync(process.execPath),args:[script],cwd:dir,durationMs:3000,terminationMs:5000,termGraceMs:100};
   const owner=spawn(OwnedCliInvocation.pythonExecutable(),[worker,JSON.stringify(cfg)],{stdio:['ignore','ignore','pipe','pipe']});let lines='';
   if(!owner.stderr)throw new Error('synthetic_result_stream_missing');owner.stderr.on('data',(b:Buffer)=>{lines+=b.toString();});
@@ -79,7 +80,7 @@ test('slow exact-member metadata during teardown stays within the existing budge
   await expect.poll(()=>{try{pids=JSON.parse(readFileSync(marker,'utf8')) as number[];return pids.length===9;}catch{return false;}},{timeout:1500}).toBe(true);
   await new Promise(r=>setTimeout(r,400));const began=performance.now();const control=owner.stdio[3];if(!(control instanceof Writable))throw new Error('synthetic_control_missing');control.write('stop\n');await ended;
   const result=lines.trim().split('\n').map(s=>JSON.parse(s) as {type:string;ownedMembers:number;exitCode:number|null;terminationVerified:boolean;escapedMemberObserved:boolean}).find(r=>r.type==='result');
-  expect(result).toMatchObject({ownedMembers:9,terminationVerified:true,escapedMemberObserved:true});expect(result?.exitCode).not.toBeNull();
+  expect(result,`Synthetic owner result: ${JSON.stringify(result)}`).toMatchObject({ownedMembers:9,terminationVerified:true,escapedMemberObserved:true});expect(result?.exitCode).not.toBeNull();
   expect(performance.now()-began).toBeLessThan(5200);
   await expect.poll(()=>pids.every(pid=>{try{process.kill(pid,0);return false;}catch{return true;}}),{timeout:500}).toBe(true);
  }finally{for(const pid of pids)try{process.kill(pid,'SIGKILL');}catch{/* own fixture already gone */}rmSync(dir,{recursive:true,force:true});}
