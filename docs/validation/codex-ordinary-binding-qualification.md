@@ -82,15 +82,26 @@ configuration. Native startup may still require ordinary project/auth approval;
 that prompt is not bypassed or evidence of a successful connection. Do not broaden
 permissions or change permanent settings to make the smoke succeed.
 
-In the new disposable root, invoke `harness-connect` once with origin
-`http://127.0.0.1:4319`, project `qualification-project`, and the exact prepared
-`task_id`. Ask for exactly two fresh direct children using the approved model/effort,
-one short acknowledgement per child and a short parent acknowledgement, then exit. Do no
-other work. The child does not invoke the skill. The installed helper uses the
+In the new disposable root, observe the automatically submitted `harness-connect`
+input for origin `http://127.0.0.1:4319`, project `qualification-project`, and the
+exact prepared `task_id`, followed by the two fresh direct children. Do not submit
+another connect or child-creation request. Exit normally after the bounded work
+completes. Do no other work. The child does not invoke the skill. The installed helper uses the
 native opaque receipt; cwd, guessed UUIDs or model self-report are not identity.
 Open that loopback UI to inspect automatic family/partial usage updates.
 
 ## Bounds and ownership
+
+The ordinary TUI receives a fixed initial prompt naming the prepared task and
+`$harness-connect`, followed by the bounded two-child work. Codex submits this
+startup input after session configuration; no long manual composer paste is
+required. Preparation prints the exact argv for review and freezes the
+implementation bytes. This is still the ordinary TUI, not `codex exec`.
+Native submission, skill activation and hook execution must be observed in the
+approved trial; source compatibility and synthetic argv checks do not prove them.
+Offline late-row regressions use a trusted fixture callback after verified owned
+exit and immediately before final projection. This makes the last-tick boundary
+deterministic; the public CLI exposes no fixture switch or callback.
 
 The in-process opaque lease is tied to the fresh reserved store/task/project,
 assignment, price pin, new root/child identities and deadline. Browser/profile

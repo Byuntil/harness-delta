@@ -30,7 +30,10 @@ const intentSchema=z.strictObject({schema_version:z.literal(1),purpose:z.literal
  hard_billing_bound:z.null(),product_gate_delta:z.literal(false)});
 type Intent=z.infer<typeof intentSchema>;
 /** Trusted Node fixture seam, absent from public CLI. Never accepts native logs. */
-export interface BindingQualificationFixture {script:string;durationMs?:number;uiPreparation?:boolean}
+export interface BindingQualificationFixture {script:string;durationMs?:number;uiPreparation?:boolean;
+ /** Synthetic late rows enter only after owned exit, immediately before projection. */
+ beforeFinalSourceCheck?:(native:OwnedCliResult)=>void;
+}
 function implementationDigest(){
  // Freeze all transitive local implementation bytes and the actual built UI.
  // Source-fixture execution freezes src; the public built CLI freezes dist.
@@ -163,7 +166,10 @@ export function codexBindingQualificationArgv(i:Intent):string[]{
   args.push('-c',`hooks.${event}=[{hooks=[{type="command",command=${JSON.stringify(i.wrapper)},timeout=5}]}]`);
   const trusted=hash(JSON.stringify({event_name:label,hooks:[{async:false,command:i.wrapper,timeout:5,type:'command'}]}));states.push(`"/<session-flags>/config.toml:${label}:0:0"={trusted_hash="sha256:${trusted}"}`);
  }
- args.push('-c',`hooks.state={${states.join(',')}}`);return args;
+ args.push('-c',`hooks.state={${states.join(',')}}`);
+ // Ordinary TUI startup input: avoid unconfirmed pasted composer submission.
+ // Its exact bounded instructions are frozen with this implementation.
+ args.push(`$harness-connect Connect once to project qualification-project, task ${i.task_id}, at http://127.0.0.1:4319 using the current hook-provided receipt. Then spawn exactly two fresh direct children with gpt-6.1-sol/high and no inherited history. Each child must make no tool calls, return a short acknowledgement in one model request, and finish. Wait once for both children. Do no other work. Keep the root within four model requests and stop.`);return args;
 }
 
 const taskSchema=z.object({binding:z.object({roots:z.number(),children:z.number(),requests:z.number(),gaps:z.array(z.string()),sessions:z.array(z.object({session_id:z.string()}))}),measurement:z.object({state:z.string()})});
@@ -237,7 +243,7 @@ export async function executeCodexSessionBindingQualification(file:string,consen
   else if(new Lifecycle(store).task(i.task_id).state==='paused'){reason='binding_qualification_safety_usage_unverified';independent={safety_usage_verification:'unverified',reason:'task_paused_no_source_read',complete_cost:false};}
   else{const binding=qualificationTask(domain,i.task_id).binding;const requests=store.all<{session_id:string}>('SELECT e.session_id FROM binding_requests r JOIN events e ON e.id=r.event_id WHERE e.task_id=?',[i.task_id]);
    if(binding.roots!==1||binding.children!==2||binding.gaps.some(g=>g!=='unobserved_interval'&&g!=='binding_unobserved_context')||binding.sessions.some(s=>!requests.some(r=>r.session_id===s.session_id)))reason='binding_qualification_evidence_incomplete';
-   else{phase='source_check';independent=await independentSourceCheck(i,store,lease);}}
+   else{phase='source_check';fixture?.beforeFinalSourceCheck?.(native);independent=await independentSourceCheck(i,store,lease);}}
  }catch(error){const known=['binding_qualification_scope_revoked','binding_qualification_scope_invalid','binding_qualification_already_reserved','ui_setup_conflict','binding_qualification_counter_mismatch','binding_qualification_source_changed','binding_qualification_family_limit','binding_qualification_final_gap','binding_qualification_runtime_invalid','binding_qualification_request_limit','binding_qualification_token_limit','binding_qualification_request_conflict','binding_qualification_final_unobserved_request'];reason??=error instanceof Error&&known.includes(error.message)?error.message:'binding_qualification_execution_failed';owner.stop();}
  finally{owner.stop();if(owned)try{native=await owned;}catch{reason='owned_cli_termination_unverified';}if(native&&!native.terminationVerified)reason='owned_cli_termination_unverified';if(lease)revokeBindingQualification(lease);await domain?.close?.();await app?.close();store.close();process.removeListener('SIGINT',interrupt);process.removeListener('SIGTERM',interrupt);}
  const result={safety_usage_verification:independent&&typeof independent==='object'&&'sources' in independent?'verified':'unverified',status:reason?'failed':'completed',reason,phase,validation_kind:i.validation_kind,intent_sha256:hash(data),native:native??null,binding:state,independent_source_check:independent,product_gate_delta:false,complete_cost:null,hard_billing_bound:null};

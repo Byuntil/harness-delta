@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -16,10 +16,10 @@ function fixture(mode='normal'){
  const followUp:Record<string,string>={
   'root-stop':"for(let n=0;n<3;n++)appendFileSync(file(root),usage(root,'extra-'+n));await new Promise(r=>setTimeout(r,1200));",
   'child-overflow':"appendFileSync(file(children[0]),usage(children[0],'extra-child'));await new Promise(r=>setTimeout(r,1200));",
-  'late-request':"appendFileSync(file(root),usage(root,'late-turn'));",
-  'late-runtime':"appendFileSync(file(root),usage(root,'late-turn','wrong-model'));",
-  'late-tokens':"appendFileSync(file(root),usage(root,'late-turn','gpt-6.1-sol',100000));",
-  'late-gap':"appendFileSync(file(root),row('compacted',{}));",
+  'late-request':"writeFileSync(join(i.directory,'late-record.json'),JSON.stringify({file:file(root),bytes:usage(root,'late-turn')}));",
+  'late-runtime':"writeFileSync(join(i.directory,'late-record.json'),JSON.stringify({file:file(root),bytes:usage(root,'late-turn','wrong-model')}));",
+  'late-tokens':"writeFileSync(join(i.directory,'late-record.json'),JSON.stringify({file:file(root),bytes:usage(root,'late-turn','gpt-6.1-sol',100000)}));",
+  'late-gap':"writeFileSync(join(i.directory,'late-record.json'),JSON.stringify({file:file(root),bytes:row('compacted',{})}));",
   'pause-exit':uiAction+"await action('pause');await new Promise(r=>setTimeout(r,1000));",
   emergency:uiAction+"await action('emergency-stop');await new Promise(r=>setTimeout(r,1000));",
   'pause-resume':uiAction+`for(let cycle=0;cycle<2;cycle++){await action('pause');appendFileSync(file(root),usage(root,'paused-'+cycle));const before=await(await fetch(origin+'/api/tasks/'+i.task_id)).json();if(before.measurement.state!=='paused'||before.binding.requests!==3||before.actions.some(a=>['apply','ticket','connect','rework','release'].includes(a.code)&&a.enabled)||before.actions.some(a=>a.code.startsWith('finish-')&&a.enabled))throw Error('paused contract');await action('resume-binding');}await new Promise(r=>setTimeout(r,350));`,
@@ -38,7 +38,13 @@ function fixture(mode='normal'){
  for(const id of[root,...children]){appendFileSync(file(id),row('turn_context',{cwd:i.project,turn_id:id===root?'root-turn':'child-turn',root_turn_id:'root-turn',model:'gpt-6.1-sol',effort:'high'})+row('token_usage_record',{thread_id:id,session_id:root,turn_id:id===root?'root-turn':'child-turn',root_turn_id:'root-turn',response_id:randomUUID(),usage:{input_tokens:10,cached_input_tokens:2,output_tokens:3,reasoning_output_tokens:1,total_tokens:13}}));}
  for(let n=0;n<150;n++){const t=await(await fetch(origin+'/api/tasks/'+i.task_id)).json();if(t.binding?.requests===3&&t.binding.children===2){${followUp[mode]??''}process.exit(0);}await new Promise(r=>setTimeout(r,20));}process.exit(4);
  `);
- return{root,home,script,dir:join(root,'attempt'),dependency:{script,durationMs:mode==='deadline-before-connect'?500:5000},cleanup:()=>rmSync(root,{recursive:true,force:true})};
+ let finalInjectionObserved=false;
+ const beforeFinalSourceCheck=mode.startsWith('late-')?(native:{status:string;terminationVerified:boolean})=>{
+  expect(native).toMatchObject({status:'completed',terminationVerified:true});
+  const late=JSON.parse(readFileSync(join(root,'attempt','late-record.json'),'utf8')) as {file:string;bytes:string};
+  appendFileSync(late.file,late.bytes);finalInjectionObserved=true;
+ }:undefined;
+ return{root,home,script,dir:join(root,'attempt'),dependency:{script,durationMs:mode==='deadline-before-connect'?500:5000,...(beforeFinalSourceCheck?{beforeFinalSourceCheck}:{})},finalInjectionObserved:()=>finalInjectionObserved,cleanup:()=>rmSync(root,{recursive:true,force:true})};
 }
 const consent=(sha:string)=>({intent_sha256:sha,approval_reference:'synthetic-test-only',actual_model_run:true,transient_hooks:true,native_source_reads:true,owned_process_termination:true});
 test('an unlinked owner reaching its fixed deadline reports timeout separately from observer failure',async()=>{
@@ -52,6 +58,7 @@ test('one ordinary fixture connects through real helper/server, inherits two dir
  const f=fixture();try{
   const prepared=await prepareCodexSessionBindingQualification(f.dir,{binary:realpathSync(process.execPath),codexHome:f.home},f.dependency);
   const args=codexBindingQualificationArgv(prepared.intent);expect(args[0]).toBe('--cd');expect(args).not.toContain('exec');expect(args.join(' ')).toContain('/<session-flags>/config.toml');
+  expect(args.at(-1)).toBe(`$harness-connect Connect once to project qualification-project, task ${prepared.intent.task_id}, at http://127.0.0.1:4319 using the current hook-provided receipt. Then spawn exactly two fresh direct children with gpt-6.1-sol/high and no inherited history. Each child must make no tool calls, return a short acknowledgement in one model request, and finish. Wait once for both children. Do no other work. Keep the root within four model requests and stop.`);
   expect(digest(readFileSync(prepared.intentPath))).toBe(prepared.sha256);
   // A synthetic intent has no public execution switch: native entry rejects it.
   await expect(executeCodexSessionBindingQualification(prepared.intentPath,consent(prepared.sha256))).rejects.toThrow('binding_qualification_invalid_fixture');
@@ -88,6 +95,7 @@ for(const [mode,reason] of [['late-request','binding_qualification_final_unobser
  const f=fixture(mode);try{
   const p=await prepareCodexSessionBindingQualification(f.dir,{binary:realpathSync(process.execPath),codexHome:f.home},f.dependency);
   const result=await executeCodexSessionBindingQualification(p.intentPath,consent(p.sha256),f.dependency);
+  expect(f.finalInjectionObserved()).toBe(true);
   expect(result,JSON.stringify(result)).toMatchObject({status:'failed',reason,phase:'source_check',native:{terminationVerified:true}});
  }finally{f.cleanup();}
 },10000);
