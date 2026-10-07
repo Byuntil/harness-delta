@@ -7,8 +7,8 @@ import { codexWorkflowFixture } from './codex-workflow-fixture.js';
 import { createSyntheticCodexWorkflowAdapter } from '../../src/codex-workflow-adapter.js';
 import { externalInstructionFragment } from '../../src/external-session-context.js';
 import { createLocalWebDomain, LocalWebProfileSchema } from '../../src/local-web-domain.js';
-export function localWebFixture() {
-  const f = codexWorkflowFixture(undefined, 'functional_pilot');
+export function localWebFixture(nativeProfile?: string) {
+  const f = codexWorkflowFixture(nativeProfile, 'functional_pilot');
   // A git hook (e.g. pre-commit in a linked worktree) exports GIT_DIR/GIT_INDEX_FILE; the
   // fixture repository must not inherit them.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));

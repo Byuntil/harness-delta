@@ -6,7 +6,7 @@ export interface BindingReading {status: 'observed'|'partial'|'missing';value:nu
 export interface BindingSummary {requests:number|null;input_total:BindingReading;output_total:BindingReading;partial_amount:string|null;currency:string|null;unpriced_events:number;price_table_id:string|null;complete_cost:null}
 export interface Task {
  id: string; name: string; project_id: string; setup_id: string; version: string; state: string; status: string;
- measurement: { state: string; active_ms: number | null; requests: number | null; window: { started_at: string | null; ends_at: string | null } };
+ measurement: { end_condition?: 'explicit_stop' | 'followup_deadline'; state: string; active_ms: number | null; requests: number | null; window: { started_at: string | null; ends_at: string | null } };
  outcome: { status: string; assessed_at: string } | null; attempt: number;
  preparation: { state: string; configuration_evidence: string; native_context_evidence: string; freshness_evidence: string; tool_use_evidence: string; assigned_variant_id: string | null };
  price: { partial_amount: string | null; currency: string; unpriced_events: number; basis: string | null };

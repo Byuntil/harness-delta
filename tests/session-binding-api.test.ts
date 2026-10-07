@@ -7,6 +7,42 @@ import { createLocalWebDomain } from '../src/local-web-domain.js';
 import { createLocalWebServer } from '../src/local-web-server.js';
 import { CodexSessionBindingProvider } from '../src/session-binding-codex.js';
 import { localWebFixture } from './helpers/local-web-fixture.js';
+import type { SessionBindingProvider } from '../src/session-binding-contract.js';
+
+test('ordinary configured task exposes explicit-stop authority and HTTP revocation persists across reload',async()=>{
+ const f=localWebFixture();const journal=join(f.root,'receipts');mkdirSync(journal,{mode:0o700});
+ f.profile.session_binding={product:'codex',receipt_directory:journal,source_roots:[join(f.home,'sessions')],project_root:f.project};
+ const domain=f.create();const origin='http://127.0.0.1:4321';const app=createLocalWebServer({origin,domain,metadataFile:f.metadataFile});
+ try{
+  const created=await domain.createTask({name:'Synthetic explicit stop',project_id:'project-1',setup_id:f.profile.id}) as {id:string};
+  expect(domain.task(created.id)).toMatchObject({measurement:{end_condition:'explicit_stop',window:{ends_at:null}}});
+  const bootstrap=(await app.inject({url:'/api/bootstrap',headers:{host:'127.0.0.1:4321'}})).json<{csrf:string}>();
+  const revoked=await app.inject({method:'POST',url:`/api/tasks/${created.id}/revoke-collection`,payload:'{}',headers:{host:'127.0.0.1:4321',origin,'content-type':'application/json','x-harness-csrf':bootstrap.csrf,'idempotency-key':randomUUID(),'if-match':domain.task(created.id).version}});
+  expect(revoked.statusCode,revoked.body).toBe(200);
+  expect(revoked.json<{actions:{code:string;enabled:boolean;reason:string|null}[]}>().actions).toContainEqual({code:'session-connect',enabled:false,reason:'binding_source_unqualified'});
+  expect(f.store.eventCount()).toBe(0);
+  await app.close();const restarted=f.create();try{expect(restarted.task(created.id)).toMatchObject({measurement:{end_condition:'explicit_stop'}});expect(restarted.task(created.id).actions).toContainEqual({code:'revoke-collection',enabled:false,reason:'binding_scope_revoked'});}finally{await restarted.close?.();}
+ }finally{await app.close();f.cleanup();}
+});
+
+test('domain close finishes cleanup even when pause cannot record a valid gap',async()=>{
+ const f=localWebFixture();const source=f.newRoot();
+ const provider:SessionBindingProvider={product:'codex',
+  capabilities:()=>({currentIdentity:'native_hook',ancestry:'verified_relations',usage:'own_requests',productionSupported:false,maxDepth:1,reasons:[]}),
+  resolveCurrent:()=>Promise.resolve({product:'codex',productVersion:'0.160.0',sessionId:source.id,sourceRef:source.path,sourceIdentity:randomUUID(),cwd:f.project,identityEvidenceId:randomUUID(),parentSessionId:null,createdAt:new Date().toISOString()}),
+  discoverChildren:()=>Promise.resolve({children:[],gaps:[]}),
+  readUsage:()=>Promise.resolve({records:[],cursor:'0',gaps:[]})};
+ const domain=createLocalWebDomain({store:f.store,metadataFile:f.metadataFile,profiles:[f.profile],bindingProviders:[provider]});
+ try{
+  const created=await domain.createTask({name:'Synthetic failed pause',project_id:'project-1',setup_id:f.profile.id}) as {id:string};
+  await domain.taskAction(created.id,'apply',{});
+  await domain.taskAction(created.id,'session-connect',{product:'codex',receipt:randomUUID()});
+  f.store.execute('UPDATE session_bindings SET observed_since=?',[new Date(Date.now()+10000).toISOString()]);
+  await expect(domain.close?.()).rejects.toThrow('invalid_gap');
+  expect(f.store.all('SELECT state,cursor FROM session_bindings')).toEqual([{state:'stopped',cursor:null}]);
+  await expect(domain.bootstrap()).rejects.toThrow('not open');
+ }finally{f.cleanup();}
+});
 
 // Production APIs, domain, Store and Codex parser with synthetic native hook
 // payloads. No product binary, native session or personal database is opened.
@@ -44,10 +80,10 @@ test('one native receipt connects and observes automatically; early child usage 
   appendFileSync(child.path,JSON.stringify({type:'token_usage_record',timestamp:new Date().toISOString(),payload:{thread_id:child.id,session_id:root.id,turn_id:'child-turn',root_turn_id:'root-turn',response_id:'continued-child-request',usage:{input_tokens:12,cached_input_tokens:2,cache_write_input_tokens:0,output_tokens:4,reasoning_output_tokens:1,total_tokens:16}}})+'\n');
   await expect.poll(()=>f.store.eventCount(),{timeout:3000}).toBe(2);
   expect((await post('finish-success')).json()).toMatchObject({error:'workflow_run_active'});
-  await post('pause');const assignment=f.store.get('SELECT * FROM comparison_assignments WHERE task_id=?',[id]);
+  await post('pause');expect(domain.task(id).actions).toEqual(expect.arrayContaining([{code:'resume-binding',enabled:true,reason:null}]));const assignment=f.store.get('SELECT * FROM comparison_assignments WHERE task_id=?',[id]);
   await app.close();domain=makeDomain();app=createLocalWebServer({origin,domain,metadataFile:f.metadataFile});
   expect(domain.task(id)).toMatchObject({binding:{state:'stopped'}});
-  expect((await post('session-connect',{product:'codex',receipt:rootReceipt})).statusCode).toBe(200);
+  expect((await post('resume-binding')).statusCode).toBe(200);
   expect(f.store.eventCount()).toBe(2);expect(f.store.get('SELECT * FROM comparison_assignments WHERE task_id=?',[id])).toEqual(assignment);
   await post('pause');expect((await post('finish-success')).statusCode).toBe(200);expect(domain.task(id)).toMatchObject({status:'success'});
   expect(readFileSync(join(journal,`${rootReceipt}.json`),'utf8')).not.toContain('first-child-request');

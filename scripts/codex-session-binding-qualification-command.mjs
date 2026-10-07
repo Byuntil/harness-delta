@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { prepareCodexSessionBindingQualification, executeCodexSessionBindingQualification, codexBindingQualificationArgv, serveCodexSessionBindingQualificationUiPreparation, serveCodexSessionBindingQualificationResults } from '../dist/codex-session-binding-qualification.js';
 
 const program=new Command().name('codex-session-binding-qualification').description('Prepare or explicitly approve one isolated ordinary Codex root/two-direct-children qualification.');
-program.command('prepare').requiredOption('--directory <absolute-path>').requiredOption('--binary <absolute-path>').requiredOption('--codex-home <absolute-path>').action(async options=>{
- const prepared=await prepareCodexSessionBindingQualification(options.directory,{binary:options.binary,codexHome:options.codexHome});
- console.log(JSON.stringify({intent_path:prepared.intentPath,intent_sha256:prepared.sha256,task_id:prepared.intent.task_id,argv:codexBindingQualificationArgv(prepared.intent),root_model:prepared.intent.root_model,child_model:prepared.intent.child_model,effort:prepared.intent.effort,planned_roots:1,planned_children:2,root_request_stop:4,child_request_stop:1,ui_preparation_required:true,duration_ms:120000,observed_request_stop:6,observed_token_stop:100000,hard_billing_bound:null,product_gate_delta:false},null,2));
+program.command('prepare').requiredOption('--directory <absolute-path>').requiredOption('--binary <absolute-path>').requiredOption('--codex-home <absolute-path>').addOption(new Option('--start-mode <mode>','automatic initial prompt or manual terminal input').choices(['automatic','manual']).default('automatic')).action(async options=>{
+ const prepared=await prepareCodexSessionBindingQualification(options.directory,{binary:options.binary,codexHome:options.codexHome,startMode:options.startMode});
+ console.log(JSON.stringify({intent_path:prepared.intentPath,intent_sha256:prepared.sha256,task_id:prepared.intent.task_id,start_mode:prepared.intent.start_mode,argv:codexBindingQualificationArgv(prepared.intent),root_model:prepared.intent.root_model,child_model:prepared.intent.child_model,effort:prepared.intent.effort,planned_roots:1,planned_children:2,root_request_stop:4,child_request_stop:1,ui_preparation_required:true,duration_ms:120000,observed_request_stop:6,observed_token_stop:100000,hard_billing_bound:null,product_gate_delta:false},null,2));
 });
 program.command('prepare-ui').requiredOption('--intent <absolute-path>').action(async options=>{
  const server=await serveCodexSessionBindingQualificationUiPreparation(options.intent);

@@ -10,6 +10,7 @@ import { recordAbandonedRunGap } from './runtime-history.js';
 import { ExternalPreparationSpecSchema, applyManagedHarness, managedHarnessDigest, sha256, verifyCommonArtifacts, type ExternalPreparationSpec } from './harness-managed-file.js';
 import type { Store } from './store.js';
 import { externalContract } from './external-session-contract.js';
+import { codexHumanPilotProfileId } from './session-binding-human-pilot.js';
 
 interface PreparationRow {
   task_id: string; project_id: string; revision: string; configuration_digest: string;
@@ -30,18 +31,19 @@ function surfaceKey(root: string): string { return sha256(root); }
 function configurationDigest(input: ReturnType<typeof AssignedWorkflowInputSchema.parse>, spec: ExternalPreparationSpec): string {
   return sha256(JSON.stringify({ artifacts: input.artifacts, product_version: input.product_version, spec }));
 }
-function assertExternalProfile(store: Store, input: ReturnType<typeof AssignedWorkflowInputSchema.parse>): void {
+function assertExternalProfile(store: Store, input: ReturnType<typeof AssignedWorkflowInputSchema.parse>, preparationOnly = false): void {
   const protocol = comparisonProtocol(store, protocolRow(store, input.assignment.protocol_id));
   if (protocol.purpose === 'synthetic_validation') return;
   if (protocol.schema_version !== 2 || input.assignment.metadata.product !== 'codex' || input.product_version !== '0.160.0' ||
-      protocol.source_profiles.some(p => p.product !== 'codex' || p.product_version !== '0.160.0' || p.profile_id !== codexWorkflowProfileId)) throw new Error('external_source_unsupported');
+      protocol.source_profiles.some(p => p.product !== 'codex' || p.product_version !== '0.160.0' ||
+        (p.profile_id !== codexWorkflowProfileId && !(preparationOnly && protocol.purpose === 'functional_pilot' && p.profile_id === codexHumanPilotProfileId)))) throw new Error('external_source_unsupported');
 }
 
 /** Input confirmation is not native loading. No source read, activation or spawn. */
 export function prepareExternalWorkflow(store: Store, input: unknown, runtime: unknown, specInput: unknown, apply = false, clock: Clock = utcNow) {
   const config = AssignedWorkflowInputSchema.parse(input); const spec = ExternalPreparationSpecSchema.parse(specInput);
   if (store.get("SELECT 1 FROM tombstones WHERE (kind='task' AND id=?) OR (kind='project' AND id=?)", [config.assignment.task_id, config.assignment.project_id])) throw new Error('deleted_identifier');
-  assertExternalProfile(store, config);
+  assertExternalProfile(store, config, true);
   const root = rootFor(store, config.assignment.project_id); const key = surfaceKey(root);
   const oldTask = store.get<{task_id: string}>('SELECT task_id FROM comparison_identity_keys WHERE project_id=? AND key_id=?', [config.assignment.project_id, config.assignment.logical_task_id])?.task_id ?? config.assignment.task_id;
   const owner = store.get<{task_id: string}>('SELECT task_id FROM external_surface_leases WHERE surface_key=?', [key]);

@@ -90,6 +90,10 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
         `binding_receipt_limit_${this.maxReceipts}`, `binding_source_byte_limit_${this.maxSourceBytes}`, `binding_family_scope_limit_${this.maxFamilyMembers}`,
         'binding_turn_limit_64', 'binding_metadata_header_byte_limit_65536'] };
   }
+  /** Metadata-only pilot scope check before any receipt/source access. */
+  assertProjectRoot(projectRoot: string): void {
+    if(projectRoot!==this.projectRoot)throw new Error('binding_pilot_scope_invalid');
+  }
   private checkDirectory(): void {
     let stat: ReturnType<typeof lstatSync>;
     try { stat = lstatSync(this.directory); } catch { throw new Error('binding_metadata_untrusted'); }

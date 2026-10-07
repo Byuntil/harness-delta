@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { Lifecycle, utcNow, type Clock } from './lifecycle.js';
 import { parseTaskMetadata, parseProtocol } from './flexible-contracts.js';
-import { externalContract } from './external-session-contract.js';
+import { externalContract, bindingCollectionControl } from './external-session-contract.js';
 import { assertExternalPrepared } from './external-session-workflow.js';
 import { bindConfigurationToSession } from './config-confirmation.js';
 import { putUsageWithEvidence, recordObservationGap } from './runtime-history.js';
@@ -20,13 +20,15 @@ import type { CandidateScope } from './nested-candidate.js';
 import type { Store } from './store.js';
 import { assertBindingQualification, bindingQualificationOwnerLive, noteBindingQualificationTransition, checkBindingQualificationIdentity, checkBindingQualificationRecord, type BindingQualificationLease } from './session-binding-qualification-lease.js';
 import type { ExternalTaskSetup } from './external-session-service.js';
+import { assertCodexHumanPilotScope, checkCodexHumanPilotIdentity, type CodexHumanPilotScope } from './session-binding-human-pilot.js';
 
 interface BindingRow { session_id: string; task_id: string; root_id: string; identity: string;
-  relation_evidence_id: string | null; cursor: string | null; observed_since: string; generation: number; state: string; gaps: string }
+  relation_evidence_id: string | null; connect_receipt: string | null; cursor: string | null; observed_since: string; generation: number; state: string; gaps: string }
 export interface SessionBindingServiceOptions {
   store: Store; providers: SessionBindingProvider[]; setupFor(taskId: string): ExternalTaskSetup; clock?: Clock;
   providersForTask?(taskId: string, deletedProjectRoot?: string): SessionBindingProvider[];
   qualificationLease?: BindingQualificationLease;
+  humanPilot?: CodexHumanPilotScope;
   syntheticProviderForTask?(provider: SessionBindingProvider, taskId: string): boolean;
 }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -46,11 +48,19 @@ export function bindingSourceSupported(store: Store, taskId: string): boolean {
 }
 
 export function createSessionBindingService(options: SessionBindingServiceOptions) {
+  if(options.qualificationLease&&options.humanPilot)throw new Error('binding_pilot_scope_invalid');
   const { store } = options; const clock = options.clock ?? utcNow; const life = new Lifecycle(store, clock);
   const rows = (taskId: string) => store.all<BindingRow>('SELECT * FROM session_bindings WHERE task_id=? ORDER BY rowid', [taskId]);
   const providerFor = (product: BindingProduct, taskId: string) => {
     const provider = (options.providersForTask?.(taskId) ?? options.providers).find(p => p.product === product);
     if (!provider) throw new Error('binding_provider_unavailable'); return provider;
+  };
+  // Ordinary admission is independent of test ownership. Only explicitly
+  // injected providers may use the synthetic protocol's validation authority.
+  const sourceSupported = (taskId: string, product: BindingProduct) => {
+    const provider = providerFor(product, taskId);
+    return bindingSourceSupported(store, taskId) &&
+      (options.providers.includes(provider) || options.syntheticProviderForTask?.(provider, taskId) === true);
   };
   let forgetting: Promise<void> | undefined;
   const flushForgotten = (): Promise<void> => {
@@ -79,8 +89,19 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     assertExternalPrepared(store, taskId, setup.workflow, setup.preparation, clock);
     const contract = externalContract(store, taskId);
     if (!contract) throw new Error('external_contract_required');
-    if (contract.ends_at && Date.parse(clock()) >= Date.parse(contract.ends_at)) throw new Error('external_window_closed');
-    if (!bindingSourceSupported(store, taskId) && !assertBindingQualification(options.qualificationLease, store, taskId)) throw new Error('binding_source_unqualified');
+    const control = bindingCollectionControl(store,taskId);
+    if(control?.revoked_at)throw new Error('binding_scope_revoked');
+    if ((!control || options.qualificationLease) && contract.ends_at && Date.parse(clock()) >= Date.parse(contract.ends_at)) throw new Error('external_window_closed');
+    if (options.qualificationLease) assertBindingQualification(options.qualificationLease, store, taskId);
+    else if(options.humanPilot)assertCodexHumanPilotScope(options.humanPilot,store,taskId,providerFor('codex',taskId));
+    else if (!bindingSourceSupported(store, taskId)) throw new Error('binding_source_unqualified');
+    return task;
+  };
+  const authorizeConnection = (taskId:string,generation?:number) => {
+    const task=authorize(taskId,false,generation);
+    // A failed pause can leave lifecycle state active while its durable
+    // collection fence is stopped. Recover the pause before reconnecting.
+    if(task.state==='active'&&store.get("SELECT 1 FROM external_preparations WHERE task_id=? AND state='stopped'",[taskId]))throw new Error('binding_scope_revoked');
     return task;
   };
   const checkIdentity = (taskId: string, input: VerifiedSessionIdentity) => {
@@ -94,7 +115,8 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     const bound = store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?', [value.sessionId]);
     if (bound && bound.identity !== JSON.stringify(value)) throw new Error('binding_identity_mismatch');
     if (old && !bound) throw new Error('binding_session_conflict');
-    checkBindingQualificationIdentity(options.qualificationLease, store, taskId, value);
+    checkBindingQualificationIdentity(options.qualificationLease, store, taskId, value, false);
+    if(options.humanPilot)checkCodexHumanPilotIdentity(options.humanPilot,store,taskId,value);
     return value;
   };
   const bind = (taskId: string, value: VerifiedSessionIdentity, rootId: string, relation: string | null, generation: number) => {
@@ -119,18 +141,35 @@ export function createSessionBindingService(options: SessionBindingServiceOption
         processId: value.nativeMapping?.processId ?? null, agentId: value.nativeMapping?.agentId ?? null };
     }),
   });
+  const authorizeObservation = (taskId: string, row: BindingRow) => {
+    const task=authorize(taskId,true,row.generation);
+    const current=store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?',[row.session_id]);
+    if(!current||current.state!=='observing'||current.generation!==row.generation||current.identity!==row.identity||current.cursor!==row.cursor)throw new Error('binding_scope_revoked');
+    return task;
+  };
   const read = async (taskId: string, row: BindingRow, baseline: boolean) => {
-    authorize(taskId, true, row.generation); const value = identityFor(row); const provider = providerFor(value.product, taskId);
+    authorizeObservation(taskId,row); const value = identityFor(row); const provider = providerFor(value.product, taskId);
+    if(options.humanPilot)checkCodexHumanPilotIdentity(options.humanPilot,store,taskId,value);
+    if(options.humanPilot&&baseline) {
+      // Baselines also need a metadata-only family preflight. Initial connect
+      // and resume must not read a root body before noticing rejected members.
+      const discovered=await provider.discoverChildren(value);authorizeObservation(taskId,row);
+      if(discovered.gaps.length)throw new Error('binding_pilot_family_scope');
+      for(const child of discovered.children) {
+        const identity=checkIdentity(taskId,child.identity);
+        if(child.parentSessionId!==value.sessionId||identity.parentSessionId!==value.sessionId||!child.relationEvidenceId)throw new Error('binding_pilot_family_scope');
+        const descendants=await provider.discoverChildren(identity);authorizeObservation(taskId,row);
+        if(descendants.children.length||descendants.gaps.length)throw new Error('binding_pilot_family_scope');
+      }
+    }
     const batch = await provider.readUsage(value, baseline ? null : row.cursor, scopeFor(taskId, row.root_id), { baseline });
-    authorize(taskId, true, row.generation);
+    authorizeObservation(taskId,row);
     if (typeof batch.cursor !== 'string' || batch.cursor.length > 6 * 1024 * 1024 || batch.records.length > 65536 || (batch.excludedRecords?.length ?? 0) > 65536) throw new Error('binding_usage_invalid');
     const records = batch.records.map(record => BindingUsageRecordSchema.parse(record));
     const excluded = (batch.excludedRecords ?? []).map(record => BindingUsageRecordSchema.parse(record));
     for (const record of [...records,...excluded]) if (record.sessionId !== value.sessionId || record.payload.product !== value.product || record.payload.product_version !== value.productVersion || Date.parse(record.occurredAt) > Date.parse(clock())) throw new Error('binding_usage_invalid');
     store.immediateTransaction(() => {
-      const task = authorize(taskId, true, row.generation);
-      const current = store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?', [value.sessionId]);
-      if (!current || current.state !== 'observing' || current.identity !== row.identity || current.cursor !== row.cursor) throw new Error('binding_scope_revoked');
+      const task = authorizeObservation(taskId,row);
       for (const record of excluded) checkBindingQualificationRecord(options.qualificationLease, store, taskId, record, true);
       if (baseline) for (const record of records) checkBindingQualificationRecord(options.qualificationLease, store, taskId, record, true);
       if (!baseline) for (const record of records) {
@@ -188,47 +227,48 @@ export function createSessionBindingService(options: SessionBindingServiceOption
       requests: store.get<{ count: number }>('SELECT count(*) AS count FROM binding_requests r JOIN events e ON e.id=r.event_id WHERE e.task_id=?', [taskId])?.count ?? 0,
       gaps, cost_coverage: 'partial' as const, complete_cost: null, inference: false };
   };
+  const resumeAvailable = (taskId: string) => {
+    const roots = rows(taskId).filter(r => identityFor(r).parentSessionId === null);
+    return roots.length === 1 && CurrentIdentityRequestSchema.safeParse({receipt:roots[0]!.connect_receipt}).success;
+  };
   const pause = (taskId: string) => {
     const all = rows(taskId);
+    // Collection fences do not depend on a successful timestamp/gap write.
+    // A clock error remains an error; never invent an interval endpoint.
+    store.immediateTransaction(()=>{
+      store.execute("UPDATE session_bindings SET state='stopped',cursor=NULL WHERE task_id=?",[taskId]);
+      store.execute("UPDATE external_preparations SET state='stopped' WHERE task_id=?", [taskId]);
+    });
+    for(const row of all)store.execute('UPDATE session_bindings SET gaps=? WHERE session_id=?',[JSON.stringify(cleanGaps([...z.array(z.string()).parse(JSON.parse(row.gaps) as unknown),'unobserved_interval'])),row.session_id]);
     if (life.state(taskId) === 'active') {
       for (const row of all.filter(row => row.state === 'observing')) recordObservationGap(store, taskId, row.session_id, row.observed_since, clock(), 'incomplete', clock());
       life.pause(taskId);
       noteBindingQualificationTransition(options.qualificationLease, store, taskId);
     }
-    for (const row of all) store.execute("UPDATE session_bindings SET state='stopped',cursor=NULL,gaps=? WHERE session_id=?", [JSON.stringify(cleanGaps([...z.array(z.string()).parse(JSON.parse(row.gaps) as unknown), 'unobserved_interval'])), row.session_id]);
-    store.execute("UPDATE external_preparations SET state='stopped' WHERE task_id=?", [taskId]);
   };
-  return {
-    status, pause, flushForgotten,
-    async resume(taskId: string) {
-      if (!options.qualificationLease || !bindingQualificationOwnerLive(options.qualificationLease) || life.state(taskId) !== 'paused') throw new Error('binding_qualification_live_root_required');
-      assertBindingQualification(options.qualificationLease, store, taskId);
-      const root = rows(taskId).find(r => identityFor(r).parentSessionId === null);
-      if (!root) throw new Error('binding_qualification_live_root_required');
-      const identity = identityFor(root); return await this.connect(taskId, identity.product, {receipt:identity.identityEvidenceId});
-    },
-    capabilities: (taskId: string, product: BindingProduct) => providerFor(product, taskId).capabilities(),
-    async connect(taskId: string, product: BindingProduct, request: CurrentIdentityRequest) {
+  const connect = async (taskId: string, product: BindingProduct, request: CurrentIdentityRequest, expectedRoot?: VerifiedSessionIdentity): Promise<ReturnType<typeof status> & {status:string;session_id:string;automatic_children:boolean;role?:'child'}> => {
       await flushForgotten();
       if (options.qualificationLease && !bindingQualificationOwnerLive(options.qualificationLease)) throw new Error('binding_qualification_live_root_required');
-      const before = authorize(taskId); const provider = providerFor(product, taskId); const input = CurrentIdentityRequestSchema.parse(request);
-      if (options.qualificationLease) {
+      const before = authorizeConnection(taskId); const provider = providerFor(product, taskId); const input = CurrentIdentityRequestSchema.parse(request);
+      if (options.qualificationLease || options.humanPilot) {
         if (!(provider instanceof CodexSessionBindingProvider)) throw new Error('binding_qualification_scope_invalid');
         const root=rows(taskId).find(r=>identityFor(r).parentSessionId===null);
         provider.assertRootReceipt(input,root?.session_id??null);
       }
       // An injected dependency is used only inside an explicitly synthetic
       // protocol. Native manifest providers remain gated even in that workspace.
-      if (!provider.capabilities().productionSupported && !options.providers.includes(provider) && !options.syntheticProviderForTask?.(provider, taskId) && !assertBindingQualification(options.qualificationLease, store, taskId)) throw new Error('binding_source_unqualified');
-      const value = checkIdentity(taskId, await provider.resolveCurrent(input));
-      authorize(taskId, false, before.generation);
+      if (!options.qualificationLease && !options.humanPilot && !sourceSupported(taskId, product)) throw new Error('binding_source_unqualified');
+      const resolved = await provider.resolveCurrent(input);
+      authorizeConnection(taskId, before.generation);
+      const value = checkIdentity(taskId, resolved);
+      if (expectedRoot && JSON.stringify(value) !== JSON.stringify(expectedRoot)) throw new Error('binding_identity_mismatch');
       if (value.product !== product) throw new Error('binding_identity_mismatch');
       if (value.parentSessionId !== null) {
         if (before.state !== 'active') throw new Error('binding_reconnect_required');
         if (!rows(taskId).some(r => identityFor(r).product === product && identityFor(r).parentSessionId === null)) throw new Error('binding_child_requires_root');
         // Receipt identity alone does not establish family membership. Discovery
         // must independently verify the relation, including before its next poll.
-        await this.tick(taskId); authorize(taskId, true, before.generation);
+        await service.tick(taskId); authorize(taskId, true, before.generation);
         checkIdentity(taskId, value);
         const member = store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?', [value.sessionId]);
         if (!member || member.state !== 'observing' || member.generation !== before.generation) throw new Error('binding_child_requires_root');
@@ -236,14 +276,17 @@ export function createSessionBindingService(options: SessionBindingServiceOption
           automatic_children: provider.capabilities().ancestry === 'verified_relations' };
       }
       const old = store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?', [value.sessionId]);
-      if (old?.state === 'observing' && old.generation === before.generation && before.state === 'active') return { status: 'already_connected', ...status(taskId), session_id: value.sessionId, automatic_children: provider.capabilities().ancestry === 'verified_relations' };
+      if (old?.state === 'observing' && old.generation === before.generation && before.state === 'active') {
+        store.execute('UPDATE session_bindings SET connect_receipt=? WHERE session_id=?',[input.receipt,value.sessionId]);
+        return { status: 'already_connected', ...status(taskId), session_id: value.sessionId, automatic_children: provider.capabilities().ancestry === 'verified_relations' };
+      }
       const restart = before.state !== 'active';
       store.immediateTransaction(() => {
-        authorize(taskId, false, before.generation);
+        authorizeConnection(taskId, before.generation);
         if (before.state === 'registered') life.start(taskId); else if (before.state === 'paused') life.resume(taskId);
-        if (restart) noteBindingQualificationTransition(options.qualificationLease, store, taskId);
         const task = life.task(taskId); selectTaskPriceTable(store, taskId, clock());
         bind(taskId, value, value.sessionId, null, task.generation);
+        store.execute('UPDATE session_bindings SET connect_receipt=? WHERE session_id=?',[input.receipt,value.sessionId]);
         if (restart) store.execute("UPDATE session_bindings SET generation=?,observed_since=?,state='observing',cursor=NULL WHERE task_id=?", [task.generation, clock(), taskId]);
         const contract = externalContract(store, taskId)!;
         if (contract.started_at === null) {
@@ -252,20 +295,41 @@ export function createSessionBindingService(options: SessionBindingServiceOption
         }
         store.execute("UPDATE external_preparations SET first_connected_at=COALESCE(first_connected_at,?),state='connected',reason_code=NULL WHERE task_id=?", [clock(), taskId]);
       });
+      if (restart) noteBindingQualificationTransition(options.qualificationLease, store, taskId);
+      checkBindingQualificationIdentity(options.qualificationLease,store,taskId,value);
       try {
         for (const row of rows(taskId).filter(row => restart || row.session_id === value.sessionId)) await read(taskId, row, true);
-      } catch (error) { if (store.get('SELECT id FROM tasks WHERE id=?', [taskId])) pause(taskId); throw error; }
+      } catch (error) {
+        if (store.get('SELECT id FROM tasks WHERE id=?', [taskId])) try{pause(taskId);}catch{ /* Binding fences are durable; preserve the original read failure. */ }
+        throw error;
+      }
       return { status: old ? 'reconnected' : 'connected', ...status(taskId), session_id: value.sessionId, automatic_children: provider.capabilities().ancestry === 'verified_relations' };
+  };
+  const service = {
+    status, pause, flushForgotten, sourceSupported, resumeAvailable,
+    async resume(taskId: string) {
+      if (options.qualificationLease && !bindingQualificationOwnerLive(options.qualificationLease)) throw new Error('binding_qualification_live_root_required');
+      if (life.state(taskId) !== 'paused') throw new Error('binding_reconnect_required');
+      authorizeConnection(taskId);
+      const roots = rows(taskId).filter(r => identityFor(r).parentSessionId === null);
+      if (!resumeAvailable(taskId)) throw new Error('binding_reconnect_required');
+      const root=roots[0]!; const identity = identityFor(root); return await connect(taskId, identity.product, {receipt:root.connect_receipt!}, identity);
     },
+    capabilities: (taskId: string, product: BindingProduct) => providerFor(product, taskId).capabilities(),
+    connect: (taskId: string, product: BindingProduct, request: CurrentIdentityRequest) => connect(taskId, product, request),
     async tick(taskId: string) {
       await flushForgotten();
       const task = life.task(taskId); if (task.state !== 'active') return status(taskId);
+      if(!rows(taskId).some(row=>row.state==='observing'&&row.generation===task.generation))return status(taskId);
       authorize(taskId, true, task.generation);
       const pending = rows(taskId).filter(row => row.state === 'observing' && row.generation === task.generation);
       for (let index = 0; index < pending.length; index++) {
         const row = pending[index]!; const value = identityFor(row); const provider = providerFor(value.product, taskId);
-        authorize(taskId, true, task.generation);
-        const discovered = await provider.discoverChildren(value); authorize(taskId, true, task.generation);
+        authorizeObservation(taskId,row);
+        const discovered = await provider.discoverChildren(value); authorizeObservation(taskId,row);
+        // Candidate providers may report a rejected ancestry/family as a gap
+        // instead of returning its identity. A pilot cannot continue past it.
+        if(options.humanPilot&&discovered.gaps.length)throw new Error('binding_pilot_family_scope');
         let depth = 0; let ancestor = row;
         while (identityFor(ancestor).parentSessionId !== null) { depth++; ancestor = pending.find(p => p.session_id === identityFor(ancestor).parentSessionId)!; if (!ancestor || depth > 32) throw new Error('binding_relation_invalid'); }
         for (const child of discovered.children) {
@@ -277,23 +341,29 @@ export function createSessionBindingService(options: SessionBindingServiceOption
           const existing = pending.find(p => p.session_id === identity.sessionId);
           if (existing) { if (existing.root_id !== row.root_id) throw new Error('binding_relation_invalid'); continue; }
           store.immediateTransaction(() => { authorize(taskId, true, task.generation); bind(taskId, identity, row.root_id, child.relationEvidenceId, task.generation); });
+          checkBindingQualificationIdentity(options.qualificationLease,store,taskId,identity);
           const linked = store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?', [identity.sessionId])!;
           linked.observed_since = row.observed_since;
           store.execute('UPDATE session_bindings SET observed_since=? WHERE session_id=?', [linked.observed_since, identity.sessionId]);
-          pending.push(linked);
           if (Date.parse(identity.createdAt) < Date.parse(row.observed_since)) {
             linked.gaps = JSON.stringify(['late_linked_member']);
             store.execute('UPDATE session_bindings SET gaps=? WHERE session_id=?', [linked.gaps, identity.sessionId]);
             recordObservationGap(store, taskId, identity.sessionId, row.observed_since, clock(), 'incomplete', clock());
             await read(taskId, linked, true);
           }
+          // Baseline reads commit a new cursor. Discovery must use that current
+          // snapshot rather than treating our own cursor update as revocation.
+          pending.push(store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?',[identity.sessionId])!);
         }
         if (discovered.gaps.length) store.execute('UPDATE session_bindings SET gaps=? WHERE session_id=?', [JSON.stringify(cleanGaps([...z.array(z.string()).parse(JSON.parse(row.gaps) as unknown), ...discovered.gaps])), row.session_id]);
       }
       for (const row of rows(taskId).filter(r => r.state === 'observing' && r.generation === task.generation)) await read(taskId, row, false);
-      store.execute("UPDATE external_preparations SET state='measuring' WHERE task_id=?", [taskId]);
+      // An awaited read may finish just before pause fences the task. Do not
+      // clear that fence when this tick's continuation finally runs.
+      store.execute("UPDATE external_preparations SET state='measuring' WHERE task_id=? AND state!='stopped'", [taskId]);
       return status(taskId);
     },
   };
+  return service;
 }
 export type SessionBindingService = ReturnType<typeof createSessionBindingService>;

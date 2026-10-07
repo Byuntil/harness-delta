@@ -43,6 +43,43 @@ limits remain explicit gaps. Partial usage never becomes a complete total. Human
 completion and statistical adoption gates remain; full cost and inference are out
 of scope.
 
+## User sessions and automated qualification
+
+The user owns ordinary native session startup, input and exit. The product
+collector owns only explicitly authorized observation. Its source admission,
+project/task/generation and preparation checks are independent of an automated
+process owner, model choice or request/time safety budget. Normal pause, collector
+failure and server close stop collection; they do not terminate a user session.
+The declared observation window still bounds collection/report eligibility and
+is not the native agent's lifetime.
+
+`resume-binding` revalidates the one linked root using its privately retained
+opaque connect receipt and current preparation,
+then baselines the surviving family before future collection. Multiple linked
+roots require explicit parent reconnect rather than an arbitrary root choice.
+Older persisted bindings without a retained receipt require explicit parent
+reconnect. Migration022 adds only the nullable private receipt; existing identities,
+usage and assignment remain unchanged. No paused/offline usage is backfilled. Receipt expiry, source change, configuration
+drift, closed windows and deleted/revoked scope remain blockers.
+
+The isolated qualification runner optionally adds its opaque owner lease,
+fresh-root/family pins, exact tested model/effort, safety request/token/deadline
+limits and verified teardown. Its faults, emergency stop and receiver closure may
+stop its own native process. These constraints do not grant ordinary source
+admission and are not product requirements. The UI uses the same source authority
+as the collector; provider/browser `productionSupported` assertions cannot open it.
+
+Ordinary native family admission remains closed. Codex 0.160.0 needs actual
+hook/materialized-path/header and own-counter conformance for the supported
+family/history scope. Claude 2.1.291 remains a candidate and needs actual transcript,
+hook loading, family membership and own-counter conformance; nested immediate
+parents are unverified. Existing admitted workflow profiles and root-only
+`no_child_activity` conformance cannot substitute for that evidence. A future
+promotion requires sanitized evidence tied to the exact binary/source/profile and
+implementation, plus independent review and a code-owned admission change.
+An owned qualification probe can provide evidence without imposing owner control
+on ordinary product sessions. No gate promotion occurs in this implementation.
+
 ## Native instrumentation and support
 
 The [official Codex hooks](https://learn.chatgpt.com/docs/hooks) expose startup
@@ -124,3 +161,18 @@ See `tests/session-binding-service.test.ts`, `tests/session-binding-codex.test.t
 `tests/session-binding-api.test.ts`, `tests/session-binding-claude.test.ts`,
 `tests/session-binding-claude-api.test.ts` and `skills/harness-connect/tests/*.mjs`.
 Local results are separate from remote CI and actual native source qualification.
+
+### Collaborative native pilot
+
+A local operator may explicitly observe one isolated Codex 0.160.0
+`functional_pilot` task using the candidate profile
+`codex-01600-ordinary-human-pilot`. This grants candidate evidence collection,
+not ordinary production admission. A process-local exact-task/provider capability
+is separate from browser/profile inputs and owned qualification. Source-free
+preparation grants no reads. Native provenance and the persistent unverified pilot
+label are retained; user-owned agents are never launched or terminated by this
+path. Scope is one fresh root and two direct children; all existing identity,
+preparation, generation, window, dedup and pause fences still apply. Assignment
+preparation alone may use the candidate; normal activation/adapter execution and
+real allocation remain gated. See the
+[collaborative pilot procedure](../validation/codex-human-session-pilot.md).

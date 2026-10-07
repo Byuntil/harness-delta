@@ -22,6 +22,12 @@ deadline = started + cfg['durationMs'] / 1000
 uid = os.getuid()
 ps_env = dict(os.environ, LC_ALL='C', TZ='UTC')
 known = {}
+absent = set()
+proofs = {}
+groups = set()
+ownership_failed = False
+cleanup_until = None
+cleanup_exhausted = False
 escape_seen = False
 group_changes = []
 group_changes_truncated = False
@@ -33,20 +39,46 @@ def emit(value):
     sys.stderr.flush()
 
 def metadata(pid):
+    global cleanup_exhausted, ownership_failed
     try:
-        text = subprocess.check_output(['ps', '-o', 'pid=,ppid=,pgid=,uid=,lstart=', '-p', str(pid)], env=ps_env, timeout=.2, stderr=subprocess.DEVNULL).decode().strip().split(None, 4)
+        timeout = .2 if cleanup_until is None else min(.2, cleanup_until - time.monotonic())
+        if timeout <= 0:
+            cleanup_exhausted = True
+            return None
+        text = subprocess.check_output(['ps', '-o', 'pid=,ppid=,pgid=,uid=,lstart=', '-p', str(pid)], env=ps_env, timeout=timeout, stderr=subprocess.DEVNULL).decode().strip().split(None, 4)
         if len(text) != 5:
+            ownership_failed = True
+            if cleanup_until is not None:
+                cleanup_exhausted = True
             return None
         return (int(text[0]), int(text[1]), int(text[2]), int(text[3]), text[4])
-    except (OSError, subprocess.SubprocessError, ValueError):
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        # ps exit 1 means the exact PID is absent; timeout/query failure does not.
+        if isinstance(error, subprocess.CalledProcessError) and error.returncode == 1:
+            if pid in known:
+                absent.add(pid)
+        else:
+            ownership_failed = True
+            if cleanup_until is not None:
+                cleanup_exhausted = True
         return None
 
-def same(record):
-    current = metadata(record[0])
+def identity_matches(record, current):
     return current is not None and current[0] == record[0] and current[3:] == record[3:]
 
+def same(record):
+    global ownership_failed
+    if record[0] in absent:
+        return False  # A positively absent identity cannot return; PID reuse is foreign.
+    current = metadata(record[0])
+    if current is not None and not identity_matches(record, current):
+        ownership_failed = True
+    return identity_matches(record, current)
+
 def note_group_change(previous, current):
-    global group_changes_truncated
+    global group_changes_truncated, escape_seen
+    groups.add(current[2])
+    escape_seen = escape_seen or current[2] != pid
     if previous is not None and previous[2] == current[2]:
         return
     if previous is None and current[2] == pid:
@@ -55,38 +87,116 @@ def note_group_change(previous, current):
         group_changes_truncated = True
         return
     # Only metadata already sampled for owned members; no extra query or content.
+    parent = proofs.get(current[0])
     group_changes.append({'pid': current[0], 'ppid': current[1], 'uid': current[3],
                           'startedAt': current[4],
                           'fromPgid': previous[2] if previous else None,
-                          'toPgid': current[2]})
+                          'toPgid': current[2], 'parentPid': parent[0] if parent else None,
+                          'parentUid': parent[3] if parent else None,
+                          'parentStartedAt': parent[4] if parent else None,
+                          'sampleOffsetMs': int((time.monotonic() - started) * 1000)})
 
 def discover():
-    global escape_seen
+    global escape_seen, ownership_failed
     pending = list(known.values())
     for record in pending:
-        if not same(record):
+        if record[0] in absent:
             continue
         # PGID/PPID may change while PID/UID/start remain the same owned member.
         # Refresh mutable groups instead of treating a known escape as exit.
-        current = metadata(record[0])
-        if current is None or current[0] != record[0] or current[3:] != record[3:]:
-            continue
-        note_group_change(record, current)
-        known[record[0]] = current
-        escape_seen = escape_seen or current[2] != pid
+        if cleanup_until is None:
+            current = metadata(record[0])
+            if current is None:
+                continue
+            if not identity_matches(record, current):
+                ownership_failed = True
+                return False
+            note_group_change(record, current)
+            known[record[0]] = current
+            escape_seen = escape_seen or current[2] != pid
         try:
-            children = subprocess.run(['pgrep', '-P', str(record[0])], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=.2, check=False).stdout.split()
+            timeout = .2 if cleanup_until is None else min(.2, cleanup_until - time.monotonic())
+            if timeout <= 0:
+                return False
+            query = subprocess.run(['pgrep', '-P', str(record[0])], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+            if query.returncode not in (0, 1):
+                return False
+            children = query.stdout.split()
         except (OSError, subprocess.SubprocessError):
             return False
+        if cleanup_until is not None:
+            # No admission or signal follows a no-children result. Do not resample
+            # leaf identities here; signal authorization will freshly check them.
+            if not children:
+                continue
+            current = metadata(record[0])
+            if not identity_matches(record, current):
+                ownership_failed = True
+                return False
+            note_group_change(record, current)
+            known[record[0]] = current
+            escape_seen = escape_seen or current[2] != pid
         for child in children:
+            # The pending pass refreshes known identities. setdefault never replaced
+            # them, so rereading them here provided no additional discovery evidence.
+            if int(child) in known:
+                if int(child) in absent:
+                    ownership_failed = True
+                    return False
+                continue
             fresh = metadata(int(child))
-            if fresh and fresh[1] == record[0] and fresh[3] == uid:
-                if fresh[0] not in known:
-                    note_group_change(None, fresh)
-                known.setdefault(fresh[0], fresh)
+            if fresh is None:
+                continue  # Exact child absence grants no new identity.
+            parent = metadata(record[0])
+            if not identity_matches(record, parent) or fresh[1] != record[0] or fresh[3] != uid:
+                ownership_failed = True
+                return False
+            proofs[fresh[0]] = parent
+            note_group_change(None, fresh)
+            known[fresh[0]] = fresh
         if len(known) > 32:
             return False
     return True
+
+def verified_group_members(group):
+    """Scoped membership only. A group number alone never authorizes a signal."""
+    global ownership_failed
+    try:
+        timeout = .2 if cleanup_until is None else min(.2, cleanup_until - time.monotonic())
+        if timeout <= 0:
+            raise TimeoutError()
+        query = subprocess.run(['pgrep', '-g', str(group)], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+        if query.returncode not in (0, 1) or query.returncode == 1 and query.stdout:
+            raise ValueError()
+        members = {}
+        member_ids = {int(value) for value in query.stdout.split()}
+        if len(member_ids) > 32 or query.returncode == 0 and not member_ids:
+            raise ValueError()
+        if not member_ids:
+            return {}
+        # Leader identity is sampled last, immediately before group authorization.
+        for member in sorted(member_ids, key=lambda value: value == group):
+            record = known.get(member)
+            if record is None or member in absent or member != pid and proofs.get(member) is None:
+                raise ValueError()
+            current = metadata(member)
+            if not identity_matches(record, current) or current[2] != group:
+                raise ValueError()
+            note_group_change(record, current)
+            known[member] = current
+            members[member] = current
+        timeout = .2 if cleanup_until is None else min(.2, cleanup_until - time.monotonic())
+        if timeout <= 0:
+            raise TimeoutError()
+        after = subprocess.run(['pgrep', '-g', str(group)], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, timeout=timeout, check=False)
+        if after.returncode not in (0, 1) or after.returncode == 1 and after.stdout or {int(value) for value in after.stdout.split()} != member_ids:
+            raise ValueError()
+        return members
+    except (OSError, subprocess.SubprocessError, ValueError):
+        ownership_failed = True
+        return None
 
 def group_exists(group):
     try:
@@ -120,6 +230,8 @@ try:
     root = metadata(pid)
     if root:
         known[pid] = root
+        proofs[pid] = None  # Direct unreaped fork child, not inferred ancestry.
+    groups.add(pid)
     os.close(ack_write)
     ready = select.select([ack_read], [], [], 1)[0]
     tty_verified = bool(ready and os.read(ack_read, 3) == b'TTY')
@@ -164,48 +276,84 @@ except BaseException:
     termination_cause = 'owner_error'
     coverage = False
 finally:
-    discover()
-    escaped = escape_seen or any(record[2] != pid and same(record) for record in known.values())
-    groups = {pid}
-    # Additional groups may be targeted only when their freshly recorded leader
-    # is still the same owned descendant; never attach to a pre-existing group.
-    groups.update(record[2] for record in known.values() if record[0] == record[2] and same(record))
+    cleanup_until = time.monotonic() + cfg['terminationMs'] / 1000
+    coverage = discover() and coverage
+    def reap():
+        global root_exit
+        if root_exit is None:
+            ended, result = os.waitpid(pid, os.WNOHANG)
+            if ended:
+                root_exit = os.waitstatus_to_exitcode(result)
     def send(sig):
-        for group in groups:
-            try:
-                leader = known.get(group)
-                current = metadata(group) if leader and same(leader) else None
-                if group_exists(group) and (group == pid or current and current[2] == group):
-                    os.killpg(group, sig)
-            except OSError:
-                pass
-        for record in known.values():
-            if same(record):
+        global escape_seen, ownership_failed
+        signaled = set()
+        # Every current group member must have independently established ownership.
+        # A missing leader permits individual identity-checked signals only.
+        for group in list(groups):
+            members = verified_group_members(group)
+            if not members:
+                continue
+            if group in members:
                 try:
-                    os.kill(record[0], sig)
+                    os.killpg(group, sig)
+                    signaled.update(members)
                 except OSError:
                     pass
-    until = time.monotonic() + cfg['terminationMs'] / 1000
+            else:
+                for member in members:
+                    try:
+                        os.kill(member, sig)
+                        signaled.add(member)
+                    except OSError:
+                        pass
+        for record in list(known.values()):
+            if record[0] in signaled or record[0] in absent:
+                continue
+            current = metadata(record[0])
+            if current is not None and not identity_matches(record, current):
+                ownership_failed = True
+            if identity_matches(record, current):
+                note_group_change(record, current)
+                known[record[0]] = current
+                escape_seen = escape_seen or current[2] != pid
+                try:
+                    os.kill(record[0], sig)
+                    signaled.add(record[0])
+                except OSError:
+                    pass
+        # The unreaped fork child cannot have its PID reused. Metadata loss permits
+        # this exact individual fallback only, never an unproved group signal.
+        if root_exit is None and pid not in signaled:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        reap()
+    until = cleanup_until
     send(signal.SIGTERM)
     grace = min(until, time.monotonic() + cfg['termGraceMs'] / 1000)
     while any(group_exists(g) for g in groups) and time.monotonic() < grace:
-        if root_exit is None:
-            ended, result = os.waitpid(pid, os.WNOHANG)
-            if ended:
-                root_exit = os.waitstatus_to_exitcode(result)
+        reap()
         time.sleep(.01)
     send(signal.SIGKILL)
+    members_absent = False
     while time.monotonic() < until:
-        if root_exit is None:
-            ended, result = os.waitpid(pid, os.WNOHANG)
-            if ended:
-                root_exit = os.waitstatus_to_exitcode(result)
-        if root_exit is not None and not any(group_exists(g) for g in groups) and not any(same(record) for record in known.values()):
-            break
+        reap()
+        if root_exit is not None and not any(group_exists(g) for g in groups):
+            members_absent = not any(same(record) for record in known.values())
+            if members_absent:
+                break
         time.sleep(.01)
-    verified = coverage and root_exit is not None and not any(group_exists(g) for g in groups) and not any(same(record) for record in known.values())
+    # Reaping is nonblocking and remains necessary even if query work exhausted
+    # the polling budget. Exhaustion/query failure can never prove disappearance.
+    reap()
+    if not members_absent:
+        members_absent = not any(same(record) for record in known.values())
+    ownership_verified = coverage and not ownership_failed
+    verified = ownership_verified and root_exit is not None and not any(group_exists(g) for g in groups) and members_absent and not cleanup_exhausted and time.monotonic() <= until
+    escaped = escape_seen
     try:
-        emit({'type': 'result', 'status': status if verified and not escaped else 'failed', 'pid': pid, 'exitCode': root_exit, 'terminationVerified': verified, 'controllingTerminal': tty_verified, 'escapedMemberObserved': escaped, 'ownedMembers': len(known), 'terminationCause': termination_cause, 'groupChanges': group_changes, 'groupChangesTruncated': group_changes_truncated})
+        emit({'type': 'result', 'status': status if verified else 'failed', 'pid': pid, 'exitCode': root_exit, 'terminationVerified': verified, 'ownershipVerified': ownership_verified, 'controllingTerminal': tty_verified, 'escapedMemberObserved': escaped, 'ownedMembers': len(known), 'terminationCause': termination_cause, 'groupChanges': group_changes, 'groupChangesTruncated': group_changes_truncated})
     except BrokenPipeError:
         pass  # Observer lost; teardown still completed in this independent owner.
     os.close(master)

@@ -134,3 +134,25 @@ test('an existing version-one store upgrades without changing its events', async
     } finally { reopened.close(); }
   } finally { rmSync(root, {recursive:true, force:true}); }
 });
+
+
+test('version 21 bindings upgrade with no invented connect receipt or event changes',async()=>{
+  const {readFileSync,readdirSync}=await import('node:fs');
+  const root=mkdtempSync(join(tmpdir(),'binding-migration-'));const file=join(root,'local.db');
+  try{
+    const db=new Database(file);const dir=new URL('../src/migrations/',import.meta.url);
+    for(const name of readdirSync(dir).sort().slice(0,21))db.exec(readFileSync(new URL(name,dir),'utf8'));
+    db.pragma('user_version = 21');
+    db.prepare('INSERT INTO projects(id) VALUES (?)').run('p1');
+    db.prepare('INSERT INTO tasks(id,project_id) VALUES (?,?)').run('t1','p1');
+    db.prepare('INSERT INTO sessions(id,project_id,task_id) VALUES (?,?,?)').run('s1','p1','t1');
+    db.prepare("INSERT INTO session_bindings(session_id,task_id,root_id,identity,observed_since,generation,state) VALUES ('s1','t1','s1','{}','2026-01-01T00:00:00Z',0,'stopped')").run();
+    db.prepare('INSERT INTO events(id,project_id,task_id,session_id,source_key,occurred_at,payload) VALUES (?,?,?,?,?,?,?)').run(event.id,event.project_id,event.task_id,event.session_id,event.source_key,event.occurred_at,JSON.stringify(event.payload));db.close();
+    const store=new Store(file);
+    try{
+      const row=store.get<Record<string,unknown>>('SELECT * FROM session_bindings');
+      expect(row).toMatchObject({session_id:'s1',identity:'{}',state:'stopped',connect_receipt:null});
+      expect(store.eventCount()).toBe(1);expect(store.putEvent(event)).toBe(false);
+    }finally{store.close();}
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
