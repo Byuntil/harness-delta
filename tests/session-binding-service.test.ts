@@ -261,3 +261,25 @@ test('resume pins the retained root identity before lifecycle, binding or baseli
   f.setCurrent({...root,sourceIdentity:randomUUID()});await expect(f.service.resume(f.id)).rejects.toThrow('binding_identity_mismatch');
   expect(f.reads()).toBe(reads);f.setCurrent(f.identity());expect(await f.connect()).toMatchObject({status:'connected',roots:2});
 });
+
+test('legacy bindings accept new optional names without changing UUID aggregation or silently backfilling stored labels', async () => {
+  const f = await fixture(); await f.connect();
+  const root = f.current();
+  root.agentMetadata = { source: 'codex_session_meta', nickname: 'Cedar', role: 'reviewer' };
+  expect(await f.connect()).toMatchObject({ status: 'already_connected' });
+  const a = f.identity(root.sessionId); const b = f.identity(root.sessionId);
+  a.agentMetadata = { source: 'codex_session_meta', nickname: 'Same', role: 'worker' };
+  b.agentMetadata = { source: 'codex_session_meta', nickname: 'Same', role: 'worker' };
+  f.relations.set(root.sessionId, [a, b]); f.usage(a); f.usage(b); f.advance();
+  await f.service.tick(f.id); await f.service.tick(f.id);
+  const status = f.service.status(f.id);
+  expect(status).toMatchObject({ requests: 2, summary: { input_total: { value: 20 }, output_total: { value: 6 } } });
+  expect(status.sessions).toEqual(expect.arrayContaining([
+    expect.objectContaining({ session_id: root.sessionId, agent_metadata: null, models: [] }),
+    expect.objectContaining({ session_id: a.sessionId, requests: 1, models: ['model-a'], agent_metadata: { source: 'codex_session_meta', nickname: 'Same', role: 'worker' } }),
+    expect.objectContaining({ session_id: b.sessionId, requests: 1 }),
+  ]));
+  f.service.pause(f.id); expect(await f.connect()).toMatchObject({ status: 'reconnected' });
+  await f.service.tick(f.id); expect(f.store.eventCount()).toBe(2);
+  expect(f.store.get<{identity:string}>('SELECT identity FROM session_bindings WHERE session_id=?', [root.sessionId])?.identity).not.toContain('Cedar');
+});

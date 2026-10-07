@@ -69,6 +69,25 @@ The actual native startup order before work remains unverified. External Claude
 and IDE collection remain unsupported; the admitted tool-launched Claude parent
 workflow is a separate path.
 
+## Agent names in the session family
+
+For linked families, the agent column shows verified Codex nicknames with roles,
+or Claude agent types and configured names. Models from eligible observed usage
+appear in a separate column; no observed model displays **Unknown**. A model
+change can show several models for the same session.
+
+Missing names display **Child N** (or **Parent** for roots). Child numbering
+counts children only. Duplicate names receive a short identifier derived from the
+full session identity. UUID/member identifiers still control relations and usage
+aggregation. Labels never merge sessions.
+
+Names are saved when the member is linked and survive restart. Existing records
+without names remain usable and retain their fallback labels. No conversation,
+response, file content, title or historical name search supplies a label. These
+local binding fields are outside measurement exchange. Existing source admission,
+partial-cost and collection-scope limits still apply. See the
+[metadata source evidence](../validation/agent-display-metadata.md).
+
 ## Decide the result
 
 After observation settles, decide success, same-request rework, failure or

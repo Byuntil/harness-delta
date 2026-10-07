@@ -330,3 +330,26 @@ test('bounded connect rejects another family child or root from hook metadata be
  expect(()=>provider.assertRootReceipt({receipt:otherRoot},'root')).toThrow('binding_qualification_live_root_required');
  expect(()=>provider.assertRootReceipt({receipt:f.receipt('root')},'root')).not.toThrow();
 });
+
+
+test('Codex child names come only from its verified first metadata envelope', async () => {
+  const f = fixture(); const root = await f.provider.resolveCurrent({ receipt: f.receipt('root') });
+  f.write('named', [f.meta('named', 'root', 1, { agent_nickname: 'Cedar', agent_role: 'reviewer',
+    agent_name: 'PRIVATE_SYNTHETIC_SENTINEL', base_instructions: 'PRIVATE_SYNTHETIC_SENTINEL' }),
+    { type: 'event_msg', payload: { agent_nickname: 'PRIVATE_SYNTHETIC_SENTINEL' } }]);
+  const receipt = f.receipt('named', 'root');
+  const children = await f.provider.discoverChildren(root);
+  expect(children.children[0]?.identity).toMatchObject({ sessionId: 'named', agentMetadata: {
+    source: 'codex_session_meta', nickname: 'Cedar', role: 'reviewer' } });
+  expect(await f.provider.resolveCurrent({ receipt })).toEqual(children.children[0]?.identity);
+  expect(JSON.stringify(children)).not.toContain('PRIVATE_SYNTHETIC_SENTINEL');
+});
+
+test('Codex blank and malformed names are missing without breaking ancestry or usage', async () => {
+  const f = fixture(); const root = await f.provider.resolveCurrent({ receipt: f.receipt('root') });
+  f.write('unnamed', [f.meta('unnamed', 'root', 1, { agent_nickname: ' '.repeat(3), agent_role: { text: 'private' } })]);
+  f.receipt('unnamed', 'root');
+  const children = await f.provider.discoverChildren(root);
+  expect(children.children).toHaveLength(1); expect(children.gaps).toEqual([]);
+  expect(children.children[0]?.identity).not.toHaveProperty('agentMetadata');
+});

@@ -1,3 +1,4 @@
+import type { AgentDisplayMetadata } from './session-labels.js';
 export type Locale = 'ko' | 'en';
 export interface Project { id: string; name: string; directory: string; baseline: string | null; setup_ids: string[] }
 export interface Setup { id: string; name: string; project_id: string; arm_a: string; arm_b: string; types: string[]; sizes: string[]; support: string }
@@ -12,7 +13,7 @@ export interface Task {
  price: { partial_amount: string | null; currency: string; unpriced_events: number; basis: string | null };
  actions: TaskAction[]; startup: { start_command: string; ticket_id: string } | null;
  criteria: string[]; source: { handle: string; label: string } | null; reason: string | null;
- binding?: { state: string; roots: number; children: number; requests: number | null; gaps: string[]; cost_coverage: 'partial'; support: string; sessions: (BindingSummary & {session_id:string;parent_session_id:string|null})[];summary:BindingSummary };
+ binding?: { state: string; roots: number; children: number; requests: number | null; gaps: string[]; cost_coverage: 'partial'; support: string; sessions: (BindingSummary & {session_id:string;parent_session_id:string|null;agent_metadata?:AgentDisplayMetadata|null;models?:string[]})[];summary:BindingSummary };
 }
 export interface Catalog { status: string; catalog_version: number | null; verified_at: string | null; verification_age_days?: number | null;
  online_source?: { status: string; publisher_id: string | null }; reason: string | null; can_attempt_online_refresh?: boolean }

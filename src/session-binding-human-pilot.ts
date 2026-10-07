@@ -2,7 +2,7 @@ import { Lifecycle } from './lifecycle.js';
 import { comparisonProtocol, protocolRow } from './comparison.js';
 import { parseTaskMetadata } from './flexible-contracts.js';
 import { CodexSessionBindingProvider } from './session-binding-codex.js';
-import { VerifiedSessionIdentitySchema, type SessionBindingProvider, type VerifiedSessionIdentity } from './session-binding-contract.js';
+import { bindingIdentityKey, VerifiedSessionIdentitySchema, type SessionBindingProvider, type VerifiedSessionIdentity } from './session-binding-contract.js';
 import type { Store } from './store.js';
 import type { FlexibleProtocol } from './flexible-contracts.js';
 import { lstatSync } from 'node:fs';
@@ -49,7 +49,7 @@ export function checkCodexHumanPilotIdentity(scope: CodexHumanPilotScope, store:
  const members=store.all<{identity:string}>('SELECT identity FROM session_bindings WHERE task_id=?',[taskId]).map(r=>VerifiedSessionIdentitySchema.parse(JSON.parse(r.identity) as unknown));
  const root=members.find(m=>m.parentSessionId===null);const existing=members.find(m=>m.sessionId===identity.sessionId);
  if(identity.product!=='codex'||identity.productVersion!=='0.160.0'||identity.cwd!==value.projectRoot||
-  existing&&JSON.stringify(existing)!==JSON.stringify(identity)||
+  existing&&bindingIdentityKey(existing)!==bindingIdentityKey(identity)||
   identity.parentSessionId===null&&(root?root.sessionId!==identity.sessionId:Date.parse(identity.createdAt)<Date.parse(value.openedAt))||
   identity.parentSessionId!==null&&(!root||identity.parentSessionId!==root.sessionId||Date.parse(identity.createdAt)<Date.parse(root.createdAt))||
   !existing&&members.length>=3)throw new Error('binding_pilot_family_scope');

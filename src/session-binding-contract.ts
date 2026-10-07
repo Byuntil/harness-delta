@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgentMetadataSchema } from './agent-metadata.js';
 import { IdSchema, ProductVersionSchema, TimestampSchema, UsageV2Schema } from './contracts.js';
 import type { CandidateScope } from './nested-candidate.js';
 
@@ -11,9 +12,16 @@ export const VerifiedSessionIdentitySchema = z.strictObject({
   sourceRef: z.string().min(1).max(4096), sourceIdentity: IdSchema,
   cwd: z.string().min(1).max(4096), identityEvidenceId: IdSchema,
   parentSessionId: IdSchema.nullable(), createdAt: TimestampSchema,
+  agentMetadata: AgentMetadataSchema.optional(),
   nativeMapping: z.strictObject({ nativeSessionId: IdSchema, processId: IdSchema.nullable(), agentId: IdSchema.nullable() }).optional(),
-});
+}).refine(value => !value.agentMetadata || (value.product === 'codex' ? value.agentMetadata.source === 'codex_session_meta' : value.agentMetadata.source === 'claude_hook'));
 export type VerifiedSessionIdentity = z.infer<typeof VerifiedSessionIdentitySchema>;
+/** Legacy bindings omit display metadata. Changes to a name do not alter scope. */
+export function bindingIdentityKey(value: VerifiedSessionIdentity): string {
+  const { agentMetadata: _metadata, ...identity } = VerifiedSessionIdentitySchema.parse(value);
+  void _metadata;
+  return JSON.stringify(identity);
+}
 export interface BindingCapabilities {
   currentIdentity: 'native_hook' | 'validated_integration' | 'unavailable';
   ancestry: 'verified_relations' | 'unavailable';

@@ -68,11 +68,14 @@ test('one native receipt connects and observes automatically; early child usage 
   const connected=await post('session-connect',{product:'codex',receipt:rootReceipt});expect(connected.statusCode,connected.body).toBe(200);
   expect(connected.json()).toMatchObject({connection:{status:'connected',collection_active:true,automatic_children:true},binding:{roots:1}});
   expect((await post('session-connect',{product:'codex',receipt:rootReceipt})).json()).toMatchObject({connection:{status:'already_connected'}});
-  const child=f.newRoot();writeFileSync(child.path,JSON.stringify({type:'session_meta',payload:{id:child.id,session_id:root.id,parent_thread_id:root.id,cli_version:'0.160.0',cwd:f.project,source:{subagent:{thread_spawn:{parent_thread_id:root.id,depth:1}}}}})+'\n');
+  const child=f.newRoot();writeFileSync(child.path,JSON.stringify({type:'session_meta',payload:{id:child.id,session_id:root.id,parent_thread_id:root.id,cli_version:'0.160.0',agent_nickname:'Cedar',agent_role:'reviewer',cwd:f.project,source:{subagent:{thread_spawn:{parent_thread_id:root.id,depth:1}}}}})+'\n');
   receipt(child.id,child.path,root.id);
   const at=new Date().toISOString();appendFileSync(child.path,JSON.stringify({type:'turn_context',timestamp:at,payload:{cwd:f.project,turn_id:'child-turn',root_turn_id:'root-turn',model:'model-a',effort:'high'}})+'\n'+JSON.stringify({type:'token_usage_record',timestamp:at,payload:{thread_id:child.id,session_id:root.id,turn_id:'child-turn',root_turn_id:'root-turn',response_id:'first-child-request',usage:{input_tokens:10,cached_input_tokens:2,cache_write_input_tokens:0,output_tokens:3,reasoning_output_tokens:1,total_tokens:13}}})+'\n');
   await expect.poll(()=>f.store.eventCount(),{timeout:3000}).toBe(1);
-  expect(domain.task(id)).toMatchObject({binding:{roots:1,children:1,requests:1},measurement:{state:'active'}});
+  expect(domain.task(id)).toMatchObject({binding:{roots:1,children:1,requests:1,sessions:expect.arrayContaining([
+    expect.objectContaining({session_id:child.id,agent_metadata:{source:'codex_session_meta',nickname:'Cedar',role:'reviewer'},models:['model-a']})
+  ]) as unknown},measurement:{state:'active'}});
+  expect(f.store.get<{identity:string}>('SELECT identity FROM session_bindings WHERE session_id=?',[child.id])?.identity).toContain('Cedar');
   // Rejected replacement identity preserves the existing authorized observer.
   expect((await post('session-connect',{product:'codex',receipt:randomUUID()})).json()).toMatchObject({error:'binding_identity_unavailable'});
   // A child can continue the same native context after the discovery poll.
@@ -82,7 +85,9 @@ test('one native receipt connects and observes automatically; early child usage 
   expect((await post('finish-success')).json()).toMatchObject({error:'workflow_run_active'});
   await post('pause');expect(domain.task(id).actions).toEqual(expect.arrayContaining([{code:'resume-binding',enabled:true,reason:null}]));const assignment=f.store.get('SELECT * FROM comparison_assignments WHERE task_id=?',[id]);
   await app.close();domain=makeDomain();app=createLocalWebServer({origin,domain,metadataFile:f.metadataFile});
-  expect(domain.task(id)).toMatchObject({binding:{state:'stopped'}});
+  expect(domain.task(id)).toMatchObject({binding:{state:'stopped',sessions:expect.arrayContaining([
+    expect.objectContaining({session_id:child.id,agent_metadata:{source:'codex_session_meta',nickname:'Cedar',role:'reviewer'},models:['model-a']})
+  ]) as unknown}});
   expect((await post('resume-binding')).statusCode).toBe(200);
   expect(f.store.eventCount()).toBe(2);expect(f.store.get('SELECT * FROM comparison_assignments WHERE task_id=?',[id])).toEqual(assignment);
   await post('pause');expect((await post('finish-success')).statusCode).toBe(200);expect(domain.task(id)).toMatchObject({status:'success'});

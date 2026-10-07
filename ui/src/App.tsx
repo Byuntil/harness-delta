@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import * as api from './api';
+import { SessionUsageTable } from './SessionUsageTable';
 import type { Locale, Snapshot, Task, TaskAction } from './types';
 
 type Screen = 'tasks' | 'detail' | 'new' | 'setup' | 'intro';
@@ -19,12 +20,10 @@ const ActionContext = createContext<{ action: (code: string) => TaskAction | und
 function SessionFamily({ task }: { task: Task }) {
  const locale = useContext(LocaleContext); const t = (en: string, ko: string) => locale === 'ko' ? ko : en;
  const binding = task.binding; if (!binding) return null;
- const reading = (value: NonNullable<Task['binding']>['summary']['input_total']) => value.value === null ? t('Missing', '누락') : `${value.value.toLocaleString()}${value.status === 'partial' ? t(' (partial)', ' (부분)') : ''}`;
- const cells = (value: NonNullable<Task['binding']>['summary']) => <><td>{value.requests ?? '—'}</td><td title={value.input_total.statuses.join(', ')}>{reading(value.input_total)}</td><td title={value.output_total.statuses.join(', ')}>{reading(value.output_total)}</td><td>{value.partial_amount === null ? t('Unavailable', '미확정') : `${value.currency ?? 'USD'} ${value.partial_amount}`}{value.unpriced_events > 0 && <span className="block text-xs text-muted-foreground">{t(`${value.unpriced_events} unpriced`, `단가 없음 ${value.unpriced_events}개`)}</span>}</td></>;
  return <Card><CardHeader><CardTitle>{t('Session family', '세션 가족')}</CardTitle></CardHeader><CardContent className="space-y-3">
  <p>{t(`${binding.roots} parent sessions · ${binding.children} linked children`, `부모 세션 ${binding.roots}개 · 연결된 자식 ${binding.children}개`)}</p>
  <p className="text-sm text-muted-foreground">{t('Connect once in the current parent session. Verified children are linked automatically. Paused intervals remain missing.', '현재 부모 세션에서 한 번 연결하면 확인된 자식은 자동 연결합니다. 일시중단 구간은 누락으로 유지합니다.')}</p>
- {binding.sessions.length > 0 && <div className="overflow-x-auto"><table aria-label={t('Per-session observed usage', '세션별 관측 사용량')} className="w-full text-left text-sm [&_td]:px-3 [&_td]:py-2 [&_th]:px-3 [&_th]:py-2"><thead><tr><th>{t('Session', '세션')}</th><th>{t('Requests', '요청')}</th><th>{t('Input', '입력')}</th><th>{t('Output', '출력')}</th><th>{t('Partial estimated cost', '부분 추정 비용')}</th></tr></thead><tbody>{binding.sessions.map((session,index)=><tr key={session.session_id}><th><span>{session.parent_session_id === null ? t('Parent', '부모') : t(`Child ${index}`, `자식 ${index}`)}</span><span className="block font-mono text-xs font-normal text-muted-foreground">{session.session_id}</span></th>{cells(session)}</tr>)}<tr className="border-t font-medium"><th>{t('Observed sum', '관측 합계')}</th>{cells(binding.summary)}</tr></tbody></table></div>}
+ {binding.sessions.length > 0 && <SessionUsageTable sessions={binding.sessions} summary={binding.summary} locale={locale} />}
  <p className="text-xs text-muted-foreground">{t('Only eligible observed requests are added. Cached and reasoning subsets are not added again. Cost is partial; missing or unpriced usage is not zero.', '관측 가능 구간의 요청만 합산합니다. 캐시·추론 부분은 중복 가산하지 않습니다. 비용은 부분 추정이며 누락·단가 없음은 0이 아닙니다.')}</p>
  {binding.roots > 0 && <Action code="resume-binding" variant="outline"><Play />{t('Resume same session measurement', '같은 세션 측정 재개')}</Action>}
  {binding.support === 'native_qualification_only' && <><div className="flex flex-wrap gap-3"><Action code="emergency-stop" variant="destructive">{t('Emergency stop owned AI', '소유 AI 긴급 중단')}</Action></div><p className="text-sm text-muted-foreground">{t('Pause stops measurement reads while the owned AI remains alive. Resume retains the same task, assignment, price and safety deadline. Emergency stop terminates the owned process. Source-based safety counters are unverified while paused.', '일시중단은 측정 읽기만 멈추며 소유 AI는 계속 실행됩니다. 재개해도 작업·배정·가격·안전 기한은 유지됩니다. 긴급 중단은 소유 프로세스를 종료합니다. 중단 중 원본 기반 안전 카운터는 미확인입니다.')}</p></>}

@@ -2,10 +2,11 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import { constants, closeSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { metadataName, type AgentMetadata } from './agent-metadata.js';
 import { IdSchema, TimestampSchema } from './contracts.js';
 import { parseCodexCandidateRollout, type CodexCandidateSnapshot } from './codex-candidate-rollout.js';
 import { checkedCandidateScope, type CandidateScope } from './nested-candidate.js';
-import { CurrentIdentityRequestSchema, VerifiedSessionIdentitySchema, type BindingCapabilities, type BindingReadBoundary, type ChildDiscovery,
+import { bindingIdentityKey, CurrentIdentityRequestSchema, VerifiedSessionIdentitySchema, type BindingCapabilities, type BindingReadBoundary, type ChildDiscovery,
   type SessionBindingProvider, type UsageBatch, type VerifiedSessionIdentity } from './session-binding-contract.js';
 
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -15,6 +16,7 @@ const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), receipt: z.u
   sourceRef: z.string().min(1).max(4096), sourceIdentity: IdSchema, cwd: z.string().min(1).max(4096), createdAt: TimestampSchema });
 type Receipt = z.infer<typeof receiptSchema>;
 const headerSchema = z.object({ type: z.literal('session_meta'), payload: z.object({ id: IdSchema, session_id: IdSchema,
+  agent_nickname: z.unknown().optional(), agent_role: z.unknown().optional(),
   parent_thread_id: IdSchema.nullish(), cli_version: z.literal('0.160.0'), cwd: z.string(),
   source: z.union([z.enum(['cli', 'exec', 'vscode', 'mcp']), z.object({ subagent: z.object({ thread_spawn:
     z.object({ parent_thread_id: IdSchema, depth: z.number().int().positive() }) }) })]) }) });
@@ -146,14 +148,15 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     }
     return records;
   }
-  private identity(record: Receipt): VerifiedSessionIdentity {
+  private identity(record: Receipt, agentMetadata?: AgentMetadata): VerifiedSessionIdentity {
     return VerifiedSessionIdentitySchema.parse({ product: this.product, productVersion: record.productVersion,
       sessionId: record.sessionId, sourceRef: record.sourceRef, sourceIdentity: record.sourceIdentity, cwd: record.cwd,
+      ...(agentMetadata ? { agentMetadata } : {}),
       identityEvidenceId: record.receipt, parentSessionId: record.parentSessionId, createdAt: record.createdAt });
   }
   private verified(session: VerifiedSessionIdentity): Receipt {
     const record = this.canonical(this.readReceipt(session.identityEvidenceId), this.receipts());
-    if (record.cwd !== this.projectRoot || JSON.stringify(this.identity(record)) !== JSON.stringify(VerifiedSessionIdentitySchema.parse(session))) throw new Error('binding_identity_unavailable');
+    if (record.cwd !== this.projectRoot || bindingIdentityKey(this.identity(record)) !== bindingIdentityKey(session)) throw new Error('binding_identity_unavailable');
     return record;
   }
   private relation(record: Receipt, records: Receipt[]): Receipt {
@@ -292,10 +295,11 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     const records = this.receipts(); record = this.canonical(record, records);
     // Stat is metadata only: root identity does not inspect transcript contents.
     this.sourceMetadata(record);
-    if (record.parentSessionId !== null) this.verifyAncestry(record, records);
-    return await Promise.resolve(this.identity(record));
+    const ancestry = record.parentSessionId === null ? null : this.verifyAncestry(record, records);
+    return await Promise.resolve(this.identity(record, ancestry?.agentMetadata));
   }
-  private verifyAncestry(record: Receipt, records: Receipt[]): string {
+  private verifyAncestry(record: Receipt, records: Receipt[]): { rootSessionId: string; agentMetadata: AgentMetadata | undefined } {
+    let agentMetadata: AgentMetadata | undefined;
     const seen = new Set<string>(); const chain = [record]; let current = record; let depth = 0;
     while (current.parentSessionId !== null) {
       if (seen.has(current.sessionId) || ++depth > this.maxDepth) throw new Error('binding_ancestry_unverified');
@@ -316,8 +320,13 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
       if (header.id !== item.sessionId || header.session_id !== current.sessionId || header.cli_version !== item.productVersion ||
         header.cwd !== this.projectRoot || header.parent_thread_id !== item.parentSessionId || typeof header.source === 'string' ||
         header.source.subagent.thread_spawn.parent_thread_id !== item.parentSessionId || header.source.subagent.thread_spawn.depth !== depth - index) throw new Error('binding_ancestry_unverified');
+      if (index === 0) {
+        // Project names from this verified envelope, without a second header read.
+        const nickname = metadataName(header.agent_nickname); const role = metadataName(header.agent_role);
+        if (nickname !== null || role !== null) agentMetadata = { source: 'codex_session_meta', nickname, role };
+      }
     }
-    return current.sessionId;
+    return { rootSessionId: current.sessionId, agentMetadata };
   }
   async discoverChildren(parent: VerifiedSessionIdentity): Promise<ChildDiscovery> {
     const records = this.receipts();
@@ -325,15 +334,15 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     catch (error) { if (error instanceof Error && error.message === 'binding_family_limit') return { children: [], gaps: ['binding_family_limit'] }; throw error; }
     const parentReceipt = this.verified(parent);
     this.sourceMetadata(parentReceipt);
-    const family = parentReceipt.parentSessionId === null ? parentReceipt.sessionId : this.verifyAncestry(parentReceipt, records);
+    const family = parentReceipt.parentSessionId === null ? parentReceipt.sessionId : this.verifyAncestry(parentReceipt, records).rootSessionId;
     const children: ChildDiscovery['children'] = []; const gaps = new Set<string>();
     const candidates = records.filter(r => r.nativeRootSessionId === family || r.nativeRootSessionId === undefined && r.parentSessionId === parent.sessionId);
     for (const id of new Set(candidates.map(r => r.sessionId))) {
       const matches = records.filter(r => r.sessionId === id);
-      let child: Receipt;
-      try { child = this.canonical(matches[0]!, records); if (child.parentSessionId !== parent.sessionId) continue; this.verifyAncestry(child, records); }
+      let child: Receipt; let agentMetadata: AgentMetadata | undefined;
+      try { child = this.canonical(matches[0]!, records); if (child.parentSessionId !== parent.sessionId) continue; agentMetadata = this.verifyAncestry(child, records).agentMetadata; }
       catch { gaps.add('binding_ancestry_unverified'); continue; }
-      children.push({ parentSessionId: parent.sessionId, identity: this.identity(child), relationEvidenceId: child.receipt });
+      children.push({ parentSessionId: parent.sessionId, identity: this.identity(child, agentMetadata), relationEvidenceId: child.receipt });
     }
     return await Promise.resolve({ children, gaps: [...gaps] });
   }

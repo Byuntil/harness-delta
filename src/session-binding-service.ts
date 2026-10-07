@@ -14,7 +14,7 @@ import { bindConfigurationToSession } from './config-confirmation.js';
 import { putUsageWithEvidence, recordObservationGap } from './runtime-history.js';
 import { selectTaskPriceTable } from './price-catalog-selection.js';
 import { comparisonProtocol, protocolRow } from './comparison.js';
-import { BindingUsageRecordSchema, CurrentIdentityRequestSchema, VerifiedSessionIdentitySchema,
+import { BindingUsageRecordSchema, bindingIdentityKey, CurrentIdentityRequestSchema, VerifiedSessionIdentitySchema,
   type BindingProduct, type CurrentIdentityRequest, type SessionBindingProvider, type VerifiedSessionIdentity } from './session-binding-contract.js';
 import type { CandidateScope } from './nested-candidate.js';
 import type { Store } from './store.js';
@@ -113,7 +113,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     const old = store.get<{ task_id: string; parent_id: string | null }>('SELECT task_id,parent_id FROM sessions WHERE id=?', [value.sessionId]);
     if (old && (old.task_id !== taskId || old.parent_id !== value.parentSessionId)) throw new Error('binding_session_conflict');
     const bound = store.get<BindingRow>('SELECT * FROM session_bindings WHERE session_id=?', [value.sessionId]);
-    if (bound && bound.identity !== JSON.stringify(value)) throw new Error('binding_identity_mismatch');
+    if (bound && bindingIdentityKey(identityFor(bound)) !== bindingIdentityKey(value)) throw new Error('binding_identity_mismatch');
     if (old && !bound) throw new Error('binding_session_conflict');
     checkBindingQualificationIdentity(options.qualificationLease, store, taskId, value, false);
     if(options.humanPilot)checkCodexHumanPilotIdentity(options.humanPilot,store,taskId,value);
@@ -222,7 +222,13 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     };
     return { state: all.some(row => row.state === 'observing' && row.generation === task.generation) && task.state === 'active' ? 'observing' : all.length ? 'stopped' : 'unconnected',
       roots: all.filter(row => identityFor(row).parentSessionId === null).length, children: all.filter(row => identityFor(row).parentSessionId !== null).length,
-      sessions: all.map(row => ({ session_id: row.session_id, parent_session_id: identityFor(row).parentSessionId, identity_basis: 'native_metadata_receipt', ...summarize(eligible.filter(e=>e.session_id===row.session_id)) })),
+      sessions: all.map(row => {
+        const identity = identityFor(row); const metadata = identity.agentMetadata;
+        const events = eligible.filter(e => e.session_id === row.session_id);
+        return { session_id: row.session_id, parent_session_id: identity.parentSessionId, identity_basis: 'native_metadata_receipt',
+          agent_metadata: metadata?.source === 'claude_hook' ? { source: metadata.source, agent_type: metadata.agentType } : metadata ?? null,
+          models: [...new Set(events.flatMap(e => e.payload.model === null ? [] : [e.payload.model]))].sort(), ...summarize(events) };
+      }),
       summary:summarize(eligible),
       requests: store.get<{ count: number }>('SELECT count(*) AS count FROM binding_requests r JOIN events e ON e.id=r.event_id WHERE e.task_id=?', [taskId])?.count ?? 0,
       gaps, cost_coverage: 'partial' as const, complete_cost: null, inference: false };
@@ -261,7 +267,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
       const resolved = await provider.resolveCurrent(input);
       authorizeConnection(taskId, before.generation);
       const value = checkIdentity(taskId, resolved);
-      if (expectedRoot && JSON.stringify(value) !== JSON.stringify(expectedRoot)) throw new Error('binding_identity_mismatch');
+      if (expectedRoot && bindingIdentityKey(value) !== bindingIdentityKey(expectedRoot)) throw new Error('binding_identity_mismatch');
       if (value.product !== product) throw new Error('binding_identity_mismatch');
       if (value.parentSessionId !== null) {
         if (before.state !== 'active') throw new Error('binding_reconnect_required');
