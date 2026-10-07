@@ -9,7 +9,7 @@ import { IdSchema, TimestampSchema } from './contracts.js';
 import { Lifecycle, utcNow, type Clock } from './lifecycle.js';
 import { ExternalPreparationSpecSchema, managedHarnessContent, sha256 } from './harness-managed-file.js';
 import { assertExternalPrepared, prepareExternalWorkflow, runExternalWorkflow, externalWorkflowState } from './external-session-workflow.js';
-import { externalContract, registerExternalContract } from './external-session-contract.js';
+import { externalContract, registerExternalContract, bindingCollectionControl } from './external-session-contract.js';
 import { externalInstructionFragment, type ExternalContextEvidence } from './external-session-context.js';
 import { readReferenceTaskCostReport } from './price-catalog-task-report.js';
 import type { Store } from './store.js';
@@ -67,11 +67,14 @@ export function externalTaskState(store: Store, taskId: string, at = utcNow()) {
   const contract = externalContract(store,taskId); if (!contract) throw new Error('external_contract_required');
   const preparation = externalWorkflowState(store,taskId);
   const proof = store.get<TicketRow>('SELECT * FROM external_start_tickets WHERE task_id=? AND verified_at IS NOT NULL ORDER BY verified_at DESC,rowid DESC LIMIT 1', [taskId]);
-  const expired = contract.ends_at !== null && Date.parse(at) >= Date.parse(contract.ends_at);
+  const control = bindingCollectionControl(store,taskId);
+  const expired = control ? control.revoked_at !== null || preparation.task_state === 'finalized' || preparation.state === 'released' : contract.ends_at !== null && Date.parse(at) >= Date.parse(contract.ends_at);
   const result = new Lifecycle(store).summary(taskId);
   return {schema_version:1,task_id:taskId,assigned_variant_id:preparation.assigned_variant_id,revision:preparation.revision,
     state:preparation.state,task_state:preparation.task_state,timing_contract:contract.timing_contract,report_contract:contract.report_contract,
-    window:{started_at:contract.started_at,ends_at:contract.ends_at},window_status:contract.started_at===null?'waiting_connection':expired?'closed':'open',
+    collection_end_condition:control?'explicit_stop' as const:'followup_deadline' as const,
+    comparison_window:{started_at:contract.started_at,ends_at:contract.ends_at},
+    window:{started_at:contract.started_at,ends_at:control?null:contract.ends_at},window_status:expired?'closed':contract.started_at===null?'waiting_connection':'open',
     configuration_evidence:preparation.files_evidence,native_context_evidence:proof?(proof.revision===preparation.revision?'native_developer_context_observed':'observed_for_previous_revision'):'unverified',
     freshness_evidence:proof?'fresh_root_after_ticket':'unverified',tool_use_evidence:'unavailable' as const,
     support:{external_collection:'codex_0_160_root_only',claude_external:'unadmitted',ide_external:'unsupported',native_startup_before_work:'unverified'},
@@ -222,7 +225,9 @@ export function recordExternalTaskOutcome(store: Store, taskId: string, choice: 
     const life=new Lifecycle(store,clock);const task=life.task(taskId);
     if(task.state==='finalized')throw new Error('invalid_transition');
     if(choice==='rework'){
-      assertWindowOpen(store,taskId,clock);
+      const control=bindingCollectionControl(store,taskId);
+      if(control?.revoked_at)throw new Error('binding_scope_revoked');
+      if(!control)assertWindowOpen(store,taskId,clock);
       if(task.state==='paused')life.resume(taskId);
       if(!task.first_completed_at)life.declareFirst(taskId);
       if(life.task(taskId).first_success===null)life.assessFirst(taskId,false);
@@ -242,12 +247,14 @@ export function recordExternalTaskOutcome(store: Store, taskId: string, choice: 
   return {state:externalTaskState(store,taskId,clock()),result:externalTaskResult(store,taskId,clock())};
 }
 
-/** One operative time contract; partial descriptive cost only. */
+/** Partial descriptive collection cost; comparison eligibility retains its frozen deadline. */
 export function externalTaskResult(store: Store, taskId: string, cutoff = utcNow()) {
   const end=nowAt(()=>cutoff);const contract=externalContract(store,taskId);if(!contract)throw new Error('external_contract_required');
   const task=new Lifecycle(store).task(taskId);
   if(Date.parse(end)>Date.now()||contract.started_at!==null&&Date.parse(end)<Date.parse(contract.started_at))throw new Error('invalid_cutoff');
-  const effective=new Date(Math.min(Date.parse(end),contract.ends_at?Date.parse(contract.ends_at):Date.parse(end),task.finalized_at?Date.parse(task.finalized_at):Date.parse(end))).toISOString();
+  const control=bindingCollectionControl(store,taskId);
+  const collectionEnd=control?control.revoked_at:contract.ends_at;
+  const effective=new Date(Math.min(Date.parse(end),collectionEnd?Date.parse(collectionEnd):Date.parse(end),task.finalized_at?Date.parse(task.finalized_at):Date.parse(end))).toISOString();
   const state=externalTaskState(store,taskId,end);
   const active=store.all<{started_at:string;ended_at:string|null}>('SELECT started_at,ended_at FROM active_intervals WHERE task_id=?',[taskId]);
   const start=contract.started_at?Date.parse(contract.started_at):null;
@@ -256,7 +263,7 @@ export function externalTaskResult(store: Store, taskId: string, cutoff = utcNow
   const cost=start===null?null:readReferenceTaskCostReport(store,taskId,effective,'output-only-v1',end);
   if(cost!==null&&(cost.window_start!==contract.started_at||cost.window_end!==effective))throw new Error('external_window_mismatch');
   return {schema_version:1,report_contract:contract.report_contract,timing_contract:contract.timing_contract,task_id:taskId,
-    assigned_variant_id:state.assigned_variant_id,window:state.window,cutoff:end,effective_cutoff:effective,
+    assigned_variant_id:state.assigned_variant_id,window:state.window,comparison_window:state.comparison_window,collection_end_condition:state.collection_end_condition,cutoff:end,effective_cutoff:effective,
     outcome:state.outcome,outcome_at:task.finalized_at,outcome_counted_in_window:task.finalized_at===null?null:contract.ends_at!==null&&Date.parse(task.finalized_at)<Date.parse(contract.ends_at),
     time:{elapsed_ms:start===null?null:Math.max(0,Date.parse(effective)-start),active_ms:activeMs,rework_count:state.rework_count,elapsed_is_labor:false},
     coverage:'partial' as const,cost,complete_cost:null,inference:false,

@@ -31,3 +31,26 @@ export function assertLegacyComparisonTiming(store: Store, protocolId: string): 
   if (!store.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='external_task_contracts'")) return;
   if (store.get('SELECT 1 FROM external_task_contracts c JOIN comparison_assignments a ON a.task_id=c.task_id WHERE a.protocol_id=?', [protocolId])) throw new Error('timing_contract_mismatch');
 }
+
+export interface BindingCollectionControl { task_id: string; end_condition: 'explicit_stop'; authorized_at: string; revoked_at: string | null; }
+export function bindingCollectionControl(store: Store, taskId: string): BindingCollectionControl | undefined {
+  if (!store.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='binding_collection_controls'")) return undefined;
+  return store.get<BindingCollectionControl>('SELECT * FROM binding_collection_controls WHERE task_id=?', [IdSchema.parse(taskId)]);
+}
+/** Metadata-only authority; source admission and native qualification remain separate. */
+export function registerBindingCollectionControl(store: Store, taskId: string, clock: Clock = utcNow): void {
+  store.immediateTransaction(() => {
+    const task = store.get<{project_id:string;state:string}>('SELECT project_id,state FROM tasks WHERE id=?', [IdSchema.parse(taskId)]);
+    if (!task || task.state === 'finalized' || store.get("SELECT 1 FROM tombstones WHERE (kind='task' AND id=?) OR (kind='project' AND id=?)", [taskId,task.project_id])) throw new Error('binding_scope_revoked');
+    const old = bindingCollectionControl(store,taskId);
+    if (old?.revoked_at) throw new Error('binding_scope_revoked');
+    if (old) return;
+    if (task.state === 'active' || !externalContract(store,taskId)) throw new Error('binding_collection_requires_inactive_task');
+    store.execute("INSERT INTO binding_collection_controls(task_id,end_condition,authorized_at) VALUES (?,'explicit_stop',?)", [taskId,new Date(TimestampSchema.parse(clock())).toISOString()]);
+  });
+}
+export function revokeBindingCollectionControl(store: Store, taskId: string, clock: Clock = utcNow): void {
+  const old = bindingCollectionControl(store,taskId);
+  if (!old) throw new Error('binding_collection_control_required');
+  if (!old.revoked_at) store.execute('UPDATE binding_collection_controls SET revoked_at=? WHERE task_id=?', [new Date(TimestampSchema.parse(clock())).toISOString(),taskId]);
+}

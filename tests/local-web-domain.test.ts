@@ -29,7 +29,7 @@ test('real Store bridge prepares inactive, persists labels, reads HEAD, respects
     expect(domain.task(task.id).version).not.toBe(before);
     new Deletion(f.store).deleteTask(task.id);
     expect(() => domain.task(task.id)).toThrow('unknown_task');
-    expect(domain.bootstrap()).toMatchObject({ tasks: [] });
+    expect(await domain.bootstrap()).toMatchObject({ tasks: [] });
   } finally { await domain.close?.(); f.cleanup(); }
 });
 
@@ -79,14 +79,14 @@ test('deleting a sibling preserves retained task reads and price pin while proto
     new Deletion(f.store).deleteTask(deleted.id);
     expect(selectTaskPriceTable(f.store, id)).toEqual(pin);
     expect(domain.task(id)).toMatchObject({ id, price });
-    expect(domain.bootstrap()).toMatchObject({ setups: [], tasks: [{ id, price }] });
+    expect(await domain.bootstrap()).toMatchObject({ setups: [], tasks: [{ id, price }] });
     expect(() => create()).toThrow('protocol_not_active');
     await domain.taskAction(id, 'observe', {});
     await expect.poll(() => domain.task(id).reason).toBe('local_operation_failed');
     expect(f.store.all("SELECT id FROM codex_workflow_runs WHERE task_id=? AND operation='collect'", [id])).toEqual([]);
     await domain.taskAction(id, 'finish-success', {});
     expect(domain.task(id)).toMatchObject({ status: 'success', outcome: { status: 'success' } });
-    expect(domain.bootstrap()).toMatchObject({ tasks: [{ id, status: 'success', price }] });
+    expect(await domain.bootstrap()).toMatchObject({ tasks: [{ id, status: 'success', price }] });
     expect(() => domain.task(deleted.id)).toThrow('unknown_task');
   } finally { await domain.close?.(); f.cleanup(); }
 });

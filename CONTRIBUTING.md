@@ -30,8 +30,10 @@ pins dependencies. SQLite may require native build tools if no matching binary i
 available. Local validation has covered macOS arm64; other platforms are unverified.
 
 `npm run check` checks the Git index for local records, runs ESLint and TypeScript
-checking, executes tests, and builds the package. Run it from a Git checkout.
-Use `npm test -- tests/runtime.test.ts` for focused tests.
+checking, builds the package, and executes tests. Run it from a Git checkout.
+Build before focused tests with `npm run build`, then use
+`npm test -- tests/runtime.test.ts`. Binding qualification tests freeze the built
+UI as well as source bytes, so a clean checkout needs the build first.
 
 ## Linting
 
@@ -56,7 +58,7 @@ bypass incompatible peer dependencies with force-install flags.
 
 `npm ci` or `npm install` runs `prepare` to install Husky for this checkout.
 The pre-commit hook runs `npm run check`: it rejects indexed local records, runs
-lint and type checks, executes tests, and builds. A failed command stops the commit. Generated Husky
+lint and type checks, builds, and executes tests. A failed command stops the commit. Generated Husky
 files under `.husky/_/` are ignored; `.husky/pre-commit` and `.husky/commit-msg`
 are shared in Git. The commit-msg hook validates the proposed message with commitlint.
 

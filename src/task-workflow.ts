@@ -14,6 +14,7 @@ import type { Store } from './store.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId } from './codex-workflow-journal.js';
 import { claudeWorkflowProfileId, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 import { externalContract } from './external-session-contract.js';
+import { isCodexHumanPilotProtocol } from './session-binding-human-pilot.js';
 
 const artifactSchema = z.strictObject({ artifact_id: IdSchema, path: z.string().min(1).max(4096) });
 export const AssignedWorkflowInputSchema = z.strictObject({ schema_version: z.literal(1),
@@ -73,9 +74,9 @@ function workflowProtocol(store: Store, protocolId: string) {
   if (protocol.schema_version !== 2) throw new Error('unsupported_workflow_mode');
   return protocol;
 }
-function checkReadiness(store: Store, protocolId: string, at: string) {
+function checkReadiness(store: Store, protocolId: string, at: string, preparationOnly = false) {
   const protocol = workflowProtocol(store, protocolId);
-  if (protocol.purpose !== 'synthetic_validation' && !comparisonReadiness(store, protocolId, at).real_allocation) throw new Error('real_experiment_disabled');
+  if (protocol.purpose !== 'synthetic_validation' && !comparisonReadiness(store, protocolId, at).real_allocation && !(preparationOnly&&isCodexHumanPilotProtocol(protocol))) throw new Error('real_experiment_disabled');
   return protocol;
 }
 
@@ -97,11 +98,11 @@ export function prepareAssignedWorkflow(store: Store, input: unknown, runtimeInp
 function prepareWorkflow(store: Store, input: unknown, runtimeInput: unknown, clock: Clock, activate: boolean) {
   const config = parseComparison(AssignedWorkflowInputSchema, input, 'invalid_workflow_input');
   const runtime = parseComparison(WorkflowRuntimeSchema, runtimeInput, 'invalid_workflow_runtime');
-  const now = clock(); const requested = checkReadiness(store, config.assignment.protocol_id, now);
+  const now = clock(); const requested = checkReadiness(store, config.assignment.protocol_id, now, !activate);
   if (config.artifacts.some(row => !requested.variant_ids.includes(row.variant_id)) ||
       !requested.source_profiles.some(row => row.product === config.assignment.metadata.product && row.product_version === config.product_version)) throw new Error('workflow_configuration_mismatch');
-  const assignment = assignTask(store, config.assignment, { clock: () => now });
-  const protocol = checkReadiness(store, assignment.protocol_id, now);
+  const assignment = assignTask(store, config.assignment, { clock: () => now, pilotPreparation: !activate&&isCodexHumanPilotProtocol(requested) });
+  const protocol = checkReadiness(store, assignment.protocol_id, now, !activate);
   if (protocol.id !== requested.id) throw new Error('workflow_protocol_mismatch');
   const life = new Lifecycle(store, () => now); const task = life.task(assignment.task_id);
   if (task.state === 'finalized') throw new Error('invalid_transition');

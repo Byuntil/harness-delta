@@ -25,7 +25,8 @@ const createInput = z.strictObject({ name: z.string().trim().min(1).max(200), pr
   type: z.enum(['feature', 'fix', 'infra', 'chore', 'docs', 'ci']).optional(), size: z.enum(['small', 'medium', 'large']).optional() });
 const actionSchemas = {
   prepare: empty, apply: empty, ticket: empty, connect: z.strictObject({ source_handle: id }),
-  observe: empty, pause: empty, rework: empty, recover: empty,
+  'session-connect': z.strictObject({ product: z.enum(['codex','claude_code']), receipt: z.uuid() }),
+  observe: empty, pause: empty, 'revoke-collection': empty, 'resume-binding': empty, 'emergency-stop': empty, rework: empty, recover: empty,
   'finish-success': z.strictObject({ criteria: z.array(id).max(256).optional() }),
   'finish-failed': empty, 'finish-abandoned': empty,
   release: z.strictObject({ external_session_stopped: z.literal(true) }),
@@ -36,8 +37,20 @@ const safeCodes = new Set(['unknown_task', 'unknown_project', 'unknown_setup', '
   'workflow_run_active', 'workflow_scope_revoked', 'native_source_unqualified', 'external_ticket_required', 'external_ticket_expired',
   'external_ticket_mismatch', 'external_native_context_unverified', 'external_collection_unsupported', 'criterion_mismatch',
   'criteria_not_met', 'deleted_identifier', 'invalid_project_root', 'git_baseline_unavailable', 'project_dirty',
+  'binding_qualification_live_root_required', 'binding_qualification_control_only', 'binding_qualification_prepare_only', 'binding_qualification_results_only',
   'external_connection_required', 'external_connection_unverified', 'external_ticket_invalid', 'external_ticket_used', 'external_freshness_unverified', 'external_context_mismatch', 'external_window_closed', 'invalid_criteria', 'invalid_ui_setup', 'ui_setup_conflict', 'binary_mismatch', 'external_native_binary_required', 'catalog_source_not_configured', 'catalog_unavailable', 'picker_unavailable', 'ui_state_changed', 'ui_action_uncertain',
-  'ui_action_conflict', 'invalid_ui_request']);
+  'ui_action_conflict', 'invalid_ui_request', 'binding_provider_unavailable', 'binding_source_unqualified',
+  'binding_pilot_scope_invalid', 'binding_pilot_family_scope', 'binding_family_limit', 'binding_pilot_control_only',
+  'binding_scope_revoked', 'binding_identity_mismatch', 'binding_identity_unavailable', 'binding_session_conflict',
+  'binding_relation_invalid', 'binding_request_conflict', 'binding_usage_invalid', 'binding_configuration_invalid',
+  'binding_source_changed', 'binding_source_unapproved', 'binding_metadata_untrusted', 'binding_cursor_invalid',
+  'binding_receipt_limit', 'binding_source_limit', 'binding_usage_incomplete', 'binding_reconnect_required',
+  'binding_identity_ambiguous', 'binding_scope_mismatch', 'binding_ancestry_unverified', 'binding_source_unavailable',
+  'binding_metadata_unavailable', 'binding_clock_regressed', 'binding_turn_limit', 'binding_child_requires_root',
+  'claude_baseline_limit', 'claude_baseline_incomplete', 'claude_binding_config_invalid', 'claude_child_source_unavailable', 'claude_cursor_invalid', 'claude_identity_invalid',
+  'claude_project_mismatch', 'claude_receipt_expired', 'claude_receipt_invalid', 'claude_receipt_missing', 'claude_receipt_untrusted',
+  'claude_scope_mismatch', 'claude_source_missing', 'claude_source_stale', 'claude_source_untrusted',
+  'claude_source_version_unobserved', 'claude_source_version_unsupported']);
 export function localWebError(error: unknown): string {
   return error instanceof Error && safeCodes.has(error.message) ? error.message : 'local_operation_failed';
 }
@@ -73,7 +86,7 @@ export function createLocalWebServer(options: LocalWebOptions) {
     const oversized = error instanceof Error && 'statusCode' in error && error.statusCode === 413;
     await reply.code(oversized ? 413 : 400).send({ error: oversized ? 'request_too_large' : localWebError(error) });
   });
-  app.get('/api/bootstrap', () => ({ csrf, data: options.domain.bootstrap() }));
+  app.get('/api/bootstrap', async () => ({ csrf, data: await options.domain.bootstrap() }));
   app.get<{ Params: { id: string } }>('/api/tasks/:id', (request, reply) => {
     const task = options.domain.task(id.parse(request.params.id)); reply.header('ETag', task.version); return task;
   });
