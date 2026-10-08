@@ -14,7 +14,7 @@ import type { Store } from './store.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId } from './codex-workflow-journal.js';
 import { claudeWorkflowProfileId, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 import { externalContract } from './external-session-contract.js';
-import { isCodexHumanPilotProtocol } from './session-binding-human-pilot.js';
+import { isHumanPilotProtocol } from './session-binding-human-pilot.js';
 
 const artifactSchema = z.strictObject({ artifact_id: IdSchema, path: z.string().min(1).max(4096) });
 export const AssignedWorkflowInputSchema = z.strictObject({ schema_version: z.literal(1),
@@ -76,7 +76,7 @@ function workflowProtocol(store: Store, protocolId: string) {
 }
 function checkReadiness(store: Store, protocolId: string, at: string, preparationOnly = false) {
   const protocol = workflowProtocol(store, protocolId);
-  if (protocol.purpose !== 'synthetic_validation' && !comparisonReadiness(store, protocolId, at).real_allocation && !(preparationOnly&&isCodexHumanPilotProtocol(protocol))) throw new Error('real_experiment_disabled');
+  if (protocol.purpose !== 'synthetic_validation' && !comparisonReadiness(store, protocolId, at).real_allocation && !(preparationOnly&&isHumanPilotProtocol(protocol))) throw new Error('real_experiment_disabled');
   return protocol;
 }
 
@@ -101,7 +101,7 @@ function prepareWorkflow(store: Store, input: unknown, runtimeInput: unknown, cl
   const now = clock(); const requested = checkReadiness(store, config.assignment.protocol_id, now, !activate);
   if (config.artifacts.some(row => !requested.variant_ids.includes(row.variant_id)) ||
       !requested.source_profiles.some(row => row.product === config.assignment.metadata.product && row.product_version === config.product_version)) throw new Error('workflow_configuration_mismatch');
-  const assignment = assignTask(store, config.assignment, { clock: () => now, pilotPreparation: !activate&&isCodexHumanPilotProtocol(requested) });
+  const assignment = assignTask(store, config.assignment, { clock: () => now, pilotPreparation: !activate&&isHumanPilotProtocol(requested) });
   const protocol = checkReadiness(store, assignment.protocol_id, now, !activate);
   if (protocol.id !== requested.id) throw new Error('workflow_protocol_mismatch');
   const life = new Lifecycle(store, () => now); const task = life.task(assignment.task_id);

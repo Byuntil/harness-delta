@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CandidateScope } from '../src/nested-candidate.js';
 import type { BindingUsageRecord, VerifiedSessionIdentity } from '../src/session-binding-contract.js';
 import { ClaudeSessionBindingProvider, claudeBindingProfiles, claudeProjectDirName, type ClaudeBindingOptions } from '../src/session-binding-claude.js';
@@ -88,7 +88,7 @@ describe('Claude current-session identity', () => {
     const identity = await currentIdentity(sid);
     expect(identity).toEqual({ product: 'claude_code', productVersion: '2.1.291', sessionId: sid, sourceRef: rootPath(sid),
       sourceIdentity: expect.stringMatching(/^[a-f0-9]{64}$/) as string, cwd, identityEvidenceId: expect.stringMatching(/^claude-session:/) as string,
-      parentSessionId: null, createdAt: '2026-10-07T00:59:00.000Z', nativeMapping: { nativeSessionId: sid, processId: null, agentId: null } });
+      parentSessionId: null, createdAt: '2026-10-07T00:59:00.000Z', nativeMapping: { nativeSessionId: sid, processId: expect.stringMatching(/^claude-process:[1-9][0-9]*:[a-f0-9]{64}$/) as string, agentId: null } });
     const stored = readdirSync(join(receipts, 'connect')).map(name => readFileSync(join(receipts, 'connect', name), 'utf8')).join('');
     expect(stored).not.toContain(privateText); expect(stored).not.toContain('--task-name');
   });
@@ -143,9 +143,9 @@ describe('Claude current-session identity', () => {
     chmodSync(join(receipts, 'connect', `${receipt}.json`), 0o644);
     await expect(provider().resolveCurrent({ receipt })).rejects.toThrow('claude_receipt_untrusted');
     chmodSync(join(receipts, 'connect', `${receipt}.json`), 0o600);
-    // An expired receipt is refused and pruned.
+    // An expired receipt cannot open a new connection, but remains for bound revalidation.
     await expect(provider({ now: () => Date.now() + 3600000 }).resolveCurrent({ receipt })).rejects.toThrow('claude_receipt_expired');
-    expect(readdirSync(join(receipts, 'connect'))).not.toContain(`${receipt}.json`);
+    expect(readdirSync(join(receipts, 'connect'))).toContain(`${receipt}.json`);
     // Forged receipts: an exited process is refused.
     const exited = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
     await expect(provider().resolveCurrent({ receipt: forgedReceipt(sid, rootPath(sid), Number(exited.stdout)) })).rejects.toThrow('claude_process_absent');
@@ -367,5 +367,221 @@ describe('Claude agent display metadata', () => {
     const children = await p.discoverChildren(rootIdentity);
     expect(children.children[0]?.identity).toMatchObject({ agentMetadata: { source: 'claude_hook', agentType: 'my-plugin:reviewer' } });
     expect(JSON.stringify(children)).not.toContain(privateText);
+  });
+});
+
+
+describe('Claude bound-session authorization', () => {
+  it('revalidates an existing live root after receipt and transcript freshness expire', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const receipt = locate(sid).receipt!; const p = provider();
+    const identity = await p.resolveCurrent({ receipt });
+    const late = provider({ now: () => Date.now() + 7200000 });
+    expect(await late.revalidateBound({ receipt }, identity)).toEqual(identity);
+    await expect(late.resolveCurrent({ receipt })).rejects.toThrow('claude_receipt_expired');
+    expect(await late.revalidateBound({ receipt }, identity)).toEqual(identity);
+  });
+
+  it('rejects a different root or replaced source before authorizing transcript access', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const receipt = locate(sid).receipt!; const identity = await provider().resolveCurrent({ receipt });
+    const authorizeSource = vi.fn(); const guarded = provider({ authorizeSource });
+    const other = randomUUID(); writeRoot(other);
+    await expect(guarded.revalidateBound({ receipt: forgedReceipt(other, rootPath(other), process.pid) }, identity)).rejects.toThrow('claude_bound_identity_changed');
+    rmSync(rootPath(sid)); writeRoot(sid);
+    await expect(guarded.revalidateBound({ receipt }, identity)).rejects.toThrow('claude_bound_identity_changed');
+    expect(authorizeSource).not.toHaveBeenCalled();
+  });
+
+  it('authorizes exact metadata before identity, discovery and usage content reads', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const receipt = locate(sid).receipt!;
+    const identity = await provider().resolveCurrent({ receipt });
+    const authorizeSource = vi.fn(() => { throw new Error('scope_denied_before_read'); });
+    const guarded = provider({ authorizeSource });
+    // Invalid content would fail identity parsing if content were accessed first.
+    writeFileSync(rootPath(sid), 'invalid synthetic row\n');
+    await expect(guarded.resolveCurrent({ receipt })).rejects.toThrow('scope_denied_before_read');
+    expect(authorizeSource).toHaveBeenLastCalledWith({ nativeSessionId: sid, agentId: null, sourceRef: rootPath(sid),
+      sourceIdentity: identity.sourceIdentity, birthtimeMs: expect.any(Number) as number });
+    await expect(guarded.readUsage(identity, null, scopeFor([identity]))).rejects.toThrow('scope_denied_before_read');
+    writeChild(sid, 'denied', []); subagent(sid, 'denied', 'SubagentStart');
+    await expect(guarded.discoverChildren(identity)).rejects.toThrow('scope_denied_before_read');
+    expect(authorizeSource).toHaveBeenLastCalledWith(expect.objectContaining({ nativeSessionId: sid, agentId: 'denied', sourceRef: childPath(sid, 'denied') }));
+  });
+
+  it('keeps Claude 2.1.293 a code-owned synthetic candidate', async () => {
+    const sid = randomUUID(); writeRoot(sid);
+    writeFileSync(rootPath(sid), lines([userRow(sid, '2026-10-07T00:59:00.000Z', { version: '2.1.293' })]));
+    connect(sid); const receipt = locate(sid).receipt!;
+    expect((await provider().resolveCurrent({ receipt })).productVersion).toBe('2.1.293');
+    await expect(provider({ allowCandidateProfiles: false }).resolveCurrent({ receipt })).rejects.toThrow('claude_source_version_unsupported');
+    expect(claudeBindingProfiles.find(profile => profile.version === '2.1.293')?.status).toBe('candidate');
+  });
+
+  it('keeps packaged hook root and Unicode agent-type projection synchronized', () => {
+    const packagedHook = resolve(import.meta.dirname, '../skills/harness-connect/scripts/claude-session-hook.mjs');
+    expect(readFileSync(packagedHook, 'utf8')).toBe(readFileSync(hook, 'utf8'));
+    const sid = randomUUID();
+    const result = spawnSync(process.execPath, [packagedHook, 'record', '--dir', receipts], {
+      input: JSON.stringify({ ...common(sid, 'PreToolUse'), tool_name: 'Bash', tool_use_id: 'toolu_unicode',
+        tool_input: { command: connectCommand }, agent_type: '검토자' }), env: { ...process.env, CLAUDE_PID: String(process.pid) }, encoding: 'utf8' });
+    expect(result.status).toBe(0);
+    const receipt = locate(sid).receipt!;
+    expect(JSON.parse(readFileSync(join(receipts, 'connect', `${receipt}.json`), 'utf8'))).toMatchObject({ agent_id: null, agent_type: '검토자' });
+  });
+});
+
+
+describe('Claude family metadata preflight', () => {
+  it('refuses an excess family before reading any child transcript', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const parent = await currentIdentity(sid);
+    for (const agent of ['a', 'b', 'c']) { writeChild(sid, agent, []); subagent(sid, agent, 'SubagentStart'); }
+    const authorizeSource = vi.fn();
+    await expect(provider({ maxFamilyMembers: 3, authorizeSource }).discoverChildren(parent)).rejects.toThrow('claude_family_scope_limit');
+    expect(authorizeSource).not.toHaveBeenCalled();
+  });
+
+  it('checks configured project authority without accessing receipts', () => {
+    const p = provider();
+    expect(() => p.assertProjectRoot(cwd)).not.toThrow();
+    expect(() => p.assertProjectRoot(join(root, 'other'))).toThrow('binding_pilot_scope_invalid');
+  });
+});
+
+
+describe('Claude bound-session failure boundaries', () => {
+  it('omits the new-connection transcript-mtime guard only for a persisted root', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid); const receipt = locate(sid).receipt!;
+    const older = new Date(Date.now() - 1200000); utimesSync(rootPath(sid), older, older);
+    const identity = await provider({ receiptMaxAgeMs: 1800000 }).resolveCurrent({ receipt });
+    await expect(provider().resolveCurrent({ receipt })).rejects.toThrow('claude_source_stale');
+    expect(await provider().revalidateBound({ receipt }, identity)).toEqual(identity);
+  });
+
+  it.each(['pid', 'uid', 'null_uid', 'cwd', 'child', 'receipt_id', 'loose_receipt', 'unreadable_source', 'missing_receipt', 'missing_source', 'deleted', 'legacy_pid'] as const)(
+    'rejects %s before transcript authorization', async defect => {
+      const sid = randomUUID(); writeRoot(sid); connect(sid); const receipt = locate(sid).receipt!;
+      let identity = await provider().resolveCurrent({ receipt });
+      const path = join(receipts, 'connect', `${receipt}.json`);
+      const value = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      if (defect === 'pid') value.claude_pid = process.ppid;
+      if (defect === 'uid') value.uid = (process.getuid?.() ?? 0) + 1;
+      if (defect === 'null_uid') value.uid = null;
+      if (defect === 'cwd') value.cwd = join(root, 'other');
+      if (defect === 'child') value.agent_id = 'child';
+      if (defect === 'receipt_id') value.receipt_id = randomUUID();
+      writeFileSync(path, JSON.stringify(value));
+      if (defect === 'loose_receipt') chmodSync(path, 0o644);
+      if (defect === 'unreadable_source') chmodSync(rootPath(sid), 0o000);
+      if (defect === 'missing_receipt') rmSync(path);
+      if (defect === 'missing_source') rmSync(rootPath(sid));
+      if (defect === 'deleted') {
+        mkdirSync(join(receipts, 'forgotten'), { recursive: true, mode: 0o700 });
+        writeFileSync(join(receipts, 'forgotten', sid), '', { mode: 0o600 });
+      }
+      if (defect === 'legacy_pid') identity = { ...identity, nativeMapping: { ...identity.nativeMapping!, processId: null } };
+      const authorizeSource = vi.fn();
+      await expect(provider({ authorizeSource }).revalidateBound({ receipt }, identity)).rejects.toThrow();
+      expect(authorizeSource).not.toHaveBeenCalled();
+    });
+
+  it('rejects an exited bound process before authorization', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid); const receipt = locate(sid).receipt!;
+    const identity = await provider().resolveCurrent({ receipt });
+    const exited = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+    const path = join(receipts, 'connect', `${receipt}.json`);
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    value.claude_pid = Number(exited.stdout); writeFileSync(path, JSON.stringify(value));
+    const authorizeSource = vi.fn();
+    await expect(provider({ authorizeSource }).revalidateBound({ receipt }, { ...identity,
+      nativeMapping: { ...identity.nativeMapping!, processId: exited.stdout } })).rejects.toThrow('claude_process_absent');
+    expect(authorizeSource).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Claude live process identity', () => {
+  it('rejects PID reuse even when the numeric PID remains signalable', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid); const receipt = locate(sid).receipt!;
+    const identity = await provider({ readProcessIdentity: () => 'synthetic-process-start-one' }).resolveCurrent({ receipt });
+    const authorizeSource = vi.fn();
+    await expect(provider({ authorizeSource, readProcessIdentity: () => 'synthetic-process-start-two' })
+      .revalidateBound({ receipt }, identity)).rejects.toThrow('claude_bound_identity_changed');
+    expect(authorizeSource).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Claude active-observation process fence', () => {
+  it('blocks discovery and root/child usage after the bound process start changes', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const receipt = locate(sid).receipt!;
+    const original = provider({ readProcessIdentity: () => 'synthetic-original-start' });
+    const parent = await original.resolveCurrent({ receipt });
+    writeChild(sid, 'child', [childRow(sid, 'child', '2026-10-07T01:00:00.000Z')]); subagent(sid, 'child', 'SubagentStart');
+    const child = (await original.discoverChildren(parent)).children[0]!.identity;
+    const authorizeSource = vi.fn();
+    const changed = provider({ readProcessIdentity: () => 'synthetic-reused-pid-start', authorizeSource });
+    await expect(changed.discoverChildren(parent)).rejects.toThrow('claude_bound_identity_changed');
+    await expect(changed.readUsage(parent, null, scopeFor([parent, child]))).rejects.toThrow('claude_bound_identity_changed');
+    await expect(changed.readUsage(child, null, scopeFor([parent, child]))).rejects.toThrow('claude_bound_identity_changed');
+    expect(authorizeSource).not.toHaveBeenCalled();
+  });
+
+  it('requires the persisted root process proof before child usage access', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid); const p = provider(); const parent = await currentIdentity(sid, p);
+    writeChild(sid, 'child', [childRow(sid, 'child', '2026-10-07T01:00:00.000Z')]); subagent(sid, 'child', 'SubagentStart');
+    const child = (await p.discoverChildren(parent)).children[0]!.identity;
+    const authorizeSource = vi.fn(); const guarded = provider({ authorizeSource });
+    await expect(guarded.readUsage(child, null, scopeFor([child]))).rejects.toThrow('claude_bound_identity_changed');
+    expect(authorizeSource).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('Claude usage-window process fence', () => {
+  it('rechecks the pinned process before an oversized-line probe window', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const original = provider({ readProcessIdentity: () => 'synthetic-original-start' });
+    const parent = await currentIdentity(sid, original);
+    const initial = await original.readUsage(parent, null, scopeFor([parent]));
+    appendFileSync(rootPath(sid), 'x'.repeat(150000) + '\n');
+    let start = 'synthetic-original-start';
+    const authorizeSource = vi.fn(() => { start = 'synthetic-reused-start'; });
+    const guarded = provider({ maxReadBytes: 4096, readProcessIdentity: () => start, authorizeSource });
+    await expect(guarded.readUsage(parent, initial.cursor, scopeFor([parent]))).rejects.toThrow('claude_bound_identity_changed');
+    expect(authorizeSource).toHaveBeenCalledTimes(1);
+  });
+
+  it('authorizes each oversized-line probe and stops at the opened snapshot', async () => {
+    const sid = randomUUID(); writeRoot(sid); connect(sid);
+    const original = provider({ readProcessIdentity: () => 'synthetic-original-start' });
+    const parent = await currentIdentity(sid, original);
+    const initial = await original.readUsage(parent, null, scopeFor([parent]));
+    appendFileSync(rootPath(sid), 'x'.repeat(150000));
+    const authorizeSource = vi.fn(() => {
+      if (authorizeSource.mock.calls.length === 2) appendFileSync(rootPath(sid), '\n' + lines([assistant(sid, 'after_oversized', [1, 0, 0, 1])]));
+    });
+    const guarded = provider({ maxReadBytes: 4096, readProcessIdentity: () => 'synthetic-original-start', authorizeSource });
+    const pending = await guarded.readUsage(parent, initial.cursor, scopeFor([parent]));
+    expect(pending).toEqual({ records: [], cursor: initial.cursor, gaps: [] });
+    expect(authorizeSource).toHaveBeenCalledTimes(4);
+    const skipped = await guarded.readUsage(parent, pending.cursor, scopeFor([parent]));
+    expect(skipped.gaps).toEqual(['binding_usage_incomplete']);
+    expect(ids((await guarded.readUsage(parent, skipped.cursor, scopeFor([parent]))).records)).toEqual(['after_oversized']);
+  });
+
+  it('rechecks the persisted root process before the next content window', async () => {
+    const sid = randomUUID();
+    writeRoot(sid, Array.from({ length: 40 }, (_, index) => assistant(sid, `window_${index}`, [1, 0, 0, 1])));
+    connect(sid); const receipt = locate(sid).receipt!;
+    const parent = await provider({ readProcessIdentity: () => 'synthetic-original-start' }).resolveCurrent({ receipt });
+    let start = 'synthetic-original-start';
+    const authorizeSource = vi.fn(() => { start = 'synthetic-reused-start'; });
+    const guarded = provider({ maxReadBytes: 4096, readProcessIdentity: () => start, authorizeSource });
+    await expect(guarded.readUsage(parent, null, scopeFor([parent]))).rejects.toThrow('claude_bound_identity_changed');
+    expect(authorizeSource).toHaveBeenCalledTimes(1);
   });
 });

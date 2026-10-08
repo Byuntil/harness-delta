@@ -47,7 +47,7 @@ const safeCodes = new Set(['unknown_task', 'unknown_project', 'unknown_setup', '
   'binding_receipt_limit', 'binding_source_limit', 'binding_usage_incomplete', 'binding_reconnect_required',
   'binding_identity_ambiguous', 'binding_scope_mismatch', 'binding_ancestry_unverified', 'binding_source_unavailable',
   'binding_metadata_unavailable', 'binding_clock_regressed', 'binding_turn_limit', 'binding_child_requires_root',
-  'claude_baseline_limit', 'claude_baseline_incomplete', 'claude_binding_config_invalid', 'claude_child_source_unavailable', 'claude_cursor_invalid', 'claude_identity_invalid',
+  'claude_bound_identity_changed', 'claude_process_absent', 'claude_baseline_limit', 'claude_baseline_incomplete', 'claude_binding_config_invalid', 'claude_child_source_unavailable', 'claude_cursor_invalid', 'claude_identity_invalid',
   'claude_project_mismatch', 'claude_receipt_expired', 'claude_receipt_invalid', 'claude_receipt_missing', 'claude_receipt_untrusted',
   'claude_scope_mismatch', 'claude_source_missing', 'claude_source_stale', 'claude_source_untrusted',
   'claude_source_version_unobserved', 'claude_source_version_unsupported']);

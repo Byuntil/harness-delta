@@ -29,6 +29,7 @@ function SessionFamily({ task }: { task: Task }) {
  {binding.support === 'native_qualification_only' && <><div className="flex flex-wrap gap-3"><Action code="emergency-stop" variant="destructive">{t('Emergency stop owned AI', '소유 AI 긴급 중단')}</Action></div><p className="text-sm text-muted-foreground">{t('Pause stops measurement reads while the owned AI remains alive. Resume retains the same task, assignment, price and safety deadline. Emergency stop terminates the owned process. Source-based safety counters are unverified while paused.', '일시중단은 측정 읽기만 멈추며 소유 AI는 계속 실행됩니다. 재개해도 작업·배정·가격·안전 기한은 유지됩니다. 긴급 중단은 소유 프로세스를 종료합니다. 중단 중 원본 기반 안전 카운터는 미확인입니다.')}</p></>}
  {['native_unverified_pilot','native_pilot_preparation_only'].includes(binding.support) && <p role="status" className="text-sm">{binding.support === 'native_pilot_preparation_only' ? t('Native unverified pilot: preparation only. Source observation requires the reviewed local command.', '네이티브 미검증 pilot: 준비만 완료합니다. 원본 관측은 검토된 로컬 명령으로 시작해야 합니다.') : t('Native unverified pilot. You own agent startup, input and exit. Pause stops collection only; source usage is unknown while paused. Production admission and complete cost remain unverified.', '네이티브 미검증 pilot입니다. 사용자가 에이전트 실행·입력·종료를 직접 합니다. 일시중단은 수집만 멈추며 중단 중 원본 사용량은 미확인입니다. 제품 지원과 전체 비용 검증은 아직 완료되지 않았습니다.')}</p>}
  {!['synthetic_validation_only','native_unverified_pilot','native_pilot_preparation_only'].includes(binding.support) && <p className="text-sm text-muted-foreground">{binding.support === 'instrumentation_required' ? t('Instrumentation requires installation review and a new session boundary.', '세션 계측은 설치 검토와 새 세션 경계가 필요합니다.') : t('Ordinary-session production collection awaits native source qualification.', '일반 세션의 제품 수집은 네이티브 원본 지원 검증을 기다리고 있습니다.')}</p>}
+ {binding.product === 'claude_code' && <p className="text-sm text-muted-foreground">{t('Claude family members are shown under the parent. Nested direct parents remain unverified.', 'Claude 가족 구성원은 부모 아래에 표시합니다. 중첩 구성원의 직접 부모 관계는 미확인입니다.')}</p>}
  {binding.gaps.length > 0 && <p role="status" className="text-sm">{t('Some family usage is missing or unsupported. All shown cost remains partial.', '일부 가족 사용량이 누락되었거나 미지원입니다. 표시 비용은 모두 부분 관측입니다.')}</p>}
  </CardContent></Card>;
 }
@@ -60,6 +61,7 @@ export function App() {
    ui_action_uncertain: ['A previous action has an uncertain result. Check the saved state before retrying.', '이전 동작의 결과가 불확실합니다. 저장된 상태를 먼저 확인하세요.'],
    binding_provider_unavailable: ['Session instrumentation has not been configured. Review the project hook proposal before installing it.', '세션 계측 설정이 없습니다. 설치 전에 프로젝트 hook 제안을 검토하세요.'],
    binding_source_unqualified: ['Ordinary session and family sources need qualification before real collection.', '일반 세션과 가족 원본은 실측 전에 지원 검증이 필요합니다.'],
+   observation_running: ['Measurement is already active.', '측정이 이미 진행 중입니다.'],
    binding_reconnect_required: ['Invoke harness-connect once in the current parent session to resume from a fresh baseline.', '현재 부모 세션에서 harness-connect를 한 번 호출해 새 기준점부터 재개하세요.'],
    external_preparation_required: ['Prepare the assigned configuration first.', '배정된 구성을 먼저 준비하세요.'],
    external_surface_busy: ['Another task owns this project configuration. Finish or release that task first.', '다른 작업이 이 프로젝트의 구성을 사용 중입니다. 해당 작업을 종료하거나 준비를 해제하세요.'],
@@ -77,7 +79,6 @@ export function App() {
    git_baseline_unavailable: ['Select a Git project with an existing HEAD commit.', '기존 HEAD 커밋이 있는 Git 프로젝트를 선택하세요.'],
    invalid_transition: ['This action is unavailable in the current state.', '현재 상태에서는 이 동작을 할 수 없습니다.'],
    inactive_observation: ['There is no active observation interval.', '활성 관측 구간이 없습니다.'],
-   observation_running: ['Pause observation before assessing the result.', '결과 판정 전에 관측을 일시중단하세요.'],
    finalized: ['The result is final. Start a new task for additional work.', '확정된 결과입니다. 추가 작업은 새 작업으로 시작하세요.'],
    external_connection_required: ['Connect a verified fresh session first.', '먼저 확인된 새 세션을 연결하세요.'],
    external_window_closed: ['The observation window has ended. Assess the result.', '관찰 기한이 종료됐습니다. 결과를 판정하세요.'],

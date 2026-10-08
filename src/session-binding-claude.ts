@@ -1,4 +1,6 @@
+import { bindingIdentityKey } from './session-binding-contract.js';
 import { claudeAgentMetadata } from './agent-metadata.js';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync, rmSync, writeFileSync, type Stats } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
@@ -20,8 +22,8 @@ import type { BindingCapabilities, BindingReadBoundary, BindingUsageRecord, Chil
  * Receipts are owner-private local files. Like the Codex recorder, this is local trust,
  * not authentication: any process running as the same user, including a model-authored
  * Bash command, can write such a file. The provider narrows that boundary (live
- * same-user PID, transcript inside the configured project's native directory, written
- * within the receipt window) but cannot detect a deliberate same-user forgery that names
+ * same-user PID and process start, transcript inside the configured project's native
+ * directory, and fresh receipt for new connections) but cannot detect a deliberate same-user forgery that names
  * such a transcript of this project.
  *
  * Claude subagents share the root session_id; each member has its own transcript under
@@ -39,6 +41,7 @@ export interface ClaudeTranscriptProfile { readonly version: string; readonly st
 /** Exact versions only. A candidate profile is synthetic-fixture evidence: production
  * binding stays closed until an approved native qualification promotes it. */
 export const claudeBindingProfiles: readonly ClaudeTranscriptProfile[] = Object.freeze([
+  Object.freeze({ version: '2.1.293', status: 'candidate' as const, evidence: 'synthetic-fixtures;native-qualification-pending' }),
   Object.freeze({ version: '2.1.291', status: 'candidate' as const, evidence: 'official-docs-2026-10-07;synthetic-fixtures;native-qualification-pending' }),
 ]);
 
@@ -51,6 +54,12 @@ export interface ClaudeBindingOptions {
   /** Synthetic tests and separately approved qualification only. Never a browser or UI flag. */
   allowCandidateProfiles?: boolean;
   profiles?: readonly ClaudeTranscriptProfile[];
+  /** Task-owned metadata authorization, invoked before every content-bearing source read. */
+  authorizeSource?: (metadata: { nativeSessionId: string; agentId: string | null; sourceRef: string; sourceIdentity: string; birthtimeMs: number }) => void;
+  /** Metadata-only process-start proof. Injection is for synthetic tests. */
+  readProcessIdentity?: (pid: number) => string;
+  /** Root plus distinct receipt or native-file members; checked before child reads. */
+  maxFamilyMembers?: number;
   receiptMaxAgeMs?: number;
   /** A trailing request is held back while its transcript was written this recently. */
   quiescenceMs?: number;
@@ -84,6 +93,18 @@ const fail = (code: string): never => { throw new Error(code); };
 const settle = <T>(work: () => T): Promise<T> => new Promise<T>(resolve => { resolve(work()); });
 const sha = (parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const currentUid = () => typeof process.getuid === 'function' ? process.getuid() : null;
+/** Fixed metadata-only OS query; no command line, environment or native source reads. */
+const processIdentity = (pid: number): string => {
+  let metadata: string;
+  try {
+    metadata = execFileSync('ps', ['-o', 'uid=', '-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8', timeout: 2000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }, stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  } catch { return fail('claude_process_absent'); }
+  const match = /^(\d+)\s+(.+)$/.exec(metadata);
+  if (!match || Number(match[1]) !== currentUid() || !Number.isFinite(Date.parse(match[2]!))) fail('claude_receipt_untrusted');
+  return metadata;
+};
 const isPrivate = (stat: Stats) => (stat.mode & 0o077) === 0 && (currentUid() === null || stat.uid === currentUid());
 /** Claude's native project directory name for a launch cwd (undocumented; qualification item). */
 export const claudeProjectDirName = (path: string) => path.replace(/[^A-Za-z0-9]/g, '-');
@@ -130,7 +151,7 @@ function assertPrivateDir(path: string) {
 function checkedSourceFile(path: string): Stats {
   let stat: Stats;
   try { stat = lstatSync(path); } catch { return fail('claude_source_missing'); }
-  if (!stat.isFile() || (currentUid() !== null && stat.uid !== currentUid())) fail('claude_source_untrusted');
+  if (!stat.isFile() || (stat.mode & 0o400) === 0 || (currentUid() !== null && stat.uid !== currentUid())) fail('claude_source_untrusted');
   try { if (realpathSync(path) !== path) fail('claude_source_untrusted'); } catch { fail('claude_source_untrusted'); }
   return stat;
 }
@@ -165,11 +186,12 @@ interface Pending { requestId: string; first: Line; record: BindingUsageRecord; 
 
 export class ClaudeSessionBindingProvider implements SessionBindingProvider {
   readonly product = 'claude_code' as const;
-  readonly #options: Required<Omit<ClaudeBindingOptions, 'profiles'>> & { profiles: readonly ClaudeTranscriptProfile[] };
+  readonly #options: Required<Omit<ClaudeBindingOptions, 'profiles' | 'authorizeSource'>> & Pick<ClaudeBindingOptions, 'authorizeSource'> & { profiles: readonly ClaudeTranscriptProfile[] };
   constructor(options: ClaudeBindingOptions) {
     if (!isAbsolute(options.receiptDir) || !isAbsolute(options.claudeProjectsDir) || !isAbsolute(options.projectRoot)) fail('claude_binding_config_invalid');
     this.#options = { allowCandidateProfiles: false, profiles: claudeBindingProfiles, receiptMaxAgeMs: 600000, quiescenceMs: 30000,
-      maxReadBytes: 8 * 1048576, now: Date.now, ...options };
+      maxReadBytes: 8 * 1048576, maxFamilyMembers: 32, readProcessIdentity: processIdentity, now: Date.now, ...options };
+    if (!Number.isSafeInteger(this.#options.maxFamilyMembers) || this.#options.maxFamilyMembers < 1 || this.#options.maxFamilyMembers > 32) fail('claude_binding_config_invalid');
   }
 
   capabilities(): BindingCapabilities {
@@ -187,6 +209,13 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     return profile !== undefined && (profile.status === 'qualified' || this.#options.allowCandidateProfiles);
   }
 
+  /** Metadata-only pilot scope check before receipt or transcript access. */
+  assertProjectRoot(projectRoot: string): void {
+    if (projectRoot !== this.#options.projectRoot) fail('binding_pilot_scope_invalid');
+  }
+  revalidateBound(input: CurrentIdentityRequest, expected: VerifiedSessionIdentity): Promise<VerifiedSessionIdentity> {
+    return settle(() => this.#resolve(input, expected));
+  }
   resolveCurrent(input: CurrentIdentityRequest): Promise<VerifiedSessionIdentity> { return settle(() => this.#resolve(input)); }
   discoverChildren(parent: VerifiedSessionIdentity): Promise<ChildDiscovery> { return settle(() => this.#discover(parent)); }
   /** A null cursor reads the complete owned snapshot to the current end.
@@ -222,23 +251,13 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     });
   }
 
-  /** Connect receipts are only needed briefly; expired ones are removed on each resolve. */
-  #pruneConnectReceipts() {
-    const dir = join(this.#options.receiptDir, 'connect'); const cutoff = this.#options.now() - 6 * this.#options.receiptMaxAgeMs;
-    const names = (() => { try { return readdirSync(dir); } catch { return []; } })();
-    for (const name of names) {
-      if (!/^[a-f0-9-]{36}\.json$/.test(name)) continue;
-      const recorded = (() => { try { return Date.parse(this.#receipt(join(dir, name)).recorded_at); } catch { return null; } })();
-      if (recorded !== null && recorded < cutoff) rmSync(join(dir, name), { force: true });
-    }
-  }
   #forgotten(native: string) { try { lstatSync(join(this.#options.receiptDir, 'forgotten', native)); return true; } catch { return false; } }
   #receipt(path: string): Receipt {
     const parsed = (() => { try { return ReceiptSchema.safeParse(JSON.parse(readPrivateFile(path, 16384))); } catch (error) {
       if (error instanceof Error && error.message.startsWith('claude_receipt_')) throw error; return fail('claude_receipt_invalid'); } })();
     if (!parsed.success) fail('claude_receipt_invalid');
     const receipt = parsed.data!;
-    if (receipt.uid !== null && receipt.uid !== currentUid()) fail('claude_receipt_untrusted');
+    if (receipt.uid !== currentUid()) fail('claude_receipt_untrusted');
     return receipt;
   }
   #projectsRoot(): string { try { return realpathSync(this.#options.claudeProjectsDir); } catch { return fail('claude_source_missing'); } }
@@ -260,12 +279,31 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
   }
   #sourceIdentity(stat: Stats, sessionId: string) { return sha(['claude-transcript-v2', stat.dev, stat.ino, stat.birthtimeMs, sessionId]); }
 
-  #readLines(path: string, offset: number, limit: number): ReadChunk {
+  #currentProcessProof(pid: number): string {
+    try { process.kill(pid, 0); } catch (error) {
+      fail((error as NodeJS.ErrnoException).code === 'EPERM' ? 'claude_receipt_untrusted' : 'claude_process_absent');
+    }
+    return `claude-process:${pid}:${sha([pid, this.#options.readProcessIdentity(pid)])}`;
+  }
+  /** Durable root proof is sufficient after restart, without searching receipt directories. */
+  #assertBoundProcess(proof: string | null | undefined): void {
+    const match = typeof proof === 'string' ? /^claude-process:([1-9][0-9]{0,9}):[a-f0-9]{64}$/.exec(proof) : null;
+    if (!match || this.#currentProcessProof(Number(match[1])) !== proof) fail('claude_bound_identity_changed');
+  }
+  #authorize(path: string, stat: Stats, native: string, agent: string | null) {
+    this.#options.authorizeSource?.({ nativeSessionId: native, agentId: agent, sourceRef: path,
+      sourceIdentity: this.#sourceIdentity(stat, agent === null ? native : `${native}:${agent}`), birthtimeMs: stat.birthtimeMs });
+  }
+  #readLines(path: string, offset: number, limit: number, native: string, agent: string | null, expectedSourceIdentity: string, processProof: string | null | undefined): ReadChunk {
     const stat = checkedSourceFile(path);
+    const sessionId = agent === null ? native : `${native}:${agent}`;
+    if (this.#sourceIdentity(stat, sessionId) !== expectedSourceIdentity) fail('claude_source_replaced');
+    this.#assertBoundProcess(processProof);
+    this.#authorize(path, stat, native, agent);
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const opened = fstatSync(fd);
-      if (opened.ino !== stat.ino || opened.dev !== stat.dev) fail('claude_source_untrusted');
+      if (this.#sourceIdentity(opened, sessionId) !== expectedSourceIdentity || opened.uid !== stat.uid || opened.mode !== stat.mode) fail('claude_source_untrusted');
       const none: ReadChunk = { lines: [], end: offset, size: opened.size, stat: opened, oversized: false };
       if (opened.size <= offset) return none;
       const length = Math.min(limit, opened.size - offset);
@@ -276,12 +314,19 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
         if (read < limit) return none;
         // A single line larger than the read window is skipped without parsing.
         let probe = offset + read; const chunk = Buffer.alloc(65536);
-        for (;;) {
-          const n = readSync(fd, chunk, 0, chunk.length, probe); if (!n) return none;
+        while (probe < opened.size) {
+          const current = checkedSourceFile(path);
+          if (this.#sourceIdentity(current, sessionId) !== expectedSourceIdentity) fail('claude_source_replaced');
+          const descriptor = fstatSync(fd);
+          if (this.#sourceIdentity(descriptor, sessionId) !== expectedSourceIdentity || descriptor.uid !== current.uid || descriptor.mode !== current.mode) fail('claude_source_untrusted');
+          this.#assertBoundProcess(processProof);
+          this.#authorize(path, current, native, agent);
+          const n = readSync(fd, chunk, 0, Math.min(chunk.length, opened.size - probe), probe); if (!n) return none;
           const index = chunk.subarray(0, n).indexOf(0x0a);
           if (index >= 0) return { ...none, end: probe + index + 1, oversized: true };
           probe += n;
         }
+        return none;
       }
       const lines: Line[] = []; let start = 0;
       while (start <= last) {
@@ -293,10 +338,10 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     } finally { closeSync(fd); }
   }
   /** First own row's timestamp and version, scanning bounded windows from the start. */
-  #firstOwnRow(path: string, native: string, agent: string | null): { createdAt: string | null; version: string | null; scanned: number } {
+  #firstOwnRow(path: string, native: string, agent: string | null, sourceIdentity: string, processProof: string | null | undefined): { createdAt: string | null; version: string | null; scanned: number } {
     let createdAt: string | null = null; let offset = 0; let scanned = 0;
     while (offset < metadataScanLimit) {
-      const chunk = this.#readLines(path, offset, metadataWindow);
+      const chunk = this.#readLines(path, offset, metadataWindow, native, agent, sourceIdentity, processProof);
       scanned += chunk.lines.length;
       for (const line of chunk.lines) {
         const row = rowMeta(line.text);
@@ -309,32 +354,33 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     }
     return { createdAt, version: null, scanned };
   }
-  #identity(native: string, agent: string | null, rootPath: string, sourcePath: string, stat: Stats, version: string, createdAt: string, agentType?: unknown): VerifiedSessionIdentity {
+  #identity(native: string, agent: string | null, rootPath: string, sourcePath: string, stat: Stats, version: string, createdAt: string, agentType?: unknown, processId: string | null = null): VerifiedSessionIdentity {
     const agentMetadata = claudeAgentMetadata(agentType);
     const sessionId = agent === null ? native : `${native}:${agent}`;
     // Stable per member: repeated connects and rediscovery yield byte-identical identities.
     const evidence = agent === null ? `claude-session:${sha([native, rootPath])}` : `claude-agent:${sha([native, agent, rootPath])}`;
     return { ...(agentMetadata ? { agentMetadata } : {}), product: 'claude_code', productVersion: version, sessionId, sourceRef: sourcePath, sourceIdentity: this.#sourceIdentity(stat, sessionId),
       cwd: this.#options.projectRoot, identityEvidenceId: evidence, parentSessionId: agent === null ? null : native, createdAt,
-      nativeMapping: { nativeSessionId: native, processId: null, agentId: agent } };
+      nativeMapping: { nativeSessionId: native, processId, agentId: agent } };
   }
   #rootStat(rootPath: string, native: string): Stats {
     if (!this.#memberPathValid(rootPath, native, null)) fail('claude_source_untrusted');
     return checkedSourceFile(rootPath);
   }
 
-  #resolve(input: CurrentIdentityRequest): VerifiedSessionIdentity {
+  #resolve(input: CurrentIdentityRequest, expected?: VerifiedSessionIdentity): VerifiedSessionIdentity {
     const receiptId = typeof input?.receipt === 'string' && uuidPattern.test(input.receipt) ? input.receipt : fail('claude_receipt_invalid');
     assertPrivateDir(this.#options.receiptDir); assertPrivateDir(join(this.#options.receiptDir, 'connect'));
     const receipt = this.#receipt(join(this.#options.receiptDir, 'connect', `${receiptId}.json`));
-    this.#pruneConnectReceipts();
     const recordedAt = Date.parse(receipt.recorded_at); const age = this.#options.now() - recordedAt;
-    if (receipt.kind !== 'connect' || receipt.receipt_id !== receiptId || age < -5000 || age > this.#options.receiptMaxAgeMs) fail('claude_receipt_expired');
+    if (receipt.kind !== 'connect' || receipt.receipt_id !== receiptId || age < -5000 || (!expected && age > this.#options.receiptMaxAgeMs)) fail('claude_receipt_expired');
+    if (expected && (expected.product !== 'claude_code' || expected.parentSessionId !== null || receipt.agent_id !== null
+      || expected.sessionId !== receipt.session_id || expected.nativeMapping?.nativeSessionId !== receipt.session_id
+      || expected.nativeMapping.agentId !== null
+      || expected.cwd !== this.#options.projectRoot || expected.sourceRef !== receipt.transcript_path)) fail('claude_bound_identity_changed');
     if (this.#forgotten(receipt.session_id)) fail('deleted_identifier');
-    // The recording Claude process must still be alive and signalable by this user.
-    try { process.kill(receipt.claude_pid, 0); } catch (error) {
-      fail((error as NodeJS.ErrnoException).code === 'EPERM' ? 'claude_receipt_untrusted' : 'claude_process_absent');
-    }
+    const processId = this.#currentProcessProof(receipt.claude_pid);
+    if (expected && expected.nativeMapping?.processId !== processId) fail('claude_bound_identity_changed');
     // Inside a subagent the hook transcript may be the root or the member file; derive the root.
     const native = receipt.session_id;
     const rootPath = receipt.agent_id !== null && receipt.transcript_path.endsWith(join(native, 'subagents', `agent-${receipt.agent_id}.jsonl`))
@@ -342,16 +388,27 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     if (!this.#memberPathValid(rootPath, native, null)) fail('claude_source_untrusted');
     this.#assertProjectScope(rootPath, receipt.cwd);
     const rootStat = this.#rootStat(rootPath, native);
+    if (expected) {
+      if (this.#sourceIdentity(rootStat, native) !== expected.sourceIdentity) fail('claude_bound_identity_changed');
+      const identity = this.#identity(native, null, rootPath, rootPath, rootStat, expected.productVersion, expected.createdAt, receipt.agent_type, processId);
+      if (bindingIdentityKey(identity) !== bindingIdentityKey(expected)) fail('claude_bound_identity_changed');
+      if (!this.supportedVersion(identity.productVersion)) fail('claude_source_version_unsupported');
+      this.#authorize(rootPath, rootStat, native, null);
+      return identity;
+    }
     // A connecting session has just written its transcript; a stale file is not current.
     if (rootStat.mtimeMs < recordedAt - this.#options.receiptMaxAgeMs) fail('claude_source_stale');
-    const root = this.#firstOwnRow(rootPath, native, null);
+    const root = this.#firstOwnRow(rootPath, native, null, this.#sourceIdentity(rootStat, native), processId);
     if (root.version === null || root.createdAt === null) fail('claude_source_version_unobserved');
     if (!this.supportedVersion(root.version)) fail('claude_source_version_unsupported');
-    if (receipt.agent_id === null) return this.#identity(native, null, rootPath, rootPath, rootStat, root.version!, root.createdAt!, receipt.agent_type);
+    if (receipt.agent_id === null) {
+      const identity = this.#identity(native, null, rootPath, rootPath, rootStat, root.version!, root.createdAt!, receipt.agent_type, processId);
+      return identity;
+    }
     // A re-invocation inside a subagent resolves to that member, never a new root.
     const childPath = this.#childPath(rootPath, native, receipt.agent_id);
     const childStat = (() => { try { return checkedSourceFile(childPath); } catch { return fail('claude_child_source_unavailable'); } })();
-    const child = this.#firstOwnRow(childPath, native, receipt.agent_id);
+    const child = this.#firstOwnRow(childPath, native, receipt.agent_id, this.#sourceIdentity(childStat, `${native}:${receipt.agent_id}`), processId);
     if (child.createdAt === null) fail('claude_child_source_unavailable');
     return this.#identity(native, receipt.agent_id, rootPath, childPath, childStat, root.version!, child.createdAt!, receipt.agent_type);
   }
@@ -360,6 +417,8 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     const { native, agent } = nativeOf(parent);
     // Claude members are discovered from the root's own receipts and layout only.
     if (agent !== null || parent.parentSessionId !== null || this.#forgotten(native)) return { children: [], gaps: [] };
+    this.#assertBoundProcess(parent.nativeMapping?.processId);
+    this.#assertProjectScope(parent.sourceRef, parent.cwd);
     const rootStat = this.#rootStat(parent.sourceRef, native);
     if (this.#sourceIdentity(rootStat, native) !== parent.sourceIdentity) return { children: [], gaps: shared(['source_replaced']) };
     const gaps: string[] = [];
@@ -380,6 +439,13 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
       if (receipt.agent_id !== matched[1] || receipt.kind !== matched[2] || receipt.session_id !== native || receipt.transcript_path !== parent.sourceRef) { gaps.push('child_receipt_mismatch'); continue; }
       receipts.set(receipt.agent_id, [...(receipts.get(receipt.agent_id) ?? []), receipt]);
     }
+    const files = (() => { try { return readdirSync(join(dirname(parent.sourceRef), native, 'subagents')); } catch { return []; } })();
+    const members = new Set(receipts.keys());
+    for (const file of files) {
+      const matched = /^agent-([A-Za-z0-9_-]{1,91})\.jsonl$/.exec(file);
+      if (matched) members.add(matched[1]!);
+    }
+    if (members.size >= this.#options.maxFamilyMembers) fail('claude_family_scope_limit');
     const children: ChildDiscovery['children'] = [];
     for (const [agentId, list] of [...receipts.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const expected = this.#childPath(parent.sourceRef, native, agentId);
@@ -392,14 +458,13 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
       try { stat = checkedSourceFile(expected); } catch { gaps.push('child_source_missing'); continue; }
       // A member with no complete line yet is linked on a later poll with a stable creation
       // time. Complete lines without an attributable own row are reported, never dropped.
-      const first = this.#firstOwnRow(expected, native, agentId);
+      const first = this.#firstOwnRow(expected, native, agentId, this.#sourceIdentity(stat, `${native}:${agentId}`), parent.nativeMapping?.processId);
       if (first.createdAt === null) { if (first.scanned > 0) gaps.push('ownership_unverified'); continue; }
       const identity = this.#identity(native, agentId, parent.sourceRef, expected, stat, parent.productVersion, first.createdAt, (list.find(r => r.kind === 'subagent_start') ?? stop)?.agent_type);
       children.push({ parentSessionId: native, relationEvidenceId: identity.identityEvidenceId, identity });
     }
     // Native member files without a hook receipt (for example, spawned before connect or
     // while hooks were absent) are neither linked nor counted.
-    const files = (() => { try { return readdirSync(join(dirname(parent.sourceRef), native, 'subagents')); } catch { return []; } })();
     for (const file of files) {
       const matched = /^agent-([A-Za-z0-9_-]{1,91})\.jsonl$/.exec(file);
       if (matched && !receipts.has(matched[1]!)) gaps.push('child_relation_unverified');
@@ -409,9 +474,17 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
 
   #usage(session: VerifiedSessionIdentity, cursorText: string | null, scope: CandidateScope, baseline: boolean): UsageBatch {
     const { native, agent } = nativeOf(session);
+    if (this.#forgotten(native)) fail('deleted_identifier');
     if (!scope.sessions.some(m => m.sessionId === session.sessionId && m.product === 'claude_code' && m.nativeSessionId === native && m.agentId === agent)) fail('claude_scope_mismatch');
+    const roots = scope.sessions.filter(member => member.sessionId === native && member.rootSessionId === native
+      && member.product === 'claude_code' && member.nativeSessionId === native && member.agentId === null && member.parentSessionId === null);
+    if (roots.length !== 1 || (agent === null && roots[0]!.processId !== session.nativeMapping?.processId)) fail('claude_bound_identity_changed');
+    const rootProcessProof = roots[0]!.processId;
+    this.#assertBoundProcess(rootProcessProof);
     if (!this.supportedVersion(session.productVersion)) fail('claude_source_version_unsupported');
     if (!this.#memberPathValid(session.sourceRef, native, agent)) fail('claude_source_untrusted');
+    const rootPath = agent === null ? session.sourceRef : join(dirname(dirname(dirname(session.sourceRef))), `${native}.jsonl`);
+    this.#assertProjectScope(rootPath, session.cwd);
     const encode = (cursor: Cursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url');
     const start: Cursor = cursorText === null ? { v: 3, source: session.sourceIdentity, offset: 0, recent: [], baselineExcluded: [] } : (() => {
       try { return CursorSchema.parse(JSON.parse(Buffer.from(cursorText, 'base64url').toString('utf8'))); } catch { return fail('claude_cursor_invalid'); } })();
@@ -425,8 +498,9 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     const toEnd = cursorText === null || baseline;
     for (;;) {
       let chunk: ReadChunk;
-      try { chunk = this.#readLines(session.sourceRef, offset, this.#options.maxReadBytes); } catch (error) {
-        return unchanged(error instanceof Error && error.message === 'claude_source_missing' ? 'source_missing' : 'source_error');
+      try { chunk = this.#readLines(session.sourceRef, offset, this.#options.maxReadBytes, native, agent, session.sourceIdentity, rootProcessProof); } catch (error) {
+        if (!(error instanceof Error) || !['claude_source_missing', 'claude_source_untrusted', 'claude_source_replaced'].includes(error.message)) throw error;
+        return unchanged(error.message === 'claude_source_missing' ? 'source_missing' : error.message === 'claude_source_replaced' ? 'source_replaced' : 'source_error');
       }
       if (this.#sourceIdentity(chunk.stat, session.sessionId) !== session.sourceIdentity) return unchanged('source_replaced');
       if (chunk.size < offset) return unchanged('source_truncated');
