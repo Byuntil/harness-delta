@@ -7,6 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CandidateScope } from '../src/nested-candidate.js';
 import type { BindingUsageRecord, VerifiedSessionIdentity } from '../src/session-binding-contract.js';
 import { ClaudeSessionBindingProvider, claudeBindingProfiles, claudeProjectDirName, type ClaudeBindingOptions } from '../src/session-binding-claude.js';
+import { EventV2Schema, RuntimeEvidenceSchema } from '../src/flexible-contracts.js';
+import { compilePriceBasis, parsePriceCatalog } from '../src/price-catalog.js';
+import { projectCatalogCost } from '../src/catalog-cost-report.js';
 
 // Synthetic fixtures only: no native Claude process, model call, user transcript or settings.
 const hook = resolve(import.meta.dirname, '../scripts/claude-session-hook.mjs');
@@ -224,6 +227,43 @@ describe('Claude family relations', () => {
 });
 
 describe('Claude usage collection', () => {
+  it.each([
+    ['claude-haiku-5-5', 20, '0.0000038'], ['claude-haiku-5-5', 10, '0.0000038'],
+    ['claude-sonnet-5-5', 20, '0.000073'], ['claude-sonnet-5-5', 10, '0.000073'],
+  ] as const)('does not price known one-hour writes as five-minute writes (%s, %i)', async (model, oneHour, amount) => {
+    const sid = randomUUID(); const row = assistant(sid, 'req_1h', [10, 20, 30, 5], {}, model);
+    const extended = { ...row, message: { ...row.message, usage: { ...row.message.usage,
+      cache_creation: { ephemeral_1h_input_tokens: oneHour, ephemeral_5m_input_tokens: 20 - oneHour } } } };
+    writeRoot(sid, [extended]); connect(sid); const p = provider(); const parent = await currentIdentity(sid, p);
+    const batch = await p.readUsage(parent, null, scopeFor([parent]), { baseline: false });
+    expect(batch.gaps).toContain('binding_partial_usage');
+    const record = batch.records[0]!;
+    expect(record.payload.billing_components.find(component => component.kind === 'cache_write')?.reading)
+      .toEqual({ status: 'observed', value: 20, reason: null });
+    expect(record.payload.cache_write_1h_observed).toBe(true);
+    expect(record.payload.input_total).toEqual({ status: 'observed', value: 60, reason: null });
+    const runtime = RuntimeEvidenceSchema.parse({ id: 'runtime-1h', task_id: 'task-1', session_id: sid, request_id: record.requestId,
+      turn_id: null, model, effort: null, product: 'claude_code', product_version: '2.1.291', source: 'product_log',
+      boundary: 'request', occurred_at: record.occurredAt, recorded_at: record.occurredAt });
+    const event = EventV2Schema.parse({ id: 'event-1h', source_key: 'event-1h', task_id: 'task-1', project_id: 'project-1', session_id: sid,
+      occurred_at: record.occurredAt, payload: { ...record.payload, runtime_evidence_id: runtime.id } });
+    const catalog = parsePriceCatalog(JSON.parse(readFileSync(new URL('../config/prices/catalogs/reference-catalog-2026-10-08.json', import.meta.url), 'utf8')) as unknown);
+    const report = projectCatalogCost([event], compilePriceBasis(catalog), 'task-1', '2026-10-08T00:00:00Z', 'output-only-v1',
+      { referenceBinding: true, runtimeEvidence: [runtime] });
+    expect(report).toMatchObject({ partial_amount: amount, complete_amount: null });
+    expect(report.price_reasons).toEqual(['unverified_condition']);
+    expect(report.matches.find(match => match.component === 'cache_write')).toMatchObject({ status: 'unavailable', price_per_unit: null });
+    expect(JSON.stringify(batch)).not.toContain(privateText);
+  });
+
+  it('rejects request rows that disagree about one-hour writes even with identical token totals', async () => {
+    const sid = randomUUID(); const row = assistant(sid, 'req_ttl_conflict', [10, 20, 30, 5]);
+    const oneHour = { ...row, message: { ...row.message, usage: { ...row.message.usage, cache_creation: { ephemeral_1h_input_tokens: 20 } } } };
+    writeRoot(sid, [row, oneHour]); connect(sid); const p = provider(); const parent = await currentIdentity(sid, p);
+    const batch = await p.readUsage(parent, null, scopeFor([parent]), { baseline: false });
+    expect(batch.records).toEqual([]); expect(batch.gaps).toContain('incomplete_request');
+  });
+
   it('counts each request once across the family and excludes copies, conflicts and non-requests', async () => {
     const sid = randomUUID(); const foreign = randomUUID();
     writeRoot(sid, [

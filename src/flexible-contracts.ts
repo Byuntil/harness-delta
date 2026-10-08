@@ -52,9 +52,12 @@ export const PriceTableSchema = z.strictObject({
   display_decimals: z.number().int().min(0).max(12), rounding: z.literal('half_even'),
   entries: z.array(z.strictObject({ product: productSchema, model: ModelSchema,
     component: BillingComponentSchema.shape.kind,
+    prompt_tier: z.enum(['up_to_100000', 'over_100000']).optional(),
     price_per_unit: MonetaryAmountSchema.refine(value => value.replace('.', '').length <= 60),
   })).min(1).max(4096),
-}).refine(value => new Set(value.entries.map(e => `${e.product}:${e.model}:${e.component}`)).size === value.entries.length);
+}).refine(value => new Set(value.entries.map(e => `${e.product}:${e.model}:${e.component}:${e.prompt_tier ?? 'flat'}`)).size === value.entries.length)
+  .refine(value => value.entries.every(entry => entry.prompt_tier === undefined || entry.product === 'claude_code' && entry.model === 'claude-haiku-5-5'))
+  .refine(value => value.entries.every(entry => entry.prompt_tier === undefined || !value.entries.some(other => other.product === entry.product && other.model === entry.model && other.component === entry.component && other.prompt_tier === undefined)));
 export const CostReasonSchema = z.enum(['unknown_model', 'unknown_attribution', 'unknown_components', 'unpriced_component',
   'missing_value', 'unsupported_profile', 'scope_mismatch', 'incomplete', 'invalidated', 'followup_pending',
   'source_unverified', 'analysis_unverified', 'price_conflict', 'quality_missing']);

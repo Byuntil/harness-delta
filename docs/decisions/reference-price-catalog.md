@@ -43,6 +43,108 @@ Reasoning tokens are included in output, never charged twice. See
 [Anthropic thinking cost](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost).
 Unsupported modifiers or unknown token readings cannot be inferred from the catalog.
 
+## October 2026 catalog update
+
+The separate [2026-10-08 catalog](../../config/prices/catalogs/reference-catalog-2026-10-08.json)
+is `reference-catalog-2026-10-08`, catalog version **2**, under the new
+`reference-standard-request-tiers-v2` policy and schema version 2. It has eight
+priced models and the existing Haiku 4.5 alias. Schema/policy v1 remains supported.
+The bootstrap remains the original 2026-10-06 v1 catalog. Local preparation does
+not publish it or refresh a database. Accepted updates never change a frozen price pin.
+
+The [official Haiku 5.5 announcement](https://www.anthropic.com/claude-haiku-5-5)
+is dated **2026-10-07** and states availability and the Sonnet 5.5 cache-read cut
+start that day. The [official model overview](https://platform.claude.com/docs/en/models/haiku-5-5/overview)
+confirms the literal Claude API ID `claude-haiku-5-5` and release date. It is a pinned
+[dateless model ID](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions),
+not a fabricated dated alias. No additional alias is added.
+The [official pricing document](https://platform.claude.com/docs/en/about-claude/pricing)
+and model overview were checked on **2026-10-08 UTC**. All following rates are
+USD per **1,000,000 tokens**, for first-party global Standard:
+
+| Model / prompt length | Ordinary input | Output | Cache read | Cache write, 5 minutes | Cache write, 1 hour |
+| --- | --- | --- | --- | --- | --- |
+| Haiku 5.5, up to and including 100,000 tokens | 0.10 | 0.50 | 0.01 | 0.125 | 0.20 |
+| Haiku 5.5, over 100,000 tokens | 0.50 | 2.50 | 0.05 | 0.625 | 1.00 |
+| Sonnet 5.5 | 2.00 | 10.00 | 0.10 | 2.50 | 4.00 |
+
+The update changes Sonnet 5.5 `cache_read` from `0.2` to `0.1`; its other
+reference rates are unchanged. One-hour writes are verified above but excluded
+from the existing five-minute policy. Unchanged rows retain their original
+2026-10-06 verification dates; this focused update does not claim to reverify
+OpenAI or other Anthropic entries.
+
+Haiku 5.5 chooses one rate set for the whole request, including its output.
+`up_to_100000` covers 0 through 100,000 prompt tokens; `over_100000` starts at
+100,001. It is not progressive pricing of the excess tokens. The
+[official caching contract](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+defines total input as ordinary input plus cache-read input plus cache-creation
+input. Output and reasoning tokens do not enter that prompt-length threshold.
+
+The catalog's `prompt_tiers` compiles into conditional table entries with
+`prompt_tier`. Matching version `exact-catalog-request-tiers-v2` binds the policy,
+rates and predicates into the immutable basis hash. The arithmetic remains
+`decimal160-disjoint-v1`; only rate selection changes. Flat v1 catalogs compile to
+their original bytes, table IDs and `exact-catalog-v1` matching behavior.
+
+Automatic selection requires a V2 event with verified attribution and its linked
+runtime evidence: matching task, session, model, product/version and occurrence
+stamp, a non-null unique request ID, `boundary: request`, and a source other than
+`self_attested`. All three disjoint input components, cached-input summary and full
+input total must be observed, consistent and within safe integer bounds. A
+session/turn total, ordinary input alone, missing cache count, conflicting identity
+or absent evidence leaves every affected Haiku rate `unverified_condition`.
+Measured zero remains zero; missing values are never filled. Independently eligible
+requests can still contribute a partial amount, with `complete_amount: null`.
+
+Existing Claude trace projections already retain request identity and the three
+input components; legacy V1 transcript messages do not prove that request boundary.
+This change reads stored metadata only and does not read extra session content,
+admit a new collector/version or improve usage completeness. The five-minute cache
+write remains an explicit reference condition, not a claim about actual TTL/billing.
+When the existing Claude binding parser observes positive one-hour cache creation,
+it preserves `cache_write_1h_observed: true` with the observed aggregate counters.
+Catalog matching and direct table arithmetic leave that request's entire cache-write
+component unpriced, including mixed five-minute/one-hour writes. Other eligible
+components remain partial; all observed write tokens still enter Haiku's prompt
+threshold. Conflicting request rows with different one-hour evidence are rejected.
+The flag survives frozen cost inputs and repricing. No one-hour rate is guessed or
+activated, and previously frozen inputs/results are not rewritten. TTL absence
+still means an explicit five-minute reference estimate, not verified actual TTL.
+
+Task, binding and frozen comparison projections pass eligible runtime evidence to
+the same selector. New retained cost inputs with such evidence use snapshot schema
+2 and freeze the linked runtime metadata and conflicting request aliases with their
+original usage/window. Freezing never removes a known request-identity conflict. Old
+schema 1 inputs remain readable and unavailable for tier-dependent pricing if they
+lack evidence; repricing never backfills runtime metadata from the live database.
+Previously stored reports, inputs and revaluations are not rewritten.
+
+Upgraded clients can consume schema/policy v2. Older clients reject the unsupported
+catalog/manifest and retain cached v1 prices; installing the updated client precedes
+an explicit accepted refresh. Bootstrap remains v1; an explicit accepted refresh selects the updated catalog.
+
+Neither official source supplies an exact effective clock time/timezone. Both
+changed/new rows retain null `effective_from`/`effective_until`; the documented
+vendor date does not authorize an invented midnight effective timestamp. Catalog
+`verified_at`/`published_at` midnight values represent the verification day snapshot,
+not an exact public-release clock time. Reconfirm publication
+metadata before publishing on a later date; never replace bytes under an accepted ID.
+The prior public v1 manifest and catalog were downloaded on 2026-10-08 and matched
+the repository's 3,476-byte file, SHA-256
+`ae7f1aefab3b78f87bf9259b68b29882edc498b305831e3c2b3146f0968adf24`.
+
+Prepare the release assets locally after a build:
+
+```sh
+node scripts/prepare-price-catalog-release.mjs config/prices/catalogs/reference-catalog-2026-10-08.json .harness-delta/catalog-release-v2-request-tiers
+```
+
+The release tag is `reference-prices-2026-10-08-v2`. Publication binds the exact
+reviewed commit, manifest and digest-named catalog assets.
+The existing v1 release, bootstrap, stored tables and measured results remain
+unchanged; only an explicit accepted refresh can select v2 for future preparation.
+
 ## Distribution, update and pin
 
 The bootstrap ships in `dist/catalogs`; a local database retains the last accepted
@@ -145,7 +247,7 @@ User procedure: [English](../runbooks/reference-price-catalog.md)
 ([한국어](../runbooks/reference-price-catalog.ko.md)). Synthetic verification:
 
 ```sh
-npm test -- tests/price-catalog.test.ts tests/price-catalog-store.test.ts tests/price-catalog-selection.test.ts tests/price-catalog-cli.test.ts tests/price-catalog-online.test.ts tests/catalog-cost-report.test.ts tests/price-revaluation.test.ts
+npm test -- tests/price-catalog.test.ts tests/price-catalog-store.test.ts tests/price-catalog-selection.test.ts tests/price-catalog-cli.test.ts tests/price-catalog-online.test.ts tests/catalog-cost-report.test.ts tests/price-revaluation.test.ts tests/reference-price-update.test.ts tests/haiku-request-pricing.test.ts
 ```
 
 These checks cover catalog identity, cache retention, exact matching, frozen pins,

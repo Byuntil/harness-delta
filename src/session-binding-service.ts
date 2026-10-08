@@ -214,8 +214,8 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     };
     const summarize=(events:UsageEvent[])=>{
       const priced=capture?(tableId&&store.get('SELECT price_table_id FROM price_catalog_bases WHERE price_table_id=?',[tableId])?
-        projectCatalogCost(events,readPriceBasis(store,tableId),taskId,clock(),'output-only-v1'):
-        projectObservedCost(events,capture.report.price_table,taskId,clock(),'output-only-v1')):null;
+        projectCatalogCost(events,readPriceBasis(store,tableId),taskId,clock(),'output-only-v1',{referenceBinding:true,runtimeEvidence:capture.runtimeEvidence}):
+        projectObservedCost(events,capture.report.price_table,taskId,clock(),'output-only-v1',capture.runtimeEvidence)):null;
       return {requests:events.length||null,input_total:total(events,'input_total'),output_total:total(events,'output_total'),
         partial_amount:priced?.partial_amount??null,unpriced_events:priced?.unpriced_events??0,
         currency:priced?.currency??null,price_table_id:tableId,cost_coverage:'partial' as const,complete_cost:null};
