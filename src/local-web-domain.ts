@@ -95,13 +95,17 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     CREATE TABLE IF NOT EXISTS web_sources(handle TEXT PRIMARY KEY,task_id TEXT NOT NULL,payload TEXT NOT NULL)`);
   const jobs = new Map<string, Job>(); const picker = options.picker ?? nativeLocalPicker;
   const saveProfiles = (inputs: LocalWebProfile[]) => privateDb.transaction(() => {
+    let addedCount = 0; let existingCount = 0;
     for (const input of inputs) {
       const profile = LocalWebProfileSchema.parse(input);
       // Replacing an existing definition would silently change a user's setup.
       const old = privateDb.prepare('SELECT payload FROM web_profiles WHERE id=?').get(profile.id) as { payload: string } | undefined;
       if (old && old.payload !== JSON.stringify(profile)) throw new Error('ui_setup_conflict');
-      privateDb.prepare('INSERT OR IGNORE INTO web_profiles(id,payload) VALUES (?,?)').run(profile.id, JSON.stringify(profile));
+      const saved = privateDb.prepare('INSERT OR IGNORE INTO web_profiles(id,payload) VALUES (?,?)').run(profile.id, JSON.stringify(profile));
+      addedCount += saved.changes;
+      if (saved.changes === 0) existingCount++;
     }
+    return { addedCount, existingCount };
   })();
   saveProfiles(options.profiles ?? []);
   const profiles = () => (privateDb.prepare('SELECT payload FROM web_profiles ORDER BY rowid').all() as { payload: string }[]).map(p => LocalWebProfileSchema.parse(JSON.parse(p.payload) as unknown));
@@ -272,7 +276,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     async chooseDirectory() { if(options.nativePilot)throw new Error('binding_pilot_control_only');
       if(options.qualificationLease)throw new Error('binding_qualification_control_only'); return picker('project'); },
     async importSetup() { if(options.nativePilot)throw new Error('binding_pilot_control_only');
-      if(options.qualificationLease)throw new Error('binding_qualification_control_only'); const path = await picker('setup'); if (path === null) return { cancelled: true }; saveProfiles(readLocalWebManifest(path).profiles); return { imported: true }; },
+      if(options.qualificationLease)throw new Error('binding_qualification_control_only'); const path = await picker('setup'); if (path === null) return { cancelled: true }; const saved = saveProfiles(readLocalWebManifest(path).profiles); return { imported: true, added_count: saved.addedCount, existing_count: saved.existingCount }; },
     async chooseSession(taskId) {
       if(options.nativePilot)throw new Error('binding_pilot_control_only');
       if(options.qualificationLease)throw new Error('binding_qualification_control_only');

@@ -24,14 +24,14 @@ Open the printed `http://127.0.0.1:4318` address. `--port` changes only the loca
 port; no host option exists. Stop the local service with Ctrl+C. Its collectors
 settle and active measurement pauses; the external AI remains under your control.
 
-## Reuse reviewed settings
+## Measurement criteria for tasks
 
 In **Setup**, select a project directory. Registration reads Git HEAD and does not
 create a repository or commit. The code baseline is read again when preparing a
 new task. Uncommitted edits are preserved; HEAD identifies the committed baseline,
 not a snapshot of uncommitted files.
 
-Choose an existing reviewed UI setup file, or pass it through `--setup`. The
+Select **Import settings file**, or pass the reviewed file through `--setup`. The
 private manifest has `schema_version: 1` and `profiles`, each with `id`, `name`,
 `setup`, and `execution`. `setup` uses the shared `ExternalTaskSetupSchema`;
 `execution` contains the reviewed binary, Codex home, recorder, sandbox, timeout,
@@ -45,9 +45,53 @@ completion criteria, or source admission. Unsupported type/size choices stay
 disabled. The form offers feature/fix/infra/chore/docs/ci and small/medium/large.
 Model and effort remain flexible choices in your native agent.
 
+The **Measurement criteria for tasks** section groups those inputs for reuse in
+new tasks. Cards show the project, harness A/B and allowed task types and sizes.
+Choose matching criteria in **New task**; the file does not grant collection access.
+A new or mixed import shows **Reviewed setup connected.** An identical repeat
+shows **This setup is already connected.** It creates no duplicate settings or
+tasks. A same-ID content conflict rejects the whole file and preserves existing
+settings. Cancelling the picker leaves settings unchanged.
+
+### Prepare a settings file
+
+The UI imports existing files; it has no file creation or editing form.
+
+1. Follow steps 3–4 of the [workflow quickstart](workflow-quickstart.md) to
+   register the reviewed project, price table, A/B variants and schema-2 protocol,
+   then freeze the protocol in the same measurement database. Replace synthetic
+   example choices before registration. Writing a settings file does not create
+   those registrations.
+2. In a text editor, create a private JSON manifest with `schema_version: 1` and
+   `profiles`. Give each profile a unique `id` and recognizable `name`. Put the
+   reviewed workflow input in `setup.workflow`, runtime input in `setup.runtime`,
+   and preparation spec in `setup.preparation`. For the manual CLI handoff,
+   include the reviewed `setup.native_binary` described in the
+   [external workflow](external-session-workflow.md). Use your accepted inputs;
+   do not infer criteria, protocol or price defaults.
+3. Put only `binary`, `codex_home`, `hook_recorder`, `sandbox`, `timeout_ms`
+   and `poll_ms` from the reviewed execution input in `execution`. Do not copy
+   an entire launch/session input. Optional session binding must match the
+   [UI manifest schema](../../src/local-web-domain.ts). Keep the file private.
+4. After building, check its structure with the loader below, then select
+   **Import settings file**. This check reads the selected file only; it does not
+   register dependencies, launch an agent or qualify collection support.
+
+```sh
+node --input-type=module <<'JS'
+import { readLocalWebManifest } from './dist/local-web-domain.js';
+readLocalWebManifest('reviewed-ui-setup.json');
+console.log('Setup file structure is valid.');
+JS
+```
+
+Expected: **Setup file structure is valid.** Registration references and source
+gates remain separate checks when choosing and preparing a task.
+
 ## Prepare, connect and observe
 
-1. In **Tasks**, select **New task**. Enter a recognizable name, project and setup.
+1. In **Tasks**, select **New task**. Enter a recognizable name and project, then
+   select **Measurement criteria for tasks**.
    Optional settings contain type, size and the automatically read baseline.
 2. Select **Prepare measurement**. The task is registered and automatically
    assigned to A/B. Internal IDs are generated; no observation interval starts.
