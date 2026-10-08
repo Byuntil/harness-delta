@@ -145,20 +145,21 @@ reviewed commit, manifest and digest-named catalog assets.
 The existing v1 release, bootstrap, stored tables and measured results remain
 unchanged; only an explicit accepted refresh can select v2 for future preparation.
 
-## Observed cache TTL candidate (v3)
+## Observed cache TTL (v3)
 
-The local [v3 candidate](../../config/prices/catalogs/reference-catalog-2026-10-08-v3.json)
+The [v3 catalog](../../config/prices/catalogs/reference-catalog-2026-10-08-v3.json)
 uses schema/catalog version 3, ID `reference-catalog-2026-10-08-cache-ttl`, policy
 `reference-standard-observed-cache-ttl-v3` and matching version
-`exact-catalog-observed-cache-ttl-v3`. It is not published by this change. Bootstrap
-remains v1; no default, frozen pin, stored input or result is changed automatically.
+`exact-catalog-observed-cache-ttl-v3`. The
+[reference-prices-2026-10-08-v3 release](https://github.com/Qello-Labs/harness-delta/releases/tag/reference-prices-2026-10-08-v3)
+distributes the manifest and digest-named catalog. Bootstrap remains v1; no default, frozen pin, stored input or result is changed automatically.
 Every release from v3 follows the [release checklist](../development/price-catalog-releases.md).
 
 [Official pricing](https://platform.claude.com/docs/en/about-claude/pricing) and
 [cache usage semantics](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 were checked on **2026-10-08 UTC**. The first-party global Standard 1-hour write
 rates per million tokens are Fable 5.1 `20`, Opus 5.5 `8`, Sonnet 5.5 `4`, Haiku 4.5
-`2`, and Haiku 5.5 `0.2`/`1` for its existing whole-request tiers. The candidate
+`2`, and Haiku 5.5 `0.2`/`1` for its existing whole-request tiers. The catalog
 retains v2 rates otherwise and the same OpenAI short-context reference conditions.
 Anthropic row verification dates advance to this check date; OpenAI dates do not.
 Unknown exact effective times remain null. These are reference prices, not billing
@@ -205,8 +206,10 @@ no TTL object keep their old fingerprints. Replaying different evidence conflict
 instead of upgrading a previous observation silently.
 
 Minimum client capability is `catalog-cache-ttl-v3` (the client containing this
-schema/policy, table and usage extension). The future release notes must name its
-exact reviewed commit; package `0.0.0` is not a meaningful minimum semantic version.
+schema/policy, table and usage extension), implemented in reviewed commit
+`c7ee96fc80d3e9046f476200c44b834aae45246e` and merged as
+`62f3841f79bb37c9b3b4e49dc78ce893109063e4`. Release notes identify the exact
+publication commit and its passing CI; package `0.0.0` is not a meaningful minimum semantic version.
 V1/v2 clients reject the v3 manifest policy/catalog schema and retain accepted
 prices. They may reject new optional usage metadata too; do not downgrade a
 database after writing it. The manifest envelope remains schema 1 with the new

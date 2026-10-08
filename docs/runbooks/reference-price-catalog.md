@@ -37,9 +37,12 @@ prices when they reject the unsupported schema/policy.
 An explicit trusted artifact or online refresh can accept v2
 for future defaults. Existing comparisons and results retain their original pins.
 
-The repository also contains an **unpublished v3 candidate** with separate 5-minute
-and 1-hour write rates. It requires a client with `catalog-cache-ttl-v3` support;
-future release notes must identify the exact reviewed client commit. V1/v2 clients
+The [v3 release](https://github.com/Qello-Labs/harness-delta/releases/tag/reference-prices-2026-10-08-v3)
+contains separate 5-minute and 1-hour write rates. It requires a client with
+`catalog-cache-ttl-v3` support, implemented in reviewed commit
+`c7ee96fc80d3e9046f476200c44b834aae45246e` and merged as
+`62f3841f79bb37c9b3b4e49dc78ce893109063e4`; release notes identify the exact
+publication commit and its passing CI. V1/v2 clients
 reject it and retain accepted prices. Do not downgrade a database after new TTL
 metadata has been written. The bootstrap and existing pins stay unchanged.
 New Claude observations with explicit, consistent TTL counts can price both
@@ -49,7 +52,7 @@ observations without those counts have the same exclusion. Other matched compone
 can remain partial. `matches[].cache_ttl` explains each matched duration;
 `unverified_condition` means missing/invalid TTL or required request evidence,
 while `missing_rate` means no rate for an observed condition. See the
-[v3 support limits](../decisions/reference-price-catalog.md#observed-cache-ttl-candidate-v3).
+[v3 support limits](../decisions/reference-price-catalog.md#observed-cache-ttl-v3).
 
 The UI shows partial amounts and separate source/compatibility unverified references.
 An unpriced-usage notice can include excluded cache writes even when their tokens
