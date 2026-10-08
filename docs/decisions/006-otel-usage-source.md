@@ -183,8 +183,12 @@ primary Codex usage candidate instead; see the
    - A process can report several session IDs, for example after `/clear`.
      A new `session.id` arriving under the same token, in sequence order, stays
      linked to the run.
-   - Nested product processes do not inherit the exporter settings. Their usage
-     is recorded as missing, never as zero.
+   - Nested product processes do not inherit the `OTEL_EXPORTER_OTLP_*`
+     destinations or the credential. Their usage is recorded as missing, never as
+     zero. They can inherit the enable setting and beta tracing settings; their
+     own configuration can name another export destination. An export that reaches
+     this receiver without its credential is rejected before decoding. See
+     [Launch settings](#launch-settings-follow-up-3) and R08 for this limitation.
    - Linking by run changes what R01 calls a linked session. R01 now records
      this wording.
 3. **Supported sessions.**

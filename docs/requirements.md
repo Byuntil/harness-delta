@@ -154,7 +154,14 @@ forwards nothing to any other destination, and stops accepting data when the
 credential is revoked at pause, finalization, or deletion. The CLI enables product
 telemetry only through per-invocation settings of the launched process, points
 every exporter it can configure at that receiver or turns it off, and never edits
-global, user, or project configuration.
+global, user, or project configuration. A product can pass its telemetry enable
+setting and some tracing settings, but not its `OTEL_EXPORTER_OTLP_*` exporter
+destinations or the receiver credential, to processes it starts. A nested
+product process can therefore export to a destination named by its own
+configuration; an export that reaches the receiver without the credential is
+rejected before decoding. This is a known limitation: the CLI does not configure,
+accept, or measure that export, and the nested process's usage remains missing.
+See the bounded [launch-settings evidence](decisions/006-otel-usage-source.md#launch-settings-follow-up-3).
 
 Acceptance: unauthorized reads/writes/deletes fail, retries remain idempotent, and
 central failure does not block local measurement.
