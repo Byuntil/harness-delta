@@ -115,7 +115,7 @@ test('confirmation linkage is explicit and cannot attach another task session or
     expect(() => bindConfigurationToSession(store, 'confirmation-1', 'other-session')).toThrow('scope_mismatch');
     expect(configurationHistory(store, 'task-1').confirmations[0]).toMatchObject({ session_ids: ['session-1'] });
     expect(() => store.execute('UPDATE comparison_confirmations SET payload = ? WHERE id = ?', ['{}', 'confirmation-1'])).toThrow('immutable_comparison_confirmation');
-    expect(() => life.linkSession('task-1', 'real-source', '/synthetic/not-read', 'codex', '0.159.0')).toThrow('unsupported');
+    expect(() => life.linkSession('task-1', 'real-source', '/synthetic/not-read', 'codex', '0.164.0')).toThrow('unsupported');
     expect(() => confirmConfiguration(store, { ...confirmation, id: 'private', prompt: 'PRIVATE_SENTINEL' }, assignmentTime)).toThrow(/^invalid_comparison_input$/);
     expect(() => confirmConfiguration(store, { ...confirmation, id: 'backdated', occurred_at: beforeRecruitment }, assignmentTime)).toThrow('invalid_confirmation_time');
     expect(() => confirmConfiguration(store, { ...confirmation, id: 'future', occurred_at: '2026-01-01T01:00:00Z' }, assignmentTime)).toThrow('invalid_confirmation_time');

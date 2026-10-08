@@ -1,3 +1,4 @@
+import { resolveSourceCompatibility, pinSessionCompatibility, invalidateCompatibility } from './source-compatibility.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { IdSchema, TimestampSchema } from './contracts.js';
 import { authorizeClaudeTraceScope, ingestClaudeTraceBatch, type ClaudeTraceBatchResult } from './claude-trace-candidate.js';
@@ -94,6 +95,7 @@ export class ClaudeProbeCoordinator {
   private rootRequests = 0;
   private childRequests = 0;
   private lastVerifiedAt: string | null = null;
+  private get compatibility(){return this.options.workflow&&!this.options.workflow.synthetic?resolveSourceCompatibility('claude_code',this.productVersion,'claude_workflow'):null;}
   private get productVersion(): ClaudeTraceProductVersion { return this.options.productVersion ?? claudeProbeProductVersion; }
   constructor(private readonly store: Store, private readonly options: ClaudeProbeOptions) {
     if (options.rootScope.sessions.length !== 1 || !IdSchema.safeParse(options.child.sessionId).success ||
@@ -112,7 +114,11 @@ export class ClaudeProbeCoordinator {
     // A non-synthetic root session must already carry the launched binary's version.
     if (!options.workflow?.synthetic && store.get<{ product_version: string | null }>('SELECT product_version FROM sessions WHERE id=?',
       [options.rootScope.sessions[0]!.sessionId])?.product_version !== (options.productVersion ?? claudeProbeProductVersion)) fail('claude_probe_invalid_options');
-    this.scope = authorizeClaudeTraceScope(store, options.rootScope, options.generation, options.workflow?.synthetic);
+    if(this.compatibility){
+      if(this.compatibility.state==='compatibility_unverified'&&options.workflow?.childEnabled)fail('claude_probe_invalid_options');
+      pinSessionCompatibility(store,options.rootScope.sessions[0]!.sessionId,this.compatibility);
+    }
+    this.scope = authorizeClaudeTraceScope(store, options.rootScope, options.generation, options.workflow?.synthetic,this.compatibility??undefined);
     this.options = { ...options, child: { ...options.child }, rootScope: this.scope, ...(options.workflow ? {workflow:{...options.workflow,...(options.workflow.childRuntime ? {childRuntime:{...options.workflow.childRuntime}} : {})}} : {}) };
   }
   exporterHeaders(): Readonly<Record<string, string>> { return { 'x-harness-delta-token': this.token }; }
@@ -131,7 +137,7 @@ export class ClaudeProbeCoordinator {
   private authorize(token: string): void {
     if (!timingSafeEqual(hash(token), this.tokenDigest)) fail('claude_probe_unauthorized');
     if (this.revoked) fail('claude_probe_revoked');
-    try { this.options.workflow?.assertActive(); authorizeClaudeTraceScope(this.store, this.scope, this.options.generation, this.options.workflow?.synthetic); }
+    try { this.options.workflow?.assertActive(); authorizeClaudeTraceScope(this.store, this.scope, this.options.generation, this.options.workflow?.synthetic,this.compatibility??undefined); }
     catch { this.revoked = true; fail('claude_trace_scope_revoked'); }
     const now = this.options.clock();
     if (!TimestampSchema.safeParse(now).success || Date.parse(now) < Date.parse(this.options.startedAt) ||
@@ -140,11 +146,12 @@ export class ClaudeProbeCoordinator {
   private read(token: string, callback: () => unknown): unknown {
     this.authorize(token);
     let value: unknown;
-    try { value = callback(); } catch { this.stop('claude_probe_source_error', 'source_error'); }
+    try { value = callback(); } catch (error) { this.stop(error instanceof SyntaxError?'claude_probe_invalid_json':'claude_probe_source_error', 'source_error'); }
     this.authorize(token); return value;
   }
   private stop(code: string, reason: 'source_error' | 'scope_mismatch' | 'unknown_parent' | 'incomplete' = 'scope_mismatch'): never {
     this.revoked = true;
+    if(this.compatibility?.state==='compatibility_unverified'&&!['claude_probe_deadline','claude_probe_source_error','claude_probe_reservation_failed','claude_probe_request_boundary','claude_probe_log_limit','claude_probe_child_limit'].includes(code))invalidateCompatibility(this.store,this.compatibility,'contract_failed');
     try {
       const root = this.scope.sessions[0]!; const at = this.options.clock();
       recordObservationGap(this.store, this.scope.taskId, root.sessionId, this.options.workflow && this.lastVerifiedAt !== null ? new Date(Math.min(Date.parse(at),Date.parse(this.lastVerifiedAt)+1)).toISOString() : this.options.startedAt, at, reason, at);
@@ -198,7 +205,8 @@ export class ClaudeProbeCoordinator {
           this.authorize(token);
           this.store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,product,product_version) VALUES (?,?,?,?,?,?)',
             [child.sessionId, this.scope.projectId, this.scope.taskId, root.sessionId, this.options.workflow?.synthetic ? 'synthetic' : 'claude_code', this.options.workflow?.synthetic ? '1.0.0' : this.productVersion]);
-          authorizeClaudeTraceScope(this.store, next, this.options.generation, this.options.workflow?.synthetic);
+          if(this.compatibility)pinSessionCompatibility(this.store,child.sessionId,this.compatibility);
+          authorizeClaudeTraceScope(this.store, next, this.options.generation, this.options.workflow?.synthetic,this.compatibility??undefined);
           this.options.workflow?.onChildBound(child.sessionId);
         });
       } catch { this.stop('claude_probe_child_scope', 'unknown_parent'); }
@@ -282,7 +290,7 @@ export class ClaudeProbeCoordinator {
       ({ result, inserted } = this.store.immediateTransaction(() => {
         const before = this.store.get<{ last: number }>('SELECT coalesce(max(rowid),0) AS last FROM events')!.last;
         const result = ingestClaudeTraceBatch(this.store, this.scope, () => raw, {
-          startedAt: this.options.workflow?.observationStartedAt?.()??this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic, productVersion: this.productVersion,
+          startedAt: this.options.workflow?.observationStartedAt?.()??this.options.startedAt, receivedAt: this.options.clock(), generation: this.options.generation, synthetic:this.options.workflow?.synthetic, productVersion: this.productVersion, compatibility:this.compatibility??undefined,
           ...(this.options.workflow && this.lastVerifiedAt!==null ? {lossStartedAt:new Date(Math.min(Date.parse(this.options.clock()),Date.parse(this.lastVerifiedAt)+1)).toISOString()} : {}),
         });
         // Count only rows this batch actually inserted while holding the writer

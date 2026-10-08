@@ -13,7 +13,7 @@ import { compiledWorker } from './helpers/compiled-worker.js';
 function fixture(script = 'process.exit(0);', durationMs = 5000, version = '2.1.288') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'claude-supervisor-'))); const cwd = join(root, 'fixture'); mkdirSync(cwd);
   const workspace = join(root, 'ledger'); mkdirSync(workspace); const compiled = compiledWorker(root);
-  const binary = join(root, 'synthetic-product'); const bytes = `#!${process.execPath}\n${script}\n`; writeFileSync(binary, bytes, { mode: 0o700 });
+  const binary = join(root, 'synthetic-product'); const bytes = `#!${process.execPath}\nif(process.argv.includes('--version')){console.log(${JSON.stringify(version+' (Claude Code)')});process.exit(0); }\n${script}\n`; writeFileSync(binary, bytes, { mode: 0o700 });
   const store = new Store(':memory:');
   store.execute('INSERT INTO projects(id,local_root) VALUES (?,?)', ['project-1', cwd]);
   store.execute("INSERT INTO tasks(id,project_id,state) VALUES ('task-1','project-1','active')", []);

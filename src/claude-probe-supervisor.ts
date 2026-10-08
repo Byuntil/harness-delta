@@ -1,13 +1,13 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, readdirSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, readdirSync, statSync } from 'node:fs';
 import { ClaudeProbeCoordinator } from './claude-probe-coordinator.js';
 import { prepareClaudeNativeProbe, reserveClaudeProbeAction } from './claude-native-probe.js';
 import type { ClaudeNativeProbeOptions, ClaudeWorkflowInvocation } from './claude-native-probe.js';
 import { prepareClaudeProbeHookMediator } from './claude-probe-hook-mediator.js';
 import { startClaudeProbeGateway, type ClaudeProbeStopDiagnostic } from './claude-probe-gateway.js';
-import type { CandidateScope, ClaudeTraceProductVersion } from './nested-candidate.js';
-import { claudeProbeProductVersion, claudeWorkflowProductVersions } from './claude-workflow-versions.js';
+import type { CandidateScope } from './nested-candidate.js';
+import { claudeProbeProductVersion, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 import { utcNow } from './lifecycle.js';
 import type { Store } from './store.js';
 
@@ -46,9 +46,11 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
   const durationMs = options.durationMs ?? 120000;
   if (process.platform === 'win32' || Number(process.versions.node.split('.')[0]) !== 24 ||
       !Number.isSafeInteger(durationMs) || durationMs < 1 || durationMs > (options.workflow ? 3600000 : 120000)) throw new Error('claude_probe_invalid_supervisor');
-  const versions = options.workflow ? claudeWorkflowProductVersions : [claudeProbeProductVersion];
+  if(options.workflow&&!isClaudeWorkflowProductVersion(options.binary.version))throw new Error('claude_probe_executable_mismatch');
+  const versions = options.workflow ? [options.binary.version] : [claudeProbeProductVersion];
   verifyClaudeProbeBinary(options.binary, versions);
-  const productVersion = options.binary.version as ClaudeTraceProductVersion;
+  if(options.workflow&&!options.workflow.synthetic)verifyClaudeWorkflowVersion(options.binary,options.workspace);
+  const productVersion = options.binary.version;
   const cwd = realpathSync(options.cwd);
   const root = options.rootScope.sessions[0];
   if (cwd !== options.cwd || (!options.workflow && readdirSync(cwd).length !== 0) || !root || options.rootScope.sessions.length !== 1 ||
@@ -81,6 +83,8 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
   const run = async () => {
     if (reserved) throw new Error('claude_probe_already_reserved');
     verifyClaudeProbeBinary(options.binary, versions);
+  if(options.workflow&&!options.workflow.synthetic)verifyClaudeWorkflowVersion(options.binary,options.workspace);
+    const binaryIdentity=claudeBinaryIdentity(options.binary.path);
     coordinator.authorizeRequest(token);
     if (disposed || realpathSync(options.cwd) !== cwd || (!options.workflow && readdirSync(cwd).length !== 0) || Date.now() >= until) throw new Error('claude_probe_deadline');
     reserveClaudeProbeAction(options.workspace, 'launch', root.processId!); reserved = true;
@@ -99,6 +103,8 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
         const stopped = () => { group('SIGKILL'); finish(stopReason === 'claude_probe_deadline' ? 'timed_out' : 'stopped', null); };
         const scopeTimer = setInterval(() => {
           if (!options.workflow) return;
+          try{if(claudeBinaryIdentity(options.binary.path)!==binaryIdentity)throw new Error('changed');}
+          catch{stopReason='claude_probe_executable_mismatch';abort.abort();return;}
           try { options.workflow.assertActive(); if(options.workflow.stopRequested()){stopReason='stop_requested';abort.abort();} }
           catch {stopReason='workflow_scope_revoked';abort.abort();}
         },25);
@@ -121,4 +127,17 @@ export async function prepareClaudeProbeSupervisor(input: ClaudeProbeSupervisorO
     } finally { await dispose(); }
   };
   return { manifest: prepared.manifest, manifestPath: prepared.manifestPath, run, dispose };
+}
+
+/** Verify the declaration against the hashed executable with isolated home state. */
+export function verifyClaudeWorkflowVersion(binary:ClaudeNativeProbeOptions['binary'],home:string):void {
+  verifyClaudeProbeBinary(binary,[binary.version]);
+  const result=spawnSync(binary.path,['--version'],{encoding:'utf8',timeout:10000,maxBuffer:4096,env:{PATH:process.env.PATH??'',HOME:home,CLAUDE_CONFIG_DIR:home},stdio:['ignore','pipe','ignore']});
+  if(result.error||result.status!==0||result.stdout.trim()!==`${binary.version} (Claude Code)`)throw new Error('claude_probe_executable_mismatch');
+  verifyClaudeProbeBinary(binary,[binary.version]);
+}
+
+function claudeBinaryIdentity(path:string):string {
+  if(realpathSync(path)!==path)throw new Error('claude_probe_executable_mismatch');
+  const st=statSync(path,{bigint:true});return [st.dev,st.ino,st.size,st.mtimeNs,st.ctimeNs].join(':');
 }

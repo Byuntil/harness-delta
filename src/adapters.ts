@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { addTokens, IdSchema, ModelSchema, TimestampSchema, TokenSchema, type Event, type Reading } from './contracts.js';
-import { lookupFileProfile, type ClaudeRegisteredProfile, type CodexRegisteredProfile } from './adapter-profiles.js';
+import { type ClaudeRegisteredProfile, type CodexRegisteredProfile } from './adapter-profiles.js';
+import { lookupCompatibleFileProfile } from './source-compatibility.js';
+import type { SourceCompatibility } from './contracts.js';
 
 export interface SourceScope { sessionId: string; projectRoot: string; product: 'codex' | 'claude_code'; version: string }
 export interface SourceRecord { key: string; at: string; turnStartedAt: string | null; toolCallIds?: string[]; inputComponents?: readonly [number, number, number]; payload: Event['payload'] }
@@ -42,8 +44,8 @@ function remember(records: Map<string, SourceRecord>, record: SourceRecord): voi
 }
 
 /** Only metadata leaves are retained. Raw JSON and tool arguments never escape. */
-export function parseSnapshot(text: string, scope: SourceScope): Snapshot {
-  const profile = lookupFileProfile(scope.product, scope.version);
+export function parseSnapshot(text: string, scope: SourceScope, compatibility?: SourceCompatibility): Snapshot {
+  const profile = lookupCompatibleFileProfile(scope.product, scope.version, compatibility);
   if (profile === 'unsupported') throw new Error('unsupported');
   if (profile.product === 'codex') return parseCodex(text, scope, profile);
   return parseClaude(text, scope, profile);

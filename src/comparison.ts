@@ -40,7 +40,7 @@ export function registerProtocol(store: Store, input: unknown): void {
     }
     // New real-source protocols may name only the newest admitted Claude workflow version;
     // a registered protocol keeps its version until that version is retired (ADR 007 exact admission).
-    if (config.schema_version === 2 && config.purpose !== 'synthetic_validation') requireLatestClaudeWorkflowProfile(config.source_profiles ?? []);
+    if (config.schema_version === 2 && config.purpose !== 'synthetic_validation') requireLatestClaudeWorkflowProfile(config.source_profiles ?? [],undefined,config.purpose==='functional_pilot');
     store.execute('INSERT INTO comparison_protocols(id,project_id,settings) VALUES (?,?,?)', [config.id, config.project_id, serialized]);
   });
 }

@@ -5,10 +5,11 @@ import { z } from 'zod';
 import { IdSchema, ModelSchema } from './contracts.js';
 import { bindConfigurationToSession } from './config-confirmation.js';
 import { authorizeClaudeTraceScope } from './claude-trace-candidate.js';
-import { prepareClaudeProbeSupervisor, verifyClaudeProbeBinary } from './claude-probe-supervisor.js';
+import { prepareClaudeProbeSupervisor, verifyClaudeProbeBinary, verifyClaudeWorkflowVersion } from './claude-probe-supervisor.js';
 import { recordAbandonedRunGap, recordObservationGap } from './runtime-history.js';
 import type { CandidateScope } from './nested-candidate.js';
-import { claudeWorkflowProductVersions, claudeWorkflowProfileId } from './claude-workflow-versions.js';
+import { isClaudeWorkflowProductVersion, claudeWorkflowProfileId } from './claude-workflow-versions.js';
+import { resolveSourceCompatibility, assertCompatibilityAllowed, pinSessionCompatibility, invalidateCompatibility } from './source-compatibility.js';
 import type { Store } from './store.js';
 import type { WorkflowAdapter, WorkflowAdapterResult } from './task-workflow.js';
 
@@ -18,7 +19,7 @@ export { claudeWorkflowProfileId };
 const effort = z.enum(['low','medium','high','xhigh','max']);
 export const ClaudeWorkflowExecutionSchema = z.strictObject({
   operation:z.literal('launch'), run_id:IdSchema,
-  binary:z.strictObject({path:z.string().min(1).max(4096),version:z.enum(claudeWorkflowProductVersions),sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
+  binary:z.strictObject({path:z.string().min(1).max(4096),version:z.string().refine(isClaudeWorkflowProductVersion),sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
   workspace:z.string().min(1).max(4096), mediator_path:z.string().min(1).max(4096), prompt_file:z.string().min(1).max(4096),
   timeout_ms:z.number().int().min(1).max(3600000), max_turns:z.number().int().min(1).max(1024),
   request_limit:z.number().int().min(1).max(1024),
@@ -60,7 +61,9 @@ export function createClaudeWorkflowAdapter(store:Store,input:unknown):WorkflowA
 export function createSyntheticClaudeWorkflowAdapter(store:Store,input:unknown):WorkflowAdapter { return adapter(store,input,true); }
 function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
   const e=ClaudeWorkflowExecutionSchema.parse(input);
+  const compatibility=synthetic?null:resolveSourceCompatibility('claude_code',e.binary.version,'claude_workflow',claudeWorkflowProfileId);
   const admitted=(requested:string|null)=>{
+    if(compatibility)assertCompatibilityAllowed(store,compatibility);
     if(requested!==null&&!effort.safeParse(requested).success)throw new Error('claude_workflow_effort_unsupported');
     if(store.get('SELECT 1 FROM claude_workflow_runs WHERE id=?',[e.run_id]))throw new Error('claude_workflow_already_reserved');
     // The admitted native profile is parent-only; child execution has no native qualification.
@@ -73,7 +76,7 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
       if(e.permissions==='workspace-edit')harnessOutsideProject(scope?.projectRoot??null,[e.workspace,e.mediator_path,dirname(e.mediator_path),e.prompt_file,e.binary.path,process.execPath,
         ...(store.filename&&store.filename!==':memory:'?[store.filename]:[])]);
       // Supervisor preparation verifies the binary again before any launch.
-      verifyClaudeProbeBinary(e.binary,claudeWorkflowProductVersions);readPrompt(e.prompt_file);
+      verifyClaudeProbeBinary(e.binary,[e.binary.version]);if(!synthetic)verifyClaudeWorkflowVersion(e.binary,e.workspace);readPrompt(e.prompt_file);
     },
     async run(c){
       c.assertActive();
@@ -88,8 +91,9 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
         c.assertActive();
         if(store.get("SELECT 1 FROM codex_workflow_runs WHERE task_id=? AND state='running' UNION ALL SELECT 1 FROM claude_workflow_runs WHERE task_id=? AND state='running'",[c.taskId,c.taskId]))throw new Error('workflow_run_active');
         store.execute('INSERT INTO sessions(id,project_id,task_id,product,product_version) VALUES (?,?,?,?,?)',[sessionId,c.projectId,c.taskId,synthetic?'synthetic':'claude_code',synthetic?'1.0.0':e.binary.version]);
+        if(compatibility)pinSessionCompatibility(store,sessionId,compatibility);
         bindConfigurationToSession(store,c.confirmationId,sessionId);
-        authorizeClaudeTraceScope(store,scope,c.generation,synthetic);
+        authorizeClaudeTraceScope(store,scope,c.generation,synthetic,compatibility??undefined);
         store.execute("INSERT INTO claude_workflow_runs(id,task_id,project_id,session_id,confirmation_id,generation,instruction_manifest_hash,state,started_at) VALUES (?,?,?,?,?,?,?,'running',?)",[e.run_id,c.taskId,c.projectId,sessionId,c.confirmationId,c.generation,c.instructionManifestHash,startedAt]);
       });
       let state:WorkflowAdapterResult['state']='failed';let reason:string|null='claude_workflow_prepare_failed';let observed=0;let application:WorkflowAdapterResult['harness_application']='unapplied';
@@ -106,7 +110,7 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
           binary:e.binary,mediatorPath:e.mediator_path,durationMs:e.timeout_ms,
           workflow:{synthetic,model:c.runtime.model,effort:c.runtime.effort,childRuntime:e.child_runtime,permissions:e.permissions,maxBudgetUsd:e.max_budget_usd,
             instructions:c.instructions.map(row=>row.content).join('\n\n'),maxTurns:e.max_turns,requestLimit:e.request_limit,durationMs:e.timeout_ms,prompt,
-            assertActive:()=>c.assertActive(),onChildBound:id=>bindConfigurationToSession(store,c.confirmationId,id),
+            assertActive:()=>{c.assertActive();if(compatibility)assertCompatibilityAllowed(store,compatibility);},onChildBound:id=>bindConfigurationToSession(store,c.confirmationId,id),
             stopRequested:()=>store.get<{stop_requested:number}>('SELECT stop_requested FROM claude_workflow_runs WHERE id=?',[e.run_id])?.stop_requested!==0,
           }});
         c.assertActive();processStarted=true;const result=await supervisor.run();observed=result.state.requestsInserted;
@@ -118,6 +122,7 @@ function adapter(store:Store,input:unknown,synthetic:boolean):WorkflowAdapter {
         reason=error instanceof Error&&['claude_workflow_private_workspace_required','claude_workflow_prompt_failed','claude_probe_executable_mismatch'].includes(error.message)?error.message:'claude_workflow_failed';
       }finally{
         await supervisor?.dispose();
+        if(compatibility?.state==='compatibility_unverified'&&['claude_probe_terminal_missing','claude_probe_executable_mismatch'].includes(reason??''))invalidateCompatibility(store,compatibility,'contract_failed');
         store.immediateTransaction(()=>{
           const endedAt=new Date().toISOString();
           // Deletion/revocation must never restore a journal, event or session.

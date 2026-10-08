@@ -224,3 +224,24 @@ test('a concurrent invocation cannot overwrite the active confirmation or launch
     expect(f.store.all('SELECT * FROM codex_workflow_runs')).toHaveLength(1);
   }finally{f.cleanup();}
 });
+
+test.each(['completed','replaced'])('conditional Codex native pilot handles %s executable with actual version provenance',async mode=>{
+  const f=codexWorkflowFixture();try{
+    const {createHash}=await import('node:crypto');const {chmodSync}=await import('node:fs');
+    const {registerProtocol,freezeProtocol}=await import('../src/comparison.js');const {FlexibleProtocolSchema}=await import('../src/flexible-contracts.js');
+    const saved=FlexibleProtocolSchema.parse(JSON.parse(f.store.get<{settings:string}>('SELECT settings FROM comparison_protocols WHERE id=?',['comparison-1'])!.settings));
+    const protocol={...saved,id:'codex-forward-pilot',purpose:'functional_pilot' as const,source_profiles:[{product:'codex' as const,product_version:'0.161.0',profile_id:'codex-workflow-own-response-v1'}]};
+    delete protocol.minimum_effect;delete protocol.quality_margin;delete protocol.confidence_level;
+    registerProtocol(f.store,protocol);freezeProtocol(f.store,protocol.id,new Date(Date.now()-120000).toISOString());
+    const script=readFileSync(f.script,'utf8').replaceAll('0.160.0','0.161.0');
+    writeFileSync(f.script,`#!${process.execPath}\nif(process.argv.includes('--version')){console.log('codex-cli 0.161.0');process.exit(0);}\n${script}`);chmodSync(f.script,0o700);
+    const execution={...f.execution('forward-native'),product_version:'0.161.0',binary:{path:f.script,sha256:createHash('sha256').update(readFileSync(f.script)).digest('hex')}};
+    const input={...f.input,product_version:'0.161.0',assignment:{...f.input.assignment,protocol_id:protocol.id,metadata:{...f.input.assignment.metadata,product:'codex'}}};
+    if(mode==='replaced')writeFileSync(f.prompt,'SYNTHETIC_PRIVATE_TASK WAIT');
+    const running=runAssignedWorkflow(f.store,input,createCodexWorkflowAdapter(f.store,execution),runtime);
+    if(mode==='replaced'){const deadline=Date.now()+4000;while(f.store.eventCount()===0&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,10));expect(f.store.eventCount()).toBe(1);writeFileSync(f.script,'#!/bin/sh\nexit 0\n');}
+    const result=await running;expect(result.adapter_result).toMatchObject({state:mode==='completed'?'completed':'failed',observed_requests:1});
+    if(mode==='replaced')expect(result.adapter_result).toMatchObject({reason:'binary_mismatch'});
+    expect(f.store.get("SELECT json_extract(payload,'$.product_version') AS version,json_extract(payload,'$.source_compatibility.state') AS state FROM events")).toEqual({version:'0.161.0',state:'compatibility_unverified'});
+  }finally{f.cleanup();}
+},20000);

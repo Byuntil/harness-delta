@@ -114,7 +114,42 @@ DB 데이터·설정·보고 기준시각이 같으면 같은 기간 보고서�
 
 ## 버전, 적합성 확인, 업데이트 제어
 
-등록된 파일 어댑터는 부분 관측입니다. 현재 허용 버전은 Codex CLI 0.156.1/0.158.0과 Claude Code 2.1.283입니다. 등록되지 않은 버전, 범위, 접미사는 파일을 읽기 전에 거절되며 세션으로 저장되지 않습니다. Codex 0.158.0은 M2 경계 내 단일 세션의 순차적 부분 사용량 수집용으로 등록되었습니다. 자세한 기준은 [ADR 007](../decisions/007-adapter-version-profiles.md)을 참고하세요.
+Implemented 2026-10-08: [ADR 013](../decisions/013-forward-version-compatibility.md)
+enables automatic conditional parser reuse for stable releases inside finite windows.
+File collection uses Codex 0.158.0 for newer versions below 0.164.0, and Claude Code
+2.1.283 for newer versions below 2.2.0. Codex CLI 0.161.0 and Claude Code 2.1.293
+therefore enroll by default with `compatibility_unverified` trust. Exact registered
+versions remain verified; prereleases, suffixes, old unregistered versions and
+out-of-window releases fail before source access.
+
+Usage records preserve actual product version, parser/profile and rule revision.
+Task reports show unverified tokens under `usage.compatibility_unverified`;
+`usage.partial_tokens` includes only verified observations. Provenance-less historical
+native usage appears under `usage.legacy_unverified`. Cost reports separate
+`compatibility_unverified_partial_amount` and `legacy_unverified_partial_amount`.
+An all-unverified task has a null verified total, not a false zero. All data stays partial.
+
+```sh
+node dist/cli.js --db ./local.db compatibility status
+node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.161.0 --source file
+node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.293 --source file
+node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.161.0 --source file --reason semantic_incompatibility
+```
+
+Expected: inspect returns actual version, selected parser and trust; invalidate
+returns `invalidated`. Required-contract failures block that version/source cohort,
+stop further reads, and exclude its earlier estimates on subsequent reports and
+repricing. Blocks survive restart. Diagnostics use fixed metadata-only categories.
+Preserve affected exported snapshots as unreliable; local invalidation cannot recall
+external copies. A repair requires synthetic reproduction, a reviewed named parser
+variant where semantics changed, focused tests and the full check before clearing a
+block. There is no automatic or user-facing unblock shortcut.
+
+Registered exact file adapters remain partial: Codex CLI 0.156.1/0.158.0 and Claude
+Code 2.1.283. Codex 0.158.0 covers sequential partial usage under the M2 boundaries.
+See [ADR 007](../decisions/007-adapter-version-profiles.md). File compatibility does
+not authorize native launch; use the separate workflow windows in the
+[native workflow guide](task-native-workflow.md).
 
 저장소의 적합성 확인 스크립트 `scripts/conformance/`는 수동으로만 실행합니다. 설치, 수집, 훅, CI는 이 스크립트를 실행하지 않습니다. CI는 오프라인 합성 단위 테스트로 보고서 투영, 후보 파서, 확인·훅 신뢰 도우미, exec 출력 축약기를 실행합니다. CI는 적합성 확인 실행기를 실행하지 않습니다. 설계 승인은 실제 제품 실행 승인이 아닙니다.
 

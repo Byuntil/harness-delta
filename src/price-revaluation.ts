@@ -1,3 +1,5 @@
+import { reportSourceTrust } from './report-source-trust.js';
+import { overlayEventCompatibility } from './source-compatibility.js';
 import { z } from 'zod';
 import { EventSchema, IdSchema, MonetaryAmountSchema, TimestampSchema } from './contracts.js';
 import { EventV2Schema, type UsageEvent } from './flexible-contracts.js';
@@ -84,10 +86,18 @@ export function captureComparisonCostSnapshot(store: Store, inputId: string, rep
       original_table_id:input.price_table.id,cutoff:input.cutoff,formula_version:input.formula_version,tasks});
   });
 }
-function projectRevaluation(snapshot: CostSnapshot, basis: ReturnType<typeof readPriceBasis>, id: string, evaluatedAt: string) {
-  const tasks=snapshot.tasks.map(task=>({task_id:task.task_id,original_variant_id:task.original_variant_id,
-    usage_snapshot_hash:task.usage_snapshot_hash,observation_snapshot_hash:task.observation_snapshot_hash,original_partial_amount:task.original_partial_amount,
-    cost:projectCatalogCost(task.events as UsageEvent[],basis,task.task_id,task.cutoff,task.input_basis),source_reasons:task.reasons}));
+function projectRevaluation(snapshot: CostSnapshot, basis: ReturnType<typeof readPriceBasis>, id: string, evaluatedAt: string, store?: Store, historicalReplay = false) {
+  const tasks=snapshot.tasks.map(task=>{
+    const events=task.events.map(event=>store?overlayEventCompatibility(store,event):event) as UsageEvent[];
+    const uncertain=events.some(event=>reportSourceTrust(event.payload)!=='verified');
+    const invalidated=events.some(event=>reportSourceTrust(event.payload)==='invalidated');
+    return {task_id:task.task_id,original_variant_id:task.original_variant_id,
+      usage_snapshot_hash:task.usage_snapshot_hash,observation_snapshot_hash:task.observation_snapshot_hash,
+      original_partial_amount:historicalReplay||!uncertain?task.original_partial_amount:null,
+      ...(!historicalReplay&&uncertain?{original_unpartitioned_reference_amount:invalidated?null:task.original_partial_amount,
+        original_invalidated_amount:invalidated?task.original_partial_amount:null}:{}),
+      cost:projectCatalogCost(events,basis,task.task_id,task.cutoff,task.input_basis,undefined,historicalReplay),source_reasons:task.reasons};
+  });
   return {schema_version:1,kind:'reference_cost_revaluation',revaluation_id:id,validity_status:'valid',base_input_id:snapshot.input_id,
     base_snapshot_hash:snapshot.snapshot_hash,base_report_id:snapshot.base_report_id,base_report_hash:snapshot.base_report_hash,
     original_table_id:snapshot.original_table_id,target_table_id:basis.table.id,target_price_basis_hash:basis.basis_hash,
@@ -99,12 +109,12 @@ export function createPriceRevaluation(store: Store, request: RevaluationRequest
   return store.immediateTransaction(()=>{
     if(store.get("SELECT id FROM price_cost_tombstones WHERE kind='revaluation' AND id=?",[request.id]))throw new Error('invalidated_revaluation');
     const existing=store.get<{input_id:string;target_table_id:string;payload:string}>('SELECT input_id,target_table_id,payload FROM price_revaluations WHERE id=?',[request.id]);
-    if(existing){if(existing.input_id!==request.inputId||existing.target_table_id!==request.targetTableId)throw new Error('revaluation_conflict');return projectRevaluation(readCostSnapshot(store,request.inputId),readPriceBasis(store,request.targetTableId),request.id,(JSON.parse(existing.payload) as {evaluated_at:string}).evaluated_at);}
+    if(existing){if(existing.input_id!==request.inputId||existing.target_table_id!==request.targetTableId)throw new Error('revaluation_conflict');return projectRevaluation(readCostSnapshot(store,request.inputId),readPriceBasis(store,request.targetTableId),request.id,(JSON.parse(existing.payload) as {evaluated_at:string}).evaluated_at,store);}
     const snapshot=readCostSnapshot(store,request.inputId);
     if(Date.parse(now)<Date.parse(snapshot.cutoff))throw new Error('invalid_cutoff');
     const result=projectRevaluation(snapshot,readPriceBasis(store,request.targetTableId),request.id,now);
     store.execute('INSERT INTO price_revaluations(id,input_id,target_table_id,payload) VALUES (?,?,?,?)',[request.id,request.inputId,request.targetTableId,canonicalJson(result)]);
-    return result;
+    return projectRevaluation(snapshot,readPriceBasis(store,request.targetTableId),request.id,now,store);
   });
 }
 export function readPriceRevaluation(store: Store, id: string) {
@@ -113,6 +123,12 @@ export function readPriceRevaluation(store: Store, id: string) {
   const row=store.get<{input_id:string;target_table_id:string;payload:string}>('SELECT input_id,target_table_id,payload FROM price_revaluations WHERE id=?',[id]);
   if(!row)throw new Error('unknown_revaluation');
   const result=projectRevaluation(readCostSnapshot(store,row.input_id),readPriceBasis(store,row.target_table_id),id,(JSON.parse(row.payload) as {evaluated_at:string}).evaluated_at);
-  if(canonicalJson(result)!==row.payload)throw new Error('invalid_revaluation');
-  return result;
+  if(canonicalJson(result)!==row.payload){
+    const snapshot=readCostSnapshot(store,row.input_id);
+    if(snapshot.tasks.some(t=>t.events.some(e=>e.payload.kind==='usage'&&e.payload.source_compatibility)))throw new Error('invalid_revaluation');
+    const legacy=projectRevaluation(snapshot,readPriceBasis(store,row.target_table_id),id,result.evaluated_at,undefined,true);
+    if(canonicalJson(legacy)!==row.payload)throw new Error('invalid_revaluation');
+  }
+  const current=projectRevaluation(readCostSnapshot(store,row.input_id),readPriceBasis(store,row.target_table_id),id,result.evaluated_at,store);
+  return {...current,limitations:[...current.limitations,...(canonicalJson(current)!==canonicalJson(result)?['source_compatibility_invalidated_since_capture']:[])]};
 }

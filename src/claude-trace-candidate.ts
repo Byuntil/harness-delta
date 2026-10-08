@@ -1,3 +1,4 @@
+import type { SourceCompatibility } from './contracts.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { IdSchema, TimestampSchema } from './contracts.js';
@@ -13,7 +14,7 @@ import type { Store } from './store.js';
  */
 export interface ClaudeTraceWindow { startedAt: string; receivedAt: string; generation: number; synthetic?: boolean|undefined; lossStartedAt?:string|undefined;
   /** The launched binary's version; every span must report it. Defaults to the pinned probe version. */
-  productVersion?: ClaudeTraceProductVersion|undefined }
+  productVersion?: ClaudeTraceProductVersion|undefined; compatibility?:SourceCompatibility|undefined }
 export interface ClaudeTraceBatchResult { requests: number; inserted: number; excluded: number; unattributed: number }
 const requestHash = (id: string|null) => createHash('sha256').update(JSON.stringify(['offline-nested-candidate-v1','synthetic','1.0.0',id])).digest('hex');
 const runtimeHash = (key:string) => createHash('sha256').update(JSON.stringify(['runtime',key])).digest('hex');
@@ -68,10 +69,10 @@ function agreed(record: Map<string, unknown>, resource: Map<string, unknown>, ke
   if (a !== undefined && b !== undefined && a !== b) invalid(); return a ?? b;
 }
 /** Authorization is reusable by a transport before buffering/decoding. */
-export function authorizeClaudeTraceScope(store: Store, input: CandidateScope, generation: number, synthetic = false): CandidateScope {
+export function authorizeClaudeTraceScope(store: Store, input: CandidateScope, generation: number, synthetic = false, compatibility?:SourceCompatibility): CandidateScope {
   const scope = checkedCandidateScope(input);
   if (scope.sessions.some(s => s.product !== 'claude_code') || !Number.isSafeInteger(generation) || generation < 0) invalid();
-  if (!synthetic) authorizeCandidateScope(store, scope);
+  if (!synthetic) authorizeCandidateScope(store, scope,compatibility);
   else {
     if (!store.get('SELECT 1 FROM comparison_workspace_scope')) throw new Error('synthetic_store_required');
     for (const s of scope.sessions) {
@@ -96,15 +97,15 @@ export function ingestClaudeTraceBatch(store: Store, inputScope: CandidateScope,
   window: ClaudeTraceWindow): ClaudeTraceBatchResult {
   const expectedVersion = window.productVersion ?? claudeProbeProductVersion;
   if (!TimestampSchema.safeParse(window.startedAt).success || !TimestampSchema.safeParse(window.receivedAt).success ||
-    Date.parse(window.receivedAt) < Date.parse(window.startedAt) || !isClaudeTraceProductVersion(expectedVersion)) invalid();
-  const scope = authorizeClaudeTraceScope(store, inputScope, window.generation, window.synthetic);
+    Date.parse(window.receivedAt) < Date.parse(window.startedAt) || !(window.compatibility?window.compatibility.product==='claude_code'&&window.compatibility.source==='claude_workflow'&&expectedVersion===window.compatibility.product_version:isClaudeTraceProductVersion(expectedVersion))) invalid();
+  const scope = authorizeClaudeTraceScope(store, inputScope, window.generation, window.synthetic,window.compatibility);
   const root = scope.sessions.find(s => s.parentSessionId === null)!;
   const from = BigInt(Date.parse(window.startedAt)) * 1000000n; const to = BigInt(Date.parse(window.receivedAt)) * 1000000n;
   return store.immediateTransaction(() => {
-    authorizeClaudeTraceScope(store, scope, window.generation, window.synthetic);
+    authorizeClaudeTraceScope(store, scope, window.generation, window.synthetic,window.compatibility);
     let raw: unknown;
     try { raw = readBody(); } catch { throw new Error('claude_trace_source_error'); }
-    authorizeClaudeTraceScope(store, scope, window.generation, window.synthetic);
+    authorizeClaudeTraceScope(store, scope, window.generation, window.synthetic,window.compatibility);
     const parsed = envelopeSchema.safeParse(raw);
     if (!parsed.success) return invalid();
     const result: ClaudeTraceBatchResult = { requests: 0, inserted: 0, excluded: 0, unattributed: 0 };
@@ -156,8 +157,8 @@ export function ingestClaudeTraceBatch(store: Store, inputScope: CandidateScope,
             cache_creation_tokens: integer(record.get('cache_creation_tokens')) },
         };
         const projected = window.synthetic
-          ? projectCandidateObservation(scope, mapping.sourceId, metadata, window.receivedAt)
-          : ingestCandidateObservation(store, scope, mapping.sourceId, () => metadata, window.receivedAt);
+          ? projectCandidateObservation(scope, mapping.sourceId, metadata, window.receivedAt,window.compatibility)
+          : ingestCandidateObservation(store, scope, mapping.sourceId, () => metadata, window.receivedAt,window.compatibility);
         let syntheticInserted = false;
         if (window.synthetic && projected.kind === 'usage') {
           const key = requestHash(projected.runtime.request_id); const runtimeId = runtimeHash(key);

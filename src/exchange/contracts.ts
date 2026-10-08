@@ -71,7 +71,8 @@ export const FlexibleSharedProtocolSchema = z.strictObject({ ...flexibleProtocol
   quality_margin: protocolFields.quality_margin, confidence_level: protocolFields.confidence_level, shared_project_id: uuid })
   .refine(p => Date.parse(p.recruitment_start) < Date.parse(p.recruitment_end) && p.planning_basis_id === p.sample_plan.planning_basis_id && p.strata.every(s => s.assignees.length === 1));
 export const FlexibleEvidenceSchema = z.strictObject({ ...EvidenceSchema.omit({ usage: true, actual_configuration: true }).shape,
-  cost: FlexibleTaskReportSchema.shape.cost, runtime_summary: FlexibleTaskReportSchema.shape.runtime_summary,
+  // Native trust/reference metadata remains local; synthetic exchange retains its strict cost contract.
+  cost: FlexibleTaskReportSchema.shape.cost.omit({compatibility:true,compatibility_unverified_partial_amount:true,legacy_unverified_partial_amount:true}), runtime_summary: FlexibleTaskReportSchema.shape.runtime_summary,
   cost_provenance: z.strictObject({ price_table_id: IdSchema, price_table_hash: z.string().regex(/^[a-f0-9]{64}$/), formula_version: z.literal(costFormulaVersion), source_snapshot_hash: z.string().regex(/^[a-f0-9]{64}$/) }),
 });
 export const FlexibleSharedAssignmentSchema = z.strictObject({ ...SharedAssignmentSchema.omit({ metadata: true, evidence: true }).shape,

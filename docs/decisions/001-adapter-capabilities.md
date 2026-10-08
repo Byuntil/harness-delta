@@ -152,9 +152,14 @@ from these feasibility probes. No raw source hashes or raw exception messages pe
 - Pause/restart: synthetic collector and CLI tests verify new baselines and excluded
   in-flight turns; live pause/reset/rotation semantics remain unverified.
 - Parent/child: unverified. Do not auto-link descendants or add parent/child totals.
-- Unknown versions/formats, partial writes, conflicting revisions: unsupported until
-  covered by parser and boundary tests; preserve a reason, never manufacture zero.
-  Exact file-adapter registration is defined in [ADR 007](007-adapter-version-profiles.md).
+- Unknown versions/formats, partial writes, conflicting revisions: exact
+  registration remains separate from conditional parser reuse. Unsupported or
+  incompatible data preserves a reason and never manufactures zero.
+  [ADR 013](013-forward-version-compatibility.md) defines an implemented compatibility-unverified
+  lane for newer releases within finite declared windows; implementation is in
+  `src/source-compatibility.ts`.
+  Unestablished format/identity/counter contracts and conflicting revisions still
+  stop observation. Exact verified registration is defined in [ADR 007](007-adapter-version-profiles.md).
 - Current bounded snapshot reader: local file identity, size, modification time,
   generation, baseline and allowlisted metadata fingerprints. Incomplete final lines
   wait for completion. Every new collector ignores durable checkpoints for resumption.

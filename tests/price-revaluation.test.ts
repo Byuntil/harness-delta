@@ -23,13 +23,13 @@ test('revaluation changes rates on the retained snapshot, never the live usage o
     const basis = preparePriceBasis(store, now);
     const original = captureTaskCostSnapshot(store, {inputId:'snapshot',taskId:'task',cutoff:'2026-01-01T00:00:10Z',tableId:basis.table.id,inputBasis:'output-only-v1'}, now);
     const first = createPriceRevaluation(store,{id:'original',inputId:'snapshot',targetTableId:basis.table.id},now);
-    expect(first.tasks[0]?.cost.partial_amount).toBe('0.0001');
+    expect(first.tasks[0]?.cost).toMatchObject({partial_amount:null,legacy_unverified_partial_amount:'0.0001'});
     const bytes = Buffer.from(JSON.stringify({...bundledPriceCatalog(),catalog_id:'new-rates',catalog_version:2,models:bundledPriceCatalog().models.map(row=>row.model==='gpt-6.1-sol'?{...row,rates:{...row.rates,output:'20'}}:row)}));
     await refreshPriceCatalog(store,()=>Promise.resolve(bytes),digest(bytes),now);
     const next = preparePriceBasis(store,now);
     store.execute("DELETE FROM events WHERE id='event'",[]);
     const repriced = createPriceRevaluation(store,{id:'recalculated',inputId:'snapshot',targetTableId:next.table.id},now);
-    expect(repriced.tasks[0]?.cost.partial_amount).toBe('0.0002');
+    expect(repriced.tasks[0]?.cost).toMatchObject({partial_amount:null,legacy_unverified_partial_amount:'0.0002'});
     expect(repriced).toMatchObject({base_snapshot_hash:original.snapshot_hash,complete_amount:null,original_table_id:basis.table.id});
     expect(repriced.tasks[0]?.usage_snapshot_hash).toBe(first.tasks[0]?.usage_snapshot_hash);
     expect(readPriceRevaluation(store,'original')).toEqual(first);
@@ -92,7 +92,7 @@ test('later synthetic catalog fills only a missing rate, preserving original unk
     expect(await refreshPriceCatalog(store,()=>Promise.resolve(bytes),digest(bytes),now)).toMatchObject({status:'updated'});
     const next=preparePriceBasis(store,now);
     const result=createPriceRevaluation(store,{id:'known-reference',inputId:'unknown-input',targetTableId:next.table.id},now);
-    expect(result.tasks[0]?.cost).toMatchObject({partial_amount:'0.0001',complete_amount:null,event_count:1});
+    expect(result.tasks[0]?.cost).toMatchObject({partial_amount:null,legacy_unverified_partial_amount:'0.0001',complete_amount:null,event_count:1});
     expect(result.tasks[0]?.cost.reasons).toContain('unknown_components');
     expect(readPriceRevaluation(store,'unknown-cost')).toEqual(original);
   } finally {store.close();}

@@ -102,7 +102,7 @@ test('production CLI recollects only its durable child, stops and reopens withou
     registerPriceTable(f.store,{id:'child-rates',version:'v1',currency:'USD',source_id:'synthetic-offline-only',as_of:'2026-01-01T00:00:00Z',unit_tokens:100,display_decimals:6,rounding:'half_even',entries:['root-choice','child-choice'].flatMap(model=>[
       {product:'codex' as const,model,component:'ordinary_input' as const,price_per_unit:'1'}, {product:'codex' as const,model,component:'cache_read' as const,price_per_unit:'2'}, {product:'codex' as const,model,component:'output' as const,price_per_unit:'4'}, {product:'codex' as const,model,component:'cache_write' as const,price_per_unit:'3'}])});
     const cost=readObservedCostReport(f.store,'task-1','child-rates',new Date(Date.now()+1000).toISOString(),'output-only-v1');
-    expect(cost).toMatchObject({event_count:4,session_count:2,partial_amount:'0.96',complete_amount:null,coverage:{observed_components_priced:true}});
+    expect(cost).toMatchObject({event_count:4,session_count:2,partial_amount:'0.48',legacy_unverified_partial_amount:'0.48',complete_amount:null,compatibility:{verified_events:2,legacy_unverified_events:2},coverage:{observed_components_priced:true}});
     expect(collected.stdout+replayed.stdout+JSON.stringify(cost)).not.toContain('SYNTHETIC_PRIVATE');
   }finally{f.cleanup();}
 },15000);

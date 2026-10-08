@@ -1,3 +1,4 @@
+import { resolveSourceCompatibility } from '../src/source-compatibility.js';
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 import { PriceTableSchema } from '../src/flexible-contracts.js';
@@ -10,7 +11,7 @@ const table = () => PriceTableSchema.parse(JSON.parse(readFileSync(new URL('../c
 type LegacyUsageEvent = Event & { payload: Extract<Event['payload'], { kind: 'usage' }> };
 const usage = (id = 'parent', model = 'gpt-6-astra', input = 40000, cached = 30000, output = 80): LegacyUsageEvent => ({
   ...makeFlexibleFixture().events[0]!, id, source_key: id, session_id: `session-${id}`, payload: {
-    kind: 'usage', product: 'codex', product_version: '0.158.0', model, epoch: 'epoch-1',
+    kind: 'usage', product: 'codex', product_version: '0.158.0', source_compatibility: resolveSourceCompatibility('codex','0.158.0','file')!, model, epoch: 'epoch-1',
     input_total: observed(input), cached_input: observed(cached), output_total: observed(output), reasoning_output: observed(40),
   },
 });

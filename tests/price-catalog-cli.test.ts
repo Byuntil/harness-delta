@@ -29,7 +29,7 @@ test('default estimate, trusted local refresh and separate repricing work withou
     expect(await run(['catalog-status'])).toMatchObject({code:0,value:{online_source:{status:'configured'},can_attempt_online_refresh:true,catalog_version:1}});
     expect(await run(['refresh-catalog','--online','--artifact','synthetic.json','--sha256','0'.repeat(64)])).toMatchObject({code:2,errors:'catalog_refresh_mode_conflict\n'});
     const estimate=await run(['estimate-task','task','--cutoff','2026-01-01T00:00:10Z']);
-    expect(estimate).toMatchObject({code:0,value:{price_selection:'current_catalog',partial_amount:'0.0001',complete_amount:null,window_policy:'active-observed-loss-half-open-v2'}});
+    expect(estimate).toMatchObject({code:0,value:{price_selection:'current_catalog',partial_amount:null,legacy_unverified_partial_amount:'0.0001',complete_amount:null,window_policy:'active-observed-loss-half-open-v2'}});
     expect(JSON.stringify(estimate.value)).not.toContain(root);
     expect(await run(['snapshot-task','task','--id','input','--cutoff','2026-01-01T00:00:10Z'])).toMatchObject({code:0,value:{input_id:'input'}});
     expect(await run(['reprice','input','--id','before'])).toMatchObject({code:0,value:{revaluation_id:'before'}});
@@ -39,8 +39,8 @@ test('default estimate, trusted local refresh and separate repricing work withou
     expect(await run(['refresh-catalog','--artifact',artifact,'--sha256','0'.repeat(64)])).toMatchObject({code:2,value:{status:'failed',reason:'catalog_hash_mismatch'}});
     expect(await run(['refresh-catalog','--artifact',artifact,'--sha256',digest(bytes)])).toMatchObject({code:0,value:{status:'updated'}});
     const repriced=await run(['reprice','input','--id','after']);
-    expect(repriced).toMatchObject({code:0,value:{complete_amount:null,tasks:[{cost:{partial_amount:'0.0002'}}]}});
-    expect(await run(['revaluation','before'])).toMatchObject({code:0,value:{tasks:[{cost:{partial_amount:'0.0001'}}]}});
+    expect(repriced).toMatchObject({code:0,value:{complete_amount:null,tasks:[{cost:{partial_amount:null,legacy_unverified_partial_amount:'0.0002'}}]}});
+    expect(await run(['revaluation','before'])).toMatchObject({code:0,value:{tasks:[{cost:{partial_amount:null,legacy_unverified_partial_amount:'0.0001'}}]}});
     // The older bundled revision must not roll back a newer accepted local artifact.
     expect(await run(['refresh-catalog'])).toMatchObject({code:2,value:{reason:'catalog_rollback'}});
     expect(await run(['catalog-status'])).toMatchObject({code:0,value:{catalog_version:2,status:'failed'}});

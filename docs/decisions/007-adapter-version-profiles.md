@@ -1,6 +1,11 @@
 # Versioned file adapter profiles
 
-Status: implemented; M2 partial-scope amendment accepted 2026-09-29. Live admission remains per-version.
+Status: implemented; M2 partial-scope amendment accepted 2026-09-29.
+Blanket rejection of unregistered versions is superseded by
+[ADR 013](013-forward-version-compatibility.md), accepted 2026-10-08.
+Its runtime fallback is implemented in `src/source-compatibility.ts`. Exact-version
+admission remains the verification boundary; the no-fallback contracts below
+describe historical decisions. ADR 013 defines the implemented conditional lane.
 
 Requirements: [R01, R02, R04, R05](../requirements.md); operating policy supports R09.
 Accepting this design authorizes no live probe or support expansion; each needs

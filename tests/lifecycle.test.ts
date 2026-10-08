@@ -108,7 +108,7 @@ test('session link rejects unregistered versions before reading a file', () => {
     life.createTask('p1', 't1', { ...metadata, product: 'codex' });
     const missing = '/synthetic/does-not-exist-unregistered.jsonl';
     for (const [sessionId, version] of [
-      ['s9', '0.159.0'],
+      ['s9', '0.164.0'],
       ['s10', '0.156.1-rc.1'],
       ['s11', '0.156.1+build.1'],
       ['s12', '0.156.10'],

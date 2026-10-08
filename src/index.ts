@@ -17,3 +17,7 @@ export { aggregateTaskCost } from './metrics.js';
 export { projectFlexibleComparison,aggregateFlexibleTaskReport } from './reports/flexible-comparison.js';
 export { evaluateReadiness } from './readiness.js';
 export { comparisonReadiness } from './readiness-store.js';
+
+export { SourceCompatibilitySchema } from './contracts.js';
+export type { SourceCompatibility } from './contracts.js';
+export { resolveSourceCompatibility, sourceCompatibilityWindows, sessionCompatibility, invalidateCompatibility } from './source-compatibility.js';

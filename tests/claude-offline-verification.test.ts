@@ -1,7 +1,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
+import { sessionCompatibility } from '../src/source-compatibility.js';
 import { lookupFileProfile } from '../src/adapter-profiles.js';
 import { parseFlexibleSnapshot } from '../src/adapters-flexible.js';
 import { assignTask } from '../src/allocation.js';
@@ -84,9 +85,9 @@ test('claude_two_parentless_sessions_replay_once_and_sum_disjoint_virtual_prices
     expect(f.collector.tick('task-1')).toEqual([]); expect(f.events()).toHaveLength(2);
     expect(f.store.all('SELECT parent_id FROM sessions')).toEqual([{ parent_id: null }, { parent_id: null }]);
     expect(f.events().map(event => event.payload.input_total.value)).toEqual([100, 100]);
-    // Per 1,000 tokens: A=(20*2+40*3+40*1+30*4)/1000=.32; B=.64.
-    expect(cost([...f.events(), ...f.events()])).toMatchObject({ partial_amount: '0.96', complete_amount: null,
-      usage_complete: false, price_complete: true });
+    // Unqualified candidate reference only. Per 1,000 tokens: A=(20*2+40*3+40*1+30*4)/1000=.32; B=.64.
+    expect(cost([...f.events(), ...f.events()])).toMatchObject({ partial_amount:null, legacy_unverified_partial_amount:'0.96', complete_amount: null,
+      usage_complete: false, price_complete: false,compatibility:{verified_events:0,legacy_unverified_events:2} });
     expect(f.events()[0]!.payload.billing_components.map(component => component.reading.value)).toEqual([20, 40, 40, 30]);
     expect(f.store.all<{payload:string}>('SELECT payload FROM runtime_evidence').map(row =>
       (JSON.parse(row.payload) as {effort:null}).effort)).toEqual([null, null]);
@@ -102,7 +103,7 @@ test('claude_collector_restart_excludes_unobserved_interval_then_counts_fresh_re
       const restarted = new Collector(reopened, f.clock, undefined, () => parseFlexibleSnapshot);
       restarted.tick('task-1'); expect(reopened.eventCount()).toBe(1);
       f.request('session-1', 7); f.set(9); restarted.tick('task-1'); expect(reopened.eventCount()).toBe(2);
-      expect(cost(f.events()).partial_amount).toBe('0.64');
+      expect(cost(f.events()).legacy_unverified_partial_amount).toBe('0.64');
       expect(reopened.get("SELECT reason FROM observation_gaps WHERE started_at=? AND reason='offline'", [at(6)])).toBeDefined();
     } finally { reopened.close(); }
   } finally { f.cleanup(); }
@@ -115,7 +116,7 @@ test('claude_model_switch_and_fresh_linked_root_remain_active_with_unknown_effor
     f.link('session-2'); f.set(7); f.collector.tick('task-1');
     f.request('session-2', 8, 'model-b'); f.set(10); f.collector.tick('task-1');
     expect(f.lifecycle.state('task-1')).toBe('active'); expect(f.events()).toHaveLength(3);
-    expect(cost(f.events())).toMatchObject({ partial_amount: '1.6', complete_amount: null });
+    expect(cost(f.events())).toMatchObject({ partial_amount:null, legacy_unverified_partial_amount:'1.6', complete_amount: null });
     const history = f.store.all<{payload:string}>('SELECT payload FROM runtime_evidence ORDER BY occurred_at').map(row => JSON.parse(row.payload) as {model:string;effort:null});
     expect(history.map(row => row.model)).toEqual(['model-a', 'model-b', 'model-b']);
     expect(history.every(row => row.effort === null)).toBe(true);
@@ -130,7 +131,7 @@ test('claude_message_identity_is_session_scoped_so_cross_session_copies_are_not_
     f.request('session-1', 1, 'model-a', 'copied-message'); f.request('session-2', 1, 'model-a', 'copied-message');
     f.set(3); f.collector.tick('task-1'); expect(f.events()).toHaveLength(2);
     expect(new Set(f.events().map(event => event.source_key)).size).toBe(2);
-    expect(cost(f.events()).partial_amount).toBe('0.64');
+    expect(cost(f.events()).legacy_unverified_partial_amount).toBe('0.64');
   } finally { f.cleanup(); }
 });
 
@@ -150,7 +151,7 @@ test('claude_collected_usage_survives_disposable_source_loss_and_database_reopen
     f.link('session-1'); f.collector.tick('task-1'); f.request('session-1', 1); f.set(3); f.collector.tick('task-1');
     rmSync(f.paths.get('session-1')!); f.set(4);
     expect(f.collector.tick('task-1')).toMatchObject([{ category: 'read_failed' }]);
-    expect(cost(f.events())).toMatchObject({ partial_amount: '0.32', complete_amount: null });
+    expect(cost(f.events())).toMatchObject({ partial_amount:null, legacy_unverified_partial_amount:'0.32', complete_amount: null });
     const reopened = new Store(f.dbPath);
     try { expect(reopened.eventCount()).toBe(1); expect(reopened.all('SELECT * FROM runtime_evidence')).toHaveLength(1); }
     finally { reopened.close(); }
@@ -205,17 +206,20 @@ test('claude_explicit_child_session_is_excluded_while_root_records_unknown_paren
     f.collector.tick('task-1'); expect(f.events()).toHaveLength(1);
     expect(f.events()[0]!.session_id).toBe('session-1');
     expect(f.store.get("SELECT reason FROM observation_gaps WHERE reason='unknown_parent'")).toBeDefined();
-    expect(cost(f.events())).toMatchObject({ partial_amount: '0.32', complete_amount: null });
+    expect(cost(f.events())).toMatchObject({ partial_amount:null, legacy_unverified_partial_amount:'0.32', complete_amount: null });
   } finally { f.cleanup(); }
 });
 
-test('claude_installed_version_and_production_flexible_collection_stay_unadmitted', () => {
+test('claude_conditional_file_enrollment_does_not_admit_production_flexible_collection', () => {
   const f = fixture(); try {
-    expect(lookupFileProfile('claude_code', '2.1.288')).toBe('unsupported');
-    expect(() => f.lifecycle.linkSession('task-1', 'new-version', join(f.root, 'never-created.jsonl'), 'claude_code', '2.1.288')).toThrow('unsupported');
+    expect(lookupFileProfile('claude_code', '2.1.292')).toBe('unsupported');
+    expect(() => f.lifecycle.linkSession('task-1', 'new-version', join(f.root, 'never-created.jsonl'), 'claude_code', '2.1.292')).not.toThrow();
+    expect(sessionCompatibility(f.store,'new-version')).toMatchObject({state:'compatibility_unverified',source:'file',product_version:'2.1.292',parser_version:'2.1.283'});
     f.link('session-1'); rmSync(f.paths.get('session-1')!);
-    const production = new Collector(f.store, f.clock);
-    expect(production.tick('task-1')).toMatchObject([{ category: 'unsupported_source' }]);
+    const read=vi.fn(()=>{throw new Error('unexpected_source_read');});
+    const production = new Collector(f.store, f.clock,read);
+    expect(production.tick('task-1')).toMatchObject([{session_id:'new-version',category:'unsupported_source'},{session_id:'session-1',category:'unsupported_source'}]);
+    expect(read).not.toHaveBeenCalled();
     expect(f.store.eventCount()).toBe(0);
   } finally { f.cleanup(); }
 });

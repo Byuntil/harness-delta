@@ -1,3 +1,4 @@
+import { resolveSourceCompatibility, effectiveSourceCompatibility } from './source-compatibility.js';
 import { z } from 'zod';
 import { assignTask } from './allocation.js';
 import type { AssignmentRow } from './allocation.js';
@@ -8,10 +9,9 @@ import { comparisonProtocol, comparisonVariant, protocolRow } from './comparison
 import { confirmConfiguration, requireConfigurationConfirmation, selectedArtifactSnapshot } from './config-confirmation.js';
 import { Lifecycle, utcNow } from './lifecycle.js';
 import type { Clock, Outcome } from './lifecycle.js';
-import { comparisonReadiness } from './readiness-store.js';
+import { comparisonReadiness, functionalWorkflowEligible } from './readiness-store.js';
 import { productionSourceEvidence, syntheticSourceEvidence } from './readiness.js';
 import type { Store } from './store.js';
-import { codexWorkflowProfileId, codexWorkflowChildProfileId } from './codex-workflow-journal.js';
 import { claudeWorkflowProfileId, isClaudeWorkflowProductVersion } from './claude-workflow-versions.js';
 import { externalContract } from './external-session-contract.js';
 import { isCodexHumanPilotProtocol } from './session-binding-human-pilot.js';
@@ -61,7 +61,7 @@ export interface WorkflowAdapterResult {
 /** Fixed adapter failure codes that are safe to surface. Anything else is
  * replaced by the generic fallback so producer text never escapes. */
 const workflowAdapterCodes = new Set(['binary_mismatch', 'binary_unreadable', 'invalid_hook_recorder', 'invalid_prompt', 'unsafe_home',
-  'invalid_execution', 'codex_workflow_source_unqualified', 'codex_workflow_child_operation_unsupported', 'codex_workflow_child_binding_invalid',
+  'compatibility_invalidated', 'invalid_execution', 'codex_workflow_source_unqualified', 'codex_workflow_child_operation_unsupported', 'codex_workflow_child_binding_invalid',
   'synthetic_store_required', 'workflow_run_active', 'claude_probe_executable_mismatch', 'claude_workflow_prompt_failed',
   'claude_workflow_effort_unsupported', 'claude_workflow_already_reserved', 'claude_workflow_child_unadmitted', 'claude_workflow_harness_inside_project', 'claude_workflow_private_workspace_required', 'claude_workflow_source_conflict', 'candidate_mixed_sources']);
 function workflowAdapterCode(error: unknown, fallback: string): string {
@@ -76,7 +76,7 @@ function workflowProtocol(store: Store, protocolId: string) {
 }
 function checkReadiness(store: Store, protocolId: string, at: string, preparationOnly = false) {
   const protocol = workflowProtocol(store, protocolId);
-  if (protocol.purpose !== 'synthetic_validation' && !comparisonReadiness(store, protocolId, at).real_allocation && !(preparationOnly&&isCodexHumanPilotProtocol(protocol))) throw new Error('real_experiment_disabled');
+  if (protocol.purpose !== 'synthetic_validation' && !comparisonReadiness(store, protocolId, at).real_allocation && !functionalWorkflowEligible(store,protocol) && !(preparationOnly&&isCodexHumanPilotProtocol(protocol))) throw new Error('real_experiment_disabled');
   return protocol;
 }
 
@@ -150,7 +150,7 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
   const registry = protocol.purpose !== 'synthetic_validation' ? productionSourceEvidence : syntheticSourceEvidence;
   const adapterProfileId=adapter.profileId;
   if (adapter.product !== config.assignment.metadata.product || adapter.productVersion !== config.product_version ||
-      !registry.some(row => row.product === adapter.product && row.product_version === adapter.productVersion && row.profile_id === adapterProfileId) ||
+      (!registry.some(row => row.product === adapter.product && row.product_version === adapter.productVersion && row.profile_id === adapterProfileId) && !functionalWorkflowEligible(store,protocol)) ||
       !protocol.source_profiles.some(row => row.product === adapter.product && row.product_version === adapter.productVersion && row.profile_id === adapterProfileId) ||
       (protocol.purpose === 'synthetic_validation' && adapter.product !== 'synthetic')) throw new Error('workflow_adapter_mismatch');
   // Environment checks precede assignment so a broken binary, recorder or prompt
@@ -165,9 +165,9 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
   const projectId = config.assignment.project_id;
   const projectRoot = store.get<{ local_root: string | null }>('SELECT local_root FROM projects WHERE id=?', [projectId])?.local_root;
   if (!projectRoot) throw new Error('workflow_scope_revoked');
-  const assertActive = () => {
+  const assertScope = () => {
+    workflowProtocol(store,prepared.receipt.protocol_id);
     if(adapter.profileId!==adapterProfileId)throw new Error('workflow_scope_revoked');
-    checkReadiness(store, prepared.receipt.protocol_id, clock());
     const task = store.get<{ state: string; generation: number; project_id: string }>('SELECT state,generation,project_id FROM tasks WHERE id=?', [taskId]);
     const project = store.get<{ local_root: string | null }>('SELECT local_root FROM projects WHERE id=?', [projectId]);
     if (task?.state !== 'active' || task.generation !== generation || task.project_id !== projectId || project?.local_root !== projectRoot ||
@@ -177,6 +177,7 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
     const confirmation=latest&&ConfigurationRecordSchema.parse(JSON.parse(latest.payload));
     if(latest?.id!==config.confirmation_id||confirmation?.verification_status!=='confirmed'||confirmation.observed_config_hash!==prepared.receipt.instruction_manifest_hash)throw new Error('workflow_scope_revoked');
   };
+  const assertActive=()=>{checkReadiness(store,prepared.receipt.protocol_id,clock());assertScope();};
   // Pause only an activation made by this invocation, atomically, while the same
   // generation is active, this invocation's confirmation is the latest and no
   // other run is in progress; nothing native ran, so no active time accrues.
@@ -198,7 +199,9 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
   }
   // process_started is false only when the adapter knows no native process ran.
   const reverted = !!adapterResult && adapterResult.state === 'failed' && adapterResult.process_started === false && revertActivation();
-  if (!reverted) assertActive();
+  // A failed contract may have blocked its source cohort; retain the terminal receipt
+  // while still enforcing lifecycle, protocol, confirmation and project scope.
+  if (!reverted) {if(adapterResult&&adapterResult.state!=='completed')assertScope();else assertActive();}
   const current = reverted ? new Lifecycle(store, clock).task(taskId) : undefined;
   return { ...prepared.receipt, ...(current ? { state: current.state, generation: current.generation } : {}),
     activation_reverted: reverted, execution: 'adapter_returned' as const, outcome: null,
@@ -225,11 +228,16 @@ export function finishAssignedWorkflow(store: Store, taskId: string, outcome: Ou
 
 export function workflowStatus(store: Store, protocolId: string, at = utcNow()) {
   const protocol = workflowProtocol(store, protocolId); const readiness = comparisonReadiness(store, protocolId, at);
-  const implemented=protocol.source_profiles.some(p=>p.product==='codex'&&p.product_version==='0.160.0'&&[codexWorkflowProfileId,codexWorkflowChildProfileId].includes(p.profile_id)||
+  const implemented=protocol.source_profiles.some(p=>p.product==='codex'&&resolveSourceCompatibility(p.product,p.product_version,'codex_workflow',p.profile_id)!==null||
     p.product==='claude_code'&&isClaudeWorkflowProductVersion(p.product_version)&&p.profile_id===claudeWorkflowProfileId);
-  return { schema_version: 1, protocol_id: protocol.id, purpose: protocol.purpose, readiness,
-    native_execution: implemented&&readiness.real_allocation, codex_adapter_implemented:true, claude_adapter_implemented:true, common_coordinator: true, selected_instructions: 'transient_per_invocation_boundary',
-    blockers: [...(protocol.purpose !== 'synthetic_validation' && !readiness.real_allocation ? ['native_source_unqualified'] : []),
+  const sourceCompatibility=protocol.source_profiles.flatMap(p=>{
+    const source=p.product==='codex'?'codex_workflow':p.product==='claude_code'?'claude_workflow':null;
+    const compatibility=source&&resolveSourceCompatibility(p.product,p.product_version,source,p.profile_id);
+    return compatibility?[effectiveSourceCompatibility(store,compatibility)]:[];
+  });
+  return { schema_version: 1, protocol_id: protocol.id, purpose: protocol.purpose, readiness, source_compatibility:sourceCompatibility,
+    native_execution: implemented&&(readiness.real_allocation||functionalWorkflowEligible(store,protocol)), codex_adapter_implemented:true, claude_adapter_implemented:true, common_coordinator: true, selected_instructions: 'transient_per_invocation_boundary',
+    blockers: [...(protocol.purpose !== 'synthetic_validation' && !readiness.real_allocation&&!functionalWorkflowEligible(store,protocol) ? ['native_source_unqualified'] : []),
       ...(!implemented?['native_adapter_not_wired']:[]), ...(!readiness.complete_cost ? ['whole_task_cost_unconfirmed'] : []), ...(!readiness.inference ? ['analysis_unverified'] : [])] };
 }
 

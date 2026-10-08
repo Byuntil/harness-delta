@@ -1,4 +1,4 @@
-import { comparisonReadiness } from './readiness-store.js';
+import { comparisonReadiness, functionalWorkflowEligible } from './readiness-store.js';
 import { FlexibleAssignmentInputSchema, type FlexibleAssignmentInput, type FlexibleProtocol } from './flexible-contracts.js';
 import { retireSource, assertUnsealedIdentity } from './exchange/deletion.js';
 import { z } from 'zod';
@@ -115,6 +115,7 @@ export function assignTask(store: Store, input: unknown, dependencies: Allocatio
     }
     const protocol = comparisonProtocol(store, requestedProtocol);
     if(protocol.purpose!=='synthetic_validation' && (protocol.schema_version!==2 || !comparisonReadiness(store,protocol.id,now).real_allocation) &&
+      !(protocol.schema_version===2&&functionalWorkflowEligible(store,protocol))&&
       !(dependencies.pilotPreparation && protocol.schema_version===2 && isCodexHumanPilotProtocol(protocol)))throw new Error('real_experiment_disabled');
     if (Date.parse(now) < Date.parse(protocol.recruitment_start) || Date.parse(now) >= Date.parse(protocol.recruitment_end)) throw new Error('outside_recruitment');
     const variant = comparisonVariant(store, protocol.variant_ids[0]);

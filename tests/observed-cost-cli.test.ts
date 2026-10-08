@@ -57,10 +57,10 @@ test('explicit table and basis report across linked sessions without paths, muta
       expect(await run(['price-table', 'register', '--config', resolve('config/prices/openai-standard-short-2026-10-04.json')])).toBe(0);
       const args = ['price-table', 'estimate-task', 'task-1', '--price-table', 'openai-standard-short-2026-10-04', '--cutoff', '2026-01-02T00:00:00Z'];
       expect(await run([...args, '--input-basis', 'cache-read-remainder-ordinary-v1'])).toBe(0);
-      expect(JSON.parse(output) as unknown).toMatchObject({ complete_amount: null, partial_amount: '0.001146', session_count: 2, assumed_input_events: 2, excluded_event_count: 2, input_basis: 'cache-read-remainder-ordinary-v1' });
+      expect(JSON.parse(output) as unknown).toMatchObject({ complete_amount: null, partial_amount: null, legacy_unverified_partial_amount: '0.001146', session_count: 2, assumed_input_events: 2, excluded_event_count: 2, input_basis: 'cache-read-remainder-ordinary-v1' });
       expect(output).not.toContain(root); expect(output).not.toContain('/synthetic/private');
       output = ''; expect(await run(args)).toBe(0);
-      expect(JSON.parse(output) as unknown).toMatchObject({ partial_amount: '0.0006', assumed_input_events: 0, input_basis: 'output-only-v1' });
+      expect(JSON.parse(output) as unknown).toMatchObject({ partial_amount: null, legacy_unverified_partial_amount: '0.0006', assumed_input_events: 0, input_basis: 'output-only-v1' });
       output = ''; new Lifecycle(store, () => '2026-01-01T00:00:03Z').finalize('task-1', 'success', ['c1']);
       expect(await run(args)).toBe(0);
       expect(JSON.parse(output) as unknown).toMatchObject({ partial_amount: null, event_count: 0, window_end: '2026-01-01T00:00:03.000Z' });

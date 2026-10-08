@@ -295,10 +295,10 @@ test('fictional priced same-task parent/child partial sum survives replay; missi
   try {
     seed(store, mapped);
     ingestCandidateObservation(store, mapped, 'source-root', () => codex(), later);
-    expect(aggregateTaskCost(events(), table, coverage)).toMatchObject({ partial_amount: '0.115', complete_amount: null, usage_complete: false });
+    expect(aggregateTaskCost(events(), table, coverage)).toMatchObject({ partial_amount: null, legacy_unverified_partial_amount: '0.115', complete_amount: null, usage_complete: false });
     ingestCandidateObservation(store, mapped, 'source-child', () => codex(true), later);
-    expect(aggregateTaskCost(events(), table, coverage)).toMatchObject({ partial_amount: '0.225', complete_amount: null, usage_complete: false });
+    expect(aggregateTaskCost(events(), table, coverage)).toMatchObject({ partial_amount: null, legacy_unverified_partial_amount: '0.225', complete_amount: null, usage_complete: false });
     ingestCandidateObservation(store, mapped, 'source-child', () => codex(true), later);
-    expect(aggregateTaskCost(events(), table, coverage)).toMatchObject({ partial_amount: '0.225', complete_amount: null });
+    expect(aggregateTaskCost(events(), table, coverage)).toMatchObject({ partial_amount: null, legacy_unverified_partial_amount: '0.225', complete_amount: null });
   } finally { store.close(); }
 });

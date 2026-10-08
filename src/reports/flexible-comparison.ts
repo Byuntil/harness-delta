@@ -1,3 +1,4 @@
+import { overlayEventCompatibility } from '../source-compatibility.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { Decimal } from 'decimal.js';
@@ -54,6 +55,7 @@ export const FlexibleComparisonReportSchema = z.strictObject({ schema_version: z
   supersedes_report_id: IdSchema.nullable(), snapshot_hash: z.string(), price_table_hash: z.string(), price_table: PriceTableSchema, formula_version: z.literal(costFormulaVersion),
   tasks: z.array(FlexibleTaskReportSchema), arms: z.array(z.strictObject({ variant_id: IdSchema, assigned_count: z.number().int().nonnegative(), complete_count: z.number().int().nonnegative(),
     partial_count: z.number().int().nonnegative(), missing_count: z.number().int().nonnegative(), complete_mean: amount, partial_mean: amount,
+    compatibility_unverified_partial_mean: amount.optional(), legacy_unverified_partial_mean: amount.optional(), invalidated_events: z.number().int().nonnegative().optional(),
     deadline_success_rate: z.number().min(0).max(1).nullable(), late_outcome_count: z.number().int().nonnegative().optional() })), relative_change: z.string().nullable(),
   adoption: z.strictObject({ status: z.enum(['inconclusive', 'not_applicable']), reasons: z.array(z.enum(['analysis_unverified', 'incomplete', 'followup_pending', 'quality_missing', 'functional_pilot_only'])) }), limitations: z.array(z.string()),
 }).refine(value => {
@@ -65,7 +67,7 @@ export const FlexibleComparisonReportSchema = z.strictObject({ schema_version: z
 export type FlexibleComparisonReport = z.infer<typeof FlexibleComparisonReportSchema>;
 export type FlexibleTaskReport = z.infer<typeof FlexibleTaskReportSchema>;
 const Money = Decimal.clone({ precision: 160, rounding: Decimal.ROUND_HALF_EVEN, toExpNeg: -1000, toExpPos: 1000 });
-export function projectFlexibleComparison(input: FlexibleSnapshotInput): FlexibleComparisonReport {
+export function projectFlexibleComparison(input: FlexibleSnapshotInput, historicalReplay = false): FlexibleComparisonReport {
   const config = parseComparison(FlexibleSnapshotInputSchema, input, 'invalid_snapshot_input');
   const functional = config.protocol.purpose === 'functional_pilot';
   // Stored version 1 snapshots must re-project byte-identically, so the late
@@ -88,7 +90,7 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
     if (a.gaps.some(g => Date.parse(g.started_at) < end && Date.parse(g.ended_at ?? new Date(end).toISOString()) >= start && Date.parse(g.recorded_at) <= evaluation)) facts.continuous_observation = 'violated';
     if (Date.parse(a.coverage.window_start) !== start || Date.parse(a.coverage.window_end) !== Date.parse(a.followup_ends_at)) throw new Error('coverage_window_mismatch');
     if (observed.some(u => !runtime.some(r => r.id === u.event.payload.runtime_evidence_id && r.session_id === u.event.session_id && r.model === u.event.payload.model && r.source !== 'self_attested'))) facts.configuration_accounting = 'unknown';
-    const cost = start < end ? aggregateTaskCost(observed.map(u => u.event), config.price_table, { ...a.coverage, window_start: new Date(start).toISOString(), window_end: new Date(end).toISOString(), facts })
+    const cost = start < end ? aggregateTaskCost(observed.map(u => u.event), config.price_table, { ...a.coverage, window_start: new Date(start).toISOString(), window_end: new Date(end).toISOString(), facts }, historicalReplay)
       : { currency: config.price_table.currency, price_table_id: config.price_table.id, complete_amount: null, partial_amount: null, usage_complete: false, price_complete: false, reasons: ['missing_value' as const] };
     const outcome = a.outcome && window(a.outcome.assessed_at) ? a.outcome : null;
     if (outcome?.criteria_met.some(id => !a.metadata.criterion_ids.includes(id))) throw new Error('invalid_criteria');
@@ -113,6 +115,7 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput): Flexibl
     return { variant_id, assigned_count: rows.length, complete_count: complete.length, partial_count: partial.length, missing_count: rows.length-complete.length-partial.length,
       complete_mean: allComplete && !functional ? mean(rows.map(t=>t.cost.complete_amount!)) : null,
       partial_mean: mean(rows.flatMap(t=>t.cost.partial_amount===null?[]:[t.cost.partial_amount])),
+      ...(rows.some(t=>t.cost.compatibility) ? {compatibility_unverified_partial_mean:mean(rows.flatMap(t=>t.cost.compatibility_unverified_partial_amount==null?[]:[t.cost.compatibility_unverified_partial_amount])),legacy_unverified_partial_mean:mean(rows.flatMap(t=>t.cost.legacy_unverified_partial_amount==null?[]:[t.cost.legacy_unverified_partial_amount])),invalidated_events:rows.reduce((sum,t)=>sum+(t.cost.compatibility?.invalidated_events??0),0)} : {}),
       deadline_success_rate: rows.length && rows.every(t=>!['followup_pending','outcome_missing'].includes(t.deadline_status)) ? rows.filter(t=>t.deadline_status==='success').length/rows.length : null,
       ...(disclosesLate ? { late_outcome_count: rows.filter(t=>t.late_outcome).length } : {}) };
   });
@@ -136,7 +139,7 @@ export function captureFlexibleInput(store: Store, protocolId: string, reportId:
     const prereg=store.get<{metadata:string;environment_id:string}>('SELECT metadata,environment_id FROM comparison_preregistrations WHERE task_id=?',[a.task_id]); if(!prereg)throw new Error('task_not_assigned');
     const usages=store.all<{id:string;project_id:string;task_id:string;session_id:string;source_key:string;occurred_at:string;payload:string;recorded_at:string|null}>('SELECT e.*,r.recorded_at FROM events e LEFT JOIN event_receipts r ON r.event_id=e.id WHERE e.task_id=? ORDER BY e.occurred_at,e.id',[a.task_id]).flatMap(e=>{
       const payload:unknown=JSON.parse(e.payload); const event=EventV2Schema.safeParse({id:e.id,project_id:e.project_id,task_id:e.task_id,session_id:e.session_id,source_key:e.source_key,occurred_at:e.occurred_at,payload});
-      return event.success?[{event:event.data,recorded_at:e.recorded_at}]:[];
+      return event.success?[{event:EventV2Schema.parse(overlayEventCompatibility(store,event.data)),recorded_at:e.recorded_at}]:[];
     });
     const runtime=store.all<{payload:string}>('SELECT payload FROM runtime_evidence WHERE task_id=? ORDER BY occurred_at,id',[a.task_id]).map(r=>parseComparison(RuntimeEvidenceSchema,JSON.parse(r.payload) as unknown));
     const endpointEnd=Math.min(Date.parse(cutoff),Date.parse(a.followup_ends_at));

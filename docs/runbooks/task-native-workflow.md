@@ -37,6 +37,33 @@ Status distinguishes source qualification, whether the requested profile has an 
 incomplete whole-task cost and unvalidated inference. These are independent
 blockers; a writable configuration flag cannot admit a source.
 
+
+## Conditional forward versions
+
+Stable Codex releases newer than 0.160.0 and below 0.164.0, including 0.161.0,
+can reuse the existing own-response native profile in a `functional_pilot`.
+Set execution JSON `product_version` to the actual Codex version; the workflow
+configuration and protocol `source_profiles` must use that same version. Keep the
+same `profile_id`. Supply the actual executable SHA-256 under `binary.sha256`.
+The adapter checks both executable bytes and `--version`; the exact 0.160.0
+path retains its existing pinned identity. Root/direct-child scope and permissions
+remain unchanged; a compatibility rule does not admit broader binding families.
+
+Claude Code releases newer than 2.1.291 and below 2.2.0, including 2.1.293, can
+reuse `claude-workflow-own-trace-v1` for a fresh parent-only functional launch.
+Set `binary.version`, configuration `product_version`, and protocol profile version
+to the actual version; supply the executable SHA-256. Runtime checks remain active.
+Child execution and native resume remain unsupported.
+
+New versions have `compatibility_unverified` source trust. Reports separate their
+reference tokens/costs from verified amounts. Functional eligibility does not make
+`real_allocation`, complete task cost or inference ready, and real experiments
+retain exact source evidence. `hm compatibility inspect` accepts `--source
+codex_workflow` or `--source claude_workflow`. Contract failures block the affected
+version/source; network, deadline and ordinary process errors remain observation gaps.
+See [ADR 013](../decisions/013-forward-version-compatibility.md) for windows and recovery.
+
+
 ## Begin an assigned task
 
 This is a command/source reference. Use the [task procedure](workflow-quickstart.md)

@@ -36,7 +36,11 @@
 - Exclude prompt, response, source-code content, and secrets from measurement
   data, fixtures, exports, reports, and diagnostics. Use synthetic fixtures.
 - Distinguish observed zero, missing, error, excluded, and unmeasurable values.
-- Verify product-log formats and counter semantics; do not infer support.
+- Verify product-log formats and counter semantics; do not infer verified support.
+  Follow the forward-version compatibility policy in R02 and
+  [ADR 013](docs/decisions/013-forward-version-compatibility.md): inherited
+  parsers produce labeled unverified estimates, with provenance and invalidation,
+  until exact-version qualification. Runtime fallback uses finite source-specific windows and immutable provenance.
 - Prevent double counting of replayed events, cached/reasoning tokens, and
   parent/child usage. Do not silently backfill unobserved intervals.
 - Keep partial usage separate from complete totals and prevent deleted records

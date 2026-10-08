@@ -45,7 +45,7 @@ test('lookup returns only exact registered profiles', () => {
 
 test('production parser source takes versions from the registry', () => {
   const source = readFileSync(new URL('../src/adapters.ts', import.meta.url), 'utf8');
-  expect(source).toContain('lookupFileProfile');
+  expect(source).toContain('lookupCompatibleFileProfile');
   expect(source).not.toContain('0.156.1');
   expect(source).not.toContain('2.1.283');
   expect(source).not.toContain('0.158.0');
