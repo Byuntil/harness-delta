@@ -1,5 +1,7 @@
 # Local browser workflow
 
+[한국어](local-browser-ui.ko.md)
+
 Use the private `hm` checkout with Node.js 24. This UI shares the CLI's Store and
 external-task coordinator. It does not launch an agent, change authentication,
 create commits, or publish a service.
@@ -45,6 +47,14 @@ completion criteria, or source admission. Unsupported type/size choices stay
 disabled. The form offers feature/fix/infra/chore/docs/ci and small/medium/large.
 Model and effort remain flexible choices in your native agent.
 
+## Choose a connection path
+
+The steps below describe the exact Codex 0.160.0 ticket path. For ordinary
+terminal sessions and family collection, use [Harness Connect](harness-connect.md).
+That path has separate candidate qualification and local pilot authority, including
+Claude 2.1.291/2.1.293/2.1.294; installing a skill alone does not enable collection.
+File or launch-workflow compatibility windows do not widen either UI source gate.
+
 ## Prepare, connect and observe
 
 1. In **Tasks**, select **New task**. Enter a recognizable name, project and setup.
@@ -65,8 +75,8 @@ Model and effort remain flexible choices in your native agent.
 The operative deadline starts at the first verified connection and survives
 reconnection and rework. Active measurement time is not human labor time.
 File preparation, native input evidence and actual tool use are separate facts.
-The actual native startup order before work remains unverified. External Claude
-and IDE collection remain unsupported; the admitted tool-launched Claude parent
+The actual native startup order before work remains unverified. This ticket path does not support external Claude
+or IDE collection; the admitted tool-launched Claude parent
 workflow is a separate path.
 
 ## Agent names in the session family

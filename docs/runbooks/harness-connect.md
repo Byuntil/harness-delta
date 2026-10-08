@@ -114,7 +114,7 @@ cost and inference stay unavailable; metadata hooks can continue during pause
 even though no transcript collection occurs. Deletion durably queues metadata-only
 receipt forgetting and suppresses later family receipts, including across restart;
 native transcripts are never removed. Complete collection and hook removal are
-different operations. Full cost and inference stay unavailable; finish only through human outcome confirmation.
+different operations. Finish only through human outcome confirmation.
 
 ## Existing ticket compatibility
 

@@ -125,14 +125,6 @@ quality, rework, follow-up, configuration deviations and the source revision vec
 It performs no new measurement or aggregation. Reading-state counts are event
 counts; component n counts tasks with an observed value.
 
-Declared writer coverage is not task or token collection completeness. The full-team
-assignment and eligibility denominators remain unknown, even when every declared
-writer contributed. A missing writer is different from an accepted empty package.
-`unavailable` preserves null; observed zero remains 0. Partial components and
-unequal observed subsets cannot establish full-task savings, causal effects or
-practical equivalence. A retired snapshot renders only its invalidation reason and
-unavailable original cohort, with no reconstructed task identities or aggregates.
-
 An identical snapshot request returns the same frozen result. Use a new snapshot
 ID for updated evidence. `cutoff_mismatch` requires new source snapshots with a
 common cutoff. `snapshot_as_of_unavailable` means current imported rows arrived

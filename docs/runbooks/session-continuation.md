@@ -1,7 +1,7 @@
 # Continue one task across explicit sessions
 
 This page covers legacy collection and internal candidate evidence. For assigned
-Codex 0.160.0 tasks, use [the task procedure](workflow-quickstart.md#7-resume-or-use-another-session).
+native workflow tasks, use [the task procedure](workflow-quickstart.md#7-resume-or-use-another-session).
 
 A development task is the durable unit; a product session is one explicitly
 linked source. Closing a product CLI or starting a new session does not require
@@ -81,13 +81,13 @@ canonical task ID** in later commands. A newly requested task ID does not replac
 it. Keep preregistration metadata, allocator, environment and original criteria
 consistent. A new session does not rerandomize the task or reset followup.
 
-This assignment path and the admitted native partial collection path are separate
-validation boundaries. The [assigned Codex 0.160.0 root workflow](task-native-workflow.md)
-now admits partial own-response collection and v2 allocation with explicit frozen
-user inputs. Whole-task cost and inference remain gated. Actual source evidence
-covers the shared start/resume/replay engine; coordinator and sticky assignment
-checks have synthetic coverage and later bounded root functional observations. Neither that admission nor candidate observations add 0.160.0
-to the ordinary `session link` or `collect` allowlist. Use `workflow codex` instead.
+This v1 assignment path and the [assigned native workflow](task-native-workflow.md)
+have separate validation boundaries. Keep assigned native tasks on `workflow codex`
+or `workflow claude`; generic `session link`/`collect` has different parser and
+scope contracts. Codex 0.160.0 is now eligible for conditional file-parser reuse,
+but that does not transfer its native workflow admission to the file lane.
+See [file-version controls](local-measurement.md#versions-conformance-and-update-controls).
+Whole-task cost and inference remain unavailable.
 
 Ordinary sequential collection excludes forked histories and observed child
 activity. Do not link a fork/child as an independent root to force aggregation.

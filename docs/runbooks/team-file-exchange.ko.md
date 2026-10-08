@@ -8,7 +8,11 @@
 실제 실험 활성화나 전체 사용량 측정을 뜻하지 않습니다.
 
 1. 새 전용 저장소에 프로젝트와 완전한 synthetic 프로토콜을 등록·동결합니다.
-   작업 생성 전에 영문 절차의 source.json 예시로 공유 설정을 등록합니다.
+   작업 생성 전에 아래 source.json 예시로 공유 설정을 등록합니다.
+
+```json
+{"schema_version":1,"namespace_id":"11111111-1111-4111-8111-111111111111","local_project_id":"project-1","shared_project_id":"22222222-2222-4222-8222-222222222222","protocol_id":"comparison-1","owned_strata":["stratum-1"]}
+```
 
 ```sh
 node dist/cli.js --db source.db exchange source register --config source.json
@@ -44,9 +48,21 @@ invalid_exchange_package는 비공개·알 수 없는 필드나 잘못된 형식
 ## 가져오기와 로컬 삭제
 
 `node dist/cli.js --db team.db project add destination --root .`로 수신 프로젝트를 등록합니다.
-영문 절차의 로컬 digest 계산 명령으로 검토한 프로토콜·variant를 고정하고,
-mapping.json의 REPLACE_WITH_REVIEWED_DIGEST를 실제 값으로 바꿉니다. 모든 stratum의
-writer를 선언해야 합니다. namespace는 인증 수단이 아니며 신뢰한 발신자의 파일만 받으세요.
+검토한 프로토콜·variant와 예상 writer를 확인하고, 빌드된 저장소에서
+네트워크 없이 다음 명령으로 canonical digest를 계산하세요.
+
+```sh
+node --input-type=module -e 'import {readExchangeFile} from "./dist/exchange/files.js"; import {parseExchangePackage,protocolDigest} from "./dist/exchange/contracts.js"; const p=parseExchangePackage(readExchangeFile("package.json")); if(p.kind!=="assignment_metadata")throw Error("data_required"); console.log(protocolDigest(p));'
+```
+
+다음 mapping.json의 `REPLACE_WITH_REVIEWED_DIGEST`를 실제 64자리 값으로 바꾸세요.
+
+```json
+{"schema_version":1,"shared_project_id":"22222222-2222-4222-8222-222222222222","local_project_id":"destination","protocol_id":"comparison-1","protocol_digest":"REPLACE_WITH_REVIEWED_DIGEST","writers":[{"namespace_id":"11111111-1111-4111-8111-111111111111","stratum_id":"stratum-1","allocator_id":"allocator-1"}]}
+```
+
+파일이 아직 없는 writer를 포함해 모든 stratum의 writer를 선언하세요.
+namespace는 발신자 인증 수단이 아니며 신뢰한 교환 경로의 파일만 받으세요.
 
 ```sh
 node dist/cli.js --db team.db exchange mapping register --config mapping.json
