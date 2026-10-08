@@ -228,6 +228,33 @@ describe('Claude family relations', () => {
 
 describe('Claude usage collection', () => {
   it.each([
+    [undefined, 'missing'], [{ ephemeral_5m_input_tokens: 20, ephemeral_1h_input_tokens: 0 }, 'observed'],
+    [{ ephemeral_5m_input_tokens: 20 }, 'missing'], [{ ephemeral_5m_input_tokens: -1, ephemeral_1h_input_tokens: 21 }, 'error'],
+    [{ ephemeral_5m_input_tokens: 10.5, ephemeral_1h_input_tokens: 9.5 }, 'error'],
+    [{ ephemeral_5m_input_tokens: 10, ephemeral_1h_input_tokens: 11 }, 'error'],
+    [{ ephemeral_5m_input_tokens: Number.MAX_SAFE_INTEGER, ephemeral_1h_input_tokens: 1 }, 'error'],
+    [null, 'error'],
+  ] as const)('preserves TTL state without discarding aggregate usage (%j)', async (creation, status) => {
+    const sid = randomUUID(); const row = assistant(sid, 'req_ttl_state', [10, 20, 30, 5]);
+    const extended = { ...row, message: { ...row.message, usage: { ...row.message.usage,
+      ...(creation === undefined ? {} : { cache_creation: creation }) } } };
+    writeRoot(sid, [extended]); connect(sid); const p = provider(); const parent = await currentIdentity(sid, p);
+    const batch = await p.readUsage(parent, null, scopeFor([parent]), { baseline: false });
+    expect(batch.records[0]?.payload.cache_write_ttl).toMatchObject({ status, source: 'product_usage_cache_creation' });
+    expect(batch.records[0]?.payload.input_total).toEqual({ status: 'observed', value: 60, reason: null });
+    expect(JSON.stringify(batch)).not.toContain(privateText);
+  });
+
+  it('rejects conflicting numeric TTL splits with identical totals and one-hour flag', async () => {
+    const sid = randomUUID(); const row = assistant(sid, 'req_split_conflict', [10, 20, 30, 5]);
+    const split = (hour: number) => ({ ...row, message: { ...row.message, usage: { ...row.message.usage,
+      cache_creation: { ephemeral_5m_input_tokens: 20 - hour, ephemeral_1h_input_tokens: hour } } } });
+    writeRoot(sid, [split(10), split(11)]); connect(sid); const p = provider(); const parent = await currentIdentity(sid, p);
+    const batch = await p.readUsage(parent, null, scopeFor([parent]), { baseline: false });
+    expect(batch.records).toEqual([]); expect(batch.gaps).toContain('incomplete_request');
+  });
+
+  it.each([
     ['claude-haiku-5-5', 20, '0.0000038'], ['claude-haiku-5-5', 10, '0.0000038'],
     ['claude-sonnet-5-5', 20, '0.000073'], ['claude-sonnet-5-5', 10, '0.000073'],
   ] as const)('does not price known one-hour writes as five-minute writes (%s, %i)', async (model, oneHour, amount) => {
@@ -241,6 +268,8 @@ describe('Claude usage collection', () => {
     expect(record.payload.billing_components.find(component => component.kind === 'cache_write')?.reading)
       .toEqual({ status: 'observed', value: 20, reason: null });
     expect(record.payload.cache_write_1h_observed).toBe(true);
+    expect(record.payload.cache_write_ttl).toEqual({ status: 'observed', source: 'product_usage_cache_creation',
+      five_minute_tokens: 20 - oneHour, one_hour_tokens: oneHour });
     expect(record.payload.input_total).toEqual({ status: 'observed', value: 60, reason: null });
     const runtime = RuntimeEvidenceSchema.parse({ id: 'runtime-1h', task_id: 'task-1', session_id: sid, request_id: record.requestId,
       turn_id: null, model, effort: null, product: 'claude_code', product_version: '2.1.291', source: 'product_log',
