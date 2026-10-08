@@ -22,8 +22,9 @@ import { ClaudeSessionBindingProvider } from './session-binding-claude.js';
 import { CodexSessionBindingProvider } from './session-binding-codex.js';
 import type { BindingQualificationLease } from './session-binding-qualification-lease.js';
 import { assertBindingQualification, bindingQualificationOwnerLive, revokeBindingQualification, noteQualificationCollectorError } from './session-binding-qualification-lease.js';
-import { issueCodexHumanPilotScope, assertCodexHumanPilotScope, type CodexHumanPilotScope } from './session-binding-human-pilot.js';
+import { issueCodexHumanPilotScope, assertHumanPilotScope, type HumanPilotScope } from './session-binding-human-pilot.js';
 import type { BindingProduct, SessionBindingProvider } from './session-binding-contract.js';
+import { issueClaudeHumanPilotScope, assertClaudeHumanPilotSource } from './session-binding-claude-human-pilot.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/);
@@ -133,16 +134,16 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       if (config.product === 'codex' && config.project_root !== projectRoot) throw new Error('binding_scope_mismatch');
       const result = config.product === 'codex'
         ? [new CodexSessionBindingProvider({ receiptDirectory: config.receipt_directory, sourceRoots: config.source_roots, projectRoot, ...(options.qualificationLease || options.nativePilot ? {maxDepth:1,maxFamilyMembers:3} : {}) })]
-        : [new ClaudeSessionBindingProvider({ receiptDir: config.receipt_directory, claudeProjectsDir: config.claude_projects_directory, projectRoot })];
+        : [new ClaudeSessionBindingProvider({ receiptDir: config.receipt_directory, claudeProjectsDir: config.claude_projects_directory, projectRoot, ...(options.nativePilot ? { allowCandidateProfiles: true, maxFamilyMembers: 3, authorizeSource: source => { if (!humanPilot || options.nativePilot?.taskId !== id) throw new Error('binding_source_unqualified'); assertClaudeHumanPilotSource(humanPilot, store, id, source); } } : {}) })];
       providers.set(id, result); return result;
 
   };
-  let humanPilot: CodexHumanPilotScope | undefined;
+  let humanPilot: HumanPilotScope | undefined;
   if(options.nativePilot) {
     const provider=providersForTask(options.nativePilot.taskId)[0];
-    if(!(provider instanceof CodexSessionBindingProvider))throw new Error('binding_pilot_scope_invalid');
+    if(!(provider instanceof CodexSessionBindingProvider) && !(provider instanceof ClaudeSessionBindingProvider))throw new Error('binding_pilot_scope_invalid');
     // Issuance inspects task/protocol metadata only; preparation grants no reads.
-    const scope=issueCodexHumanPilotScope(store,options.nativePilot.taskId,provider,{untilExplicitStop:options.nativePilot.untilExplicitStop===true});
+    const scope = provider instanceof ClaudeSessionBindingProvider ? issueClaudeHumanPilotScope(store, options.nativePilot.taskId, provider, { untilExplicitStop: options.nativePilot.untilExplicitStop === true }) : issueCodexHumanPilotScope(store,options.nativePilot.taskId,provider,{untilExplicitStop:options.nativePilot.untilExplicitStop===true});
     if(options.nativePilot.observe)humanPilot=scope;
   }
   const bindings = createSessionBindingService({store,providers:options.bindingProviders??[],setupFor:id=>setupFor(row(id)),providersForTask,
@@ -189,7 +190,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     try { qualificationAvailable = bindingQualificationOwnerLive(options.qualificationLease) && assertBindingQualification(options.qualificationLease, store, id); } catch { /* A revoked lease cannot enable a browser action. */ }
     const ownedNativeLive = bindingQualificationOwnerLive(options.qualificationLease);
     let pilotAvailable=false;
-    try{if(humanPilot){assertCodexHumanPilotScope(humanPilot,store,id,providersForTask(id)[0]);pilotAvailable=true;}}catch{/* Exact pilot task only. */}
+    try{if(humanPilot){assertHumanPilotScope(humanPilot,store,id,providersForTask(id)[0]);pilotAvailable=true;}}catch{/* Exact pilot task only. */}
     const bindingAuthorized = options.qualificationLease ? qualificationAvailable : humanPilot ? pilotAvailable : ordinaryAvailable;
     const reason = ownedNativeLive ? 'owned_native_running' : finalized ? 'finalized' : active ? 'observation_running' : !connected ? 'external_connection_required' : null;
     const action = (code: string, enabled: boolean, why: string | null = null) => ({ code, enabled, reason: enabled ? null : why });
@@ -202,7 +203,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       action('connect', !finalized && !active && startup !== null && ready && state.window_status !== 'closed' && supported, !supported ? 'external_collection_unsupported' : active ? 'workflow_run_active' : 'external_ticket_required'),
       action('session-connect', !finalized && ready && state.window_status !== 'closed' && bindingAvailable && bindingAuthorized, bindingAvailable ? 'binding_source_unqualified' : 'binding_provider_unavailable'),
       action('observe', binding.roots === 0 && !finalized && !active && !ownedNativeLive && connected && source !== null && ready && state.window_status !== 'closed' && supported, binding.roots > 0 ? 'binding_reconnect_required' : reason ?? (state.window_status === 'closed' ? 'external_window_closed' : 'external_connection_required')),
-      action('resume-binding', bindingAuthorized && ready && state.window_status !== 'closed' && task.state === 'paused' && bindings.resumeAvailable(id), !bindingAuthorized ? 'binding_source_unqualified' : 'binding_reconnect_required'),
+      action('resume-binding', bindingAuthorized && ready && state.window_status !== 'closed' && task.state === 'paused' && bindings.resumeAvailable(id), !bindingAuthorized ? 'binding_source_unqualified' : task.state === 'active' ? 'observation_running' : task.state === 'finalized' ? 'finalized' : 'binding_reconnect_required'),
       action('emergency-stop', ownedNativeLive, 'owned_native_inactive'),
       action('revoke-collection', explicitStop && !finalized && !bindingCollectionControl(store,id)?.revoked_at, 'binding_scope_revoked'),
       action('pause', !finalized && (active || task.state === 'active'), 'inactive_observation'),
@@ -221,7 +222,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       outcome: state.outcome === null ? null : { status: state.outcome, assessed_at: result.outcome_at! }, attempt: state.rework_count + 1,
       preparation: { state: state.state, configuration_evidence: state.configuration_evidence, native_context_evidence: state.native_context_evidence,
         freshness_evidence: state.freshness_evidence, tool_use_evidence: state.tool_use_evidence, assigned_variant_id: state.assigned_variant_id },
-      price: { partial_amount: result.cost?.partial_amount ?? null, currency: result.cost?.currency ?? 'USD', unpriced_events: result.cost?.unpriced_events ?? 0, basis: result.cost?.price_table_hash ?? null },
+      price: { partial_amount: result.cost?.partial_amount ?? null, compatibility_unverified_partial_amount: result.cost?.compatibility_unverified_partial_amount ?? null, legacy_unverified_partial_amount: result.cost?.legacy_unverified_partial_amount ?? null, compatibility: result.cost?.compatibility ?? null, currency: result.cost?.currency ?? 'USD', unpriced_events: result.cost?.unpriced_events ?? 0, basis: result.cost?.price_table_hash ?? null },
       criteria: setup.workflow.assignment.metadata.criterion_ids, actions, startup, source: source ? { handle: source.handle, label: source.label } : null,
       binding: { ...binding, product: bindingProduct, support: options.nativePilot && id===options.nativePilot.taskId ? (humanPilot ? 'native_unverified_pilot' : 'native_pilot_preparation_only') : options.qualificationLease ? 'native_qualification_only' : bindingAvailable ? ordinaryAvailable ? 'synthetic_validation_only' : 'qualification_required' : 'instrumentation_required' },
       reason: record.reason === 'measurement_paused' ? null : record.reason ?? state.reason_code,

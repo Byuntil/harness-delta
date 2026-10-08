@@ -16,9 +16,26 @@ Expected: catalog ID/version, verification date, last check/success and update s
 First use loads the bundled catalog offline. It contains Astra, Sol, Luna, Fable,
 Opus, Sonnet and Haiku reference rates checked on 2026-10-06. See the
 [source policy and exact identifiers](../decisions/reference-price-catalog.md).
-`update_channel` is `bundled_or_verified_local_artifact`. No online refresh service
-is configured. A stale or failed update must remain visible beside the last accepted
-catalog. The verification date does not establish the price's effective date.
+`update_channel` is `verified_https_manifest` with the default source in step 3.
+An explicitly unconfigured source reports `bundled_or_verified_local_artifact`.
+No automatic refresh runs. A stale or failed
+update must remain visible beside the last accepted catalog. The verification date does not establish the price's effective date.
+
+The 2026-10-08 v2 catalog is distributed separately and does not replace the v1
+bootstrap. It lowers Sonnet 5.5 cache reads to $0.10
+per million tokens. Haiku 5.5 has request-specific tiers under the new schema/policy:
+up to 100,000 total prompt tokens, or over 100,000, including cache reads/writes.
+Automatic selection requires consistent observed input counts and linked request
+runtime evidence. Missing evidence leaves the affected cost unavailable
+(`unverified_condition`); eligible requests can still yield a partial estimate.
+Known one-hour or mixed cache writes remain unpriced while their token counts
+remain observed and count toward the prompt threshold. TTL absence means the
+explicit five-minute reference, not confirmed actual billing.
+See the [verified rates and candidate limits](../decisions/reference-price-catalog.md#october-2026-catalog-update).
+Install the updated client before consuming v2; older clients retain cached v1
+prices when they reject the unsupported schema/policy.
+An explicit trusted artifact or online refresh can accept v2
+for future defaults. Existing comparisons and results retain their original pins.
 
 ## 2. Estimate without choosing a price file
 

@@ -46,6 +46,7 @@ export const BillingComponentSchema = z.strictObject({
 export const UsageV2Schema = UsageSchema.extend({
   schema_version: z.literal(2), model: ModelSchema.nullable(), runtime_evidence_id: IdSchema.nullable(),
   attribution: z.enum(['verified', 'ambiguous', 'unknown']),
+  cache_write_1h_observed: z.literal(true).optional(),
   billing_components: z.array(BillingComponentSchema).max(4)
     .refine(values => new Set(values.map(value => value.kind)).size === values.length),
 }).refine(value => value.attribution !== 'verified' || (value.model !== null && value.runtime_evidence_id !== null))

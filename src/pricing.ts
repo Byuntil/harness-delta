@@ -1,7 +1,8 @@
 import { Decimal } from 'decimal.js';
 import { addTokens, EventSchema, IdSchema, MonetaryAmountSchema } from './contracts.js';
 import { parseComparison } from './comparison-contracts.js';
-import { PriceTableSchema, type BillingComponent, type UsageEvent, type PriceTable, type PricedUsage } from './flexible-contracts.js';
+import { PriceTableSchema, type BillingComponent, type UsageEvent, type PriceTable, type PricedUsage, type RuntimeEvidence } from './flexible-contracts.js';
+import { verifiedRequestPromptTokens } from './request-price-evidence.js';
 import type { Store } from './store.js';
 // Prices: <=60 digits, counters/units: <=16 digits, <=4096 entries.
 // Precision160 exceeds finite-product/sum requirements and preserves >80 guard
@@ -24,12 +25,15 @@ export function readPriceTable(store: Store, id: string): PriceTable {
   return parseComparison(PriceTableSchema, JSON.parse(row.payload) as unknown, 'invalid_price_table');
 }
 export type LegacyInputBasis = 'output-only-v1' | 'cache-read-remainder-ordinary-v1';
-export function priceUsage(input: UsageEvent, inputTable: PriceTable, legacyInputBasis: LegacyInputBasis = 'output-only-v1'): PricedUsage {
+export function priceUsage(input: UsageEvent, inputTable: PriceTable, legacyInputBasis: LegacyInputBasis = 'output-only-v1', runtimeEvidence: readonly RuntimeEvidence[] = []): PricedUsage {
   if (!['output-only-v1', 'cache-read-remainder-ordinary-v1'].includes(legacyInputBasis)) throw new Error('invalid_input_basis');
   const event = parseComparison(EventSchema, input, 'invalid_event');
   if (event.payload.kind !== 'usage') throw new Error('invalid_event');
   const table = parseComparison(PriceTableSchema, inputTable, 'invalid_price_table');
   const u = event.payload; const reasons: PricedUsage['reasons'] = [];
+  const conditional = table.entries.some(entry => entry.product === u.product && entry.model === u.model && entry.prompt_tier !== undefined);
+  const promptTokens = conditional ? verifiedRequestPromptTokens(event as UsageEvent, runtimeEvidence) : null;
+  if (conditional && promptTokens === null) return { event_id: event.id, amount: null, partial_amount: null, reasons: ['unknown_components', 'unpriced_component'] };
   if (u.model === null) reasons.push('unknown_model');
   if ('schema_version' in u && u.attribution !== 'verified') reasons.push('unknown_attribution');
   // V1 lacks provenance for cache-write and request accounting. By default price
@@ -60,7 +64,9 @@ export function priceUsage(input: UsageEvent, inputTable: PriceTable, legacyInpu
   if (u.model !== null && (!('schema_version' in u) || u.attribution === 'verified')) {
     for (const component of components) {
       if (component.reading.status !== 'observed') { reasons.push('unknown_components'); continue; }
-      const entry = table.entries.find(e => e.product === u.product && e.model === u.model && e.component === component.kind);
+      if (component.kind === 'cache_write' && 'cache_write_1h_observed' in u && u.cache_write_1h_observed) { reasons.push('unpriced_component'); continue; }
+      const entry = table.entries.find(e => e.product === u.product && e.model === u.model && e.component === component.kind &&
+        (e.prompt_tier === undefined || e.prompt_tier === (promptTokens! <= 100000 ? 'up_to_100000' : 'over_100000')));
       if (!entry) { reasons.push('unpriced_component'); continue; }
       numerator = numerator.plus(new Money(entry.price_per_unit).times(component.reading.value)); priced = true;
     }

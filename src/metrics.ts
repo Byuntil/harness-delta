@@ -1,6 +1,6 @@
 import { partitionCost, reportCompatibility, reportSourceTrust } from './report-source-trust.js';
 import { overlayEventCompatibility } from './source-compatibility.js';
-import { CostCoverageEvidenceSchema, CostFactsSchema, PriceTableSchema, type UsageEvent, type PriceTable, type CostCoverageEvidence, type TaskCost, parseTaskMetadata } from './flexible-contracts.js';
+import { CostCoverageEvidenceSchema, CostFactsSchema, PriceTableSchema, type UsageEvent, type PriceTable, type CostCoverageEvidence, type TaskCost, type RuntimeEvidence, parseTaskMetadata } from './flexible-contracts.js';
 import { evaluateCostCoverage, syntheticCostProfileId } from './cost-coverage.js';
 import { parseComparison } from './comparison-contracts.js';
 import { priceUsage, sumAmounts } from './pricing.js';
@@ -83,7 +83,7 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
 export type TaskReport=ReturnType<typeof aggregateTask>;
 
 /** Cost coverage is separate from the permanently partial legacy token report. */
-export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence, historicalReplay = false): TaskCost {
+export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence, runtimeEvidence: readonly RuntimeEvidence[] = [], historicalReplay = false): TaskCost {
   const evidence = parseComparison(CostCoverageEvidenceSchema, inputEvidence, 'invalid_cost_coverage');
   const table = parseComparison(PriceTableSchema, inputTable, 'invalid_price_table');
   const unique = new Map<string, UsageEvent>();
@@ -98,7 +98,7 @@ export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: Pri
   }
   const allRows = [...unique.values()];
   const rows = historicalReplay ? allRows : allRows.filter(row => reportSourceTrust(row.payload) === 'verified');
-  const allPriced = allRows.map(row => priceUsage(row, table));
+  const allPriced = allRows.map(row => priceUsage(row, table, 'output-only-v1', runtimeEvidence));
   const trust = partitionCost(allRows, allPriced.map(row => row.partial_amount));
   const decision = evaluateCostCoverage({ ...evidence, has_observed_value: evidence.has_observed_value && rows.length > 0 });
   const priced = allPriced.filter((_,index)=>historicalReplay||reportSourceTrust(allRows[index]!.payload)==='verified');

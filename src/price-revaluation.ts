@@ -2,7 +2,7 @@ import { reportSourceTrust } from './report-source-trust.js';
 import { overlayEventCompatibility } from './source-compatibility.js';
 import { z } from 'zod';
 import { EventSchema, IdSchema, MonetaryAmountSchema, TimestampSchema } from './contracts.js';
-import { EventV2Schema, type UsageEvent } from './flexible-contracts.js';
+import { EventV2Schema, RuntimeEvidenceSchema, type UsageEvent } from './flexible-contracts.js';
 import { captureObservedCostInput } from './observed-cost-report.js';
 import { projectCatalogCost } from './catalog-cost-report.js';
 import { digest } from './price-catalog.js';
@@ -10,15 +10,16 @@ import { readPriceBasis } from './price-catalog-store.js';
 import { costFormulaVersion, type LegacyInputBasis } from './pricing.js';
 import { canonicalJson, readComparisonSnapshot } from './reports/comparison-snapshot.js';
 import { FlexibleSnapshotInputSchema } from './reports/flexible-comparison.js';
+import { linkedRequestPriceEvidence } from './request-price-evidence.js';
 import type { Store } from './store.js';
 
 const hex = z.string().regex(/^[a-f0-9]{64}$/);
 const usageSchema = EventSchema.refine(event => event.payload.kind === 'usage');
 const inputBasisSchema = z.enum(['output-only-v1','cache-read-remainder-ordinary-v1']);
 const taskInputSchema = z.strictObject({ task_id: IdSchema, original_variant_id: IdSchema.nullable(), cutoff: TimestampSchema,
-  events: z.array(usageSchema), input_basis: inputBasisSchema, observation_snapshot_hash: hex,
+  events: z.array(usageSchema), runtime_evidence: z.array(RuntimeEvidenceSchema).optional(), input_basis: inputBasisSchema, observation_snapshot_hash: hex,
   usage_snapshot_hash: hex, original_partial_amount: MonetaryAmountSchema.nullable(), reasons: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)) });
-const snapshotBodySchema = z.strictObject({ schema_version: z.literal(1), input_id: IdSchema, kind: z.enum(['task','comparison']),
+const snapshotBodySchema = z.strictObject({ schema_version: z.union([z.literal(1), z.literal(2)]), input_id: IdSchema, kind: z.enum(['task','comparison']),
   base_report_id: IdSchema.nullable(), base_report_hash: hex.nullable(), original_table_id: IdSchema, cutoff: TimestampSchema,
   formula_version: z.literal(costFormulaVersion), tasks: z.array(taskInputSchema) });
 const snapshotSchema = snapshotBodySchema.extend({ snapshot_hash: hex });
@@ -56,10 +57,10 @@ export function captureTaskCostSnapshot(store: Store, request: {inputId:string;t
       return prior;
     }
     if (store.get("SELECT id FROM price_cost_tombstones WHERE kind='input' AND id=?",[request.inputId]))throw new Error('invalidated_cost_snapshot');
-    const {report,events}=captureObservedCostInput(store,request.taskId,request.tableId,request.cutoff,request.inputBasis);
-    return persistSnapshot(store,{schema_version:1,input_id:request.inputId,kind:'task',base_report_id:null,base_report_hash:null,
+    const {report,events,runtimeEvidence}=captureObservedCostInput(store,request.taskId,request.tableId,request.cutoff,request.inputBasis);
+    return persistSnapshot(store,{schema_version:runtimeEvidence.length?2:1,input_id:request.inputId,kind:'task',base_report_id:null,base_report_hash:null,
       original_table_id:request.tableId,cutoff:request.cutoff,formula_version:costFormulaVersion,tasks:[{task_id:request.taskId,original_variant_id:null,
-        cutoff:request.cutoff,events,input_basis:request.inputBasis,observation_snapshot_hash:report.observation_snapshot_hash,
+        cutoff:request.cutoff,events,...(runtimeEvidence.length?{runtime_evidence:runtimeEvidence}:{}),input_basis:request.inputBasis,observation_snapshot_hash:report.observation_snapshot_hash,
         usage_snapshot_hash:report.usage_snapshot_hash,original_partial_amount:report.partial_amount,reasons:report.reasons}]});
   });
 }
@@ -78,11 +79,12 @@ export function captureComparisonCostSnapshot(store: Store, inputId: string, rep
       // Preserve the original flexible snapshot's window and receipt eligibility exactly.
       const events=assignment.usages.filter(u=>u.event.task_id===task.task_id&&Date.parse(u.event.occurred_at)>=Date.parse(assignment.assigned_at)&&Date.parse(u.event.occurred_at)<end&&u.recorded_at!==null&&Date.parse(u.recorded_at)<=Date.parse(input.evaluated_at)).map(u=>EventV2Schema.parse(u.event));
       const ordered=[...events].sort((a,b)=>a.source_key<b.source_key?-1:a.source_key>b.source_key?1:0);
-      return {task_id:task.task_id,original_variant_id:task.original_variant_id,cutoff:new Date(end).toISOString(),events,
+      const runtime=linkedRequestPriceEvidence(events,assignment.runtime.filter(row=>row.task_id===task.task_id&&Date.parse(row.occurred_at)>=Date.parse(assignment.assigned_at)&&Date.parse(row.occurred_at)<end&&Date.parse(row.recorded_at)<=Date.parse(input.evaluated_at)));
+      return {task_id:task.task_id,original_variant_id:task.original_variant_id,cutoff:new Date(end).toISOString(),events,...(runtime.length?{runtime_evidence:runtime}:{}),
         input_basis:'output-only-v1' as const,usage_snapshot_hash:digest(canonicalJson(ordered)),original_partial_amount:task.cost.partial_amount,
         observation_snapshot_hash:digest(canonicalJson({source_snapshot_hash:report.snapshot_hash,coverage:assignment.coverage,gaps:assignment.gaps,runtime:assignment.runtime})),reasons:task.cost.reasons};
     });
-    return persistSnapshot(store,{schema_version:1,input_id:inputId,kind:'comparison',base_report_id:reportId,base_report_hash:report.snapshot_hash,
+    return persistSnapshot(store,{schema_version:tasks.some(task=>'runtime_evidence' in task)?2:1,input_id:inputId,kind:'comparison',base_report_id:reportId,base_report_hash:report.snapshot_hash,
       original_table_id:input.price_table.id,cutoff:input.cutoff,formula_version:input.formula_version,tasks});
   });
 }
@@ -96,7 +98,7 @@ function projectRevaluation(snapshot: CostSnapshot, basis: ReturnType<typeof rea
       original_partial_amount:historicalReplay||!uncertain?task.original_partial_amount:null,
       ...(!historicalReplay&&uncertain?{original_unpartitioned_reference_amount:invalidated?null:task.original_partial_amount,
         original_invalidated_amount:invalidated?task.original_partial_amount:null}:{}),
-      cost:projectCatalogCost(events,basis,task.task_id,task.cutoff,task.input_basis,undefined,historicalReplay),source_reasons:task.reasons};
+      cost:projectCatalogCost(events,basis,task.task_id,task.cutoff,task.input_basis,{referenceBinding:true,runtimeEvidence:task.runtime_evidence??[]},historicalReplay),source_reasons:task.reasons};
   });
   return {schema_version:1,kind:'reference_cost_revaluation',revaluation_id:id,validity_status:'valid',base_input_id:snapshot.input_id,
     base_snapshot_hash:snapshot.snapshot_hash,base_report_id:snapshot.base_report_id,base_report_hash:snapshot.base_report_hash,

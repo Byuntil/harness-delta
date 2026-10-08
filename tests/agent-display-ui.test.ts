@@ -23,3 +23,16 @@ for (const locale of ['en', 'ko'] as const) {
     expect(markup).toContain('colSpan="2"');
   });
 }
+
+
+for (const locale of ['en','ko'] as const) {
+  test(`actual ${locale} table keeps source reference costs separate from verified costs and invalidation`, () => {
+    const reference = { ...missing, currency:'USD', partial_amount:'1', compatibility_unverified_partial_amount:'2', legacy_unverified_partial_amount:'0', compatibility:{invalidated_events:1} };
+    const markup=renderToStaticMarkup(createElement(SessionUsageTable,{locale,summary:reference,sessions:[{...reference,session_id:'root',parent_session_id:null}]}));
+    expect(markup).toContain('USD 1');expect(markup).toContain('USD 2');expect(markup).toContain('USD 0');
+    expect(markup).not.toContain('USD 3');
+    expect(markup).toContain(locale==='en'?'Compatibility unverified reference':'호환성 미검증 참고 비용');
+    expect(markup).toContain(locale==='en'?'Source unverified reference':'원본 미검증 참고 비용');
+    expect(markup).toContain(locale==='en'?'1 invalidated observations excluded':'무효 관측 1개 제외');
+  });
+}

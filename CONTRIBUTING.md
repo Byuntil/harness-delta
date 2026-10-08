@@ -35,6 +35,12 @@ Build before focused tests with `npm run build`, then use
 `npm test -- tests/runtime.test.ts`. Binding qualification tests freeze the built
 UI as well as source bytes, so a clean checkout needs the build first.
 
+The owned CLI process-budget suite runs before other test files. It checks a
+fixed teardown budget with synthetic process-metadata latency; concurrent
+process-heavy suites can consume that budget on CI hosts. Its timing, ownership,
+and disappearance assertions remain unchanged. All remaining suites then run
+with the normal file parallelism. The default test command includes both groups.
+
 ## Linting
 
 Run `npm run lint` to check TypeScript source, tests, and configuration, plus

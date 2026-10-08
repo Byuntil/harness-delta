@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { PriceTable } from '../../src/flexible-contracts.js';
 import { Store } from '../../src/store.js';
 import { Lifecycle } from '../../src/lifecycle.js';
 import { registerVariant, registerProtocol, freezeProtocol } from '../../src/comparison.js';
@@ -9,11 +10,12 @@ import { registerPriceTable } from '../../src/pricing.js';
 import { makeFlexibleFixture } from './flexible-fixture.js';
 import { assignmentInput } from './comparison-fixture.js';
 
-export function codexWorkflowFixture(nativeProfile?: string, purpose: 'real_experiment' | 'functional_pilot' = 'real_experiment') {
+export function codexWorkflowFixture(nativeProfile?: string, purpose: 'real_experiment' | 'functional_pilot' = 'real_experiment', native?: {product: 'codex' | 'claude_code'; productVersion: string; priceTable?: PriceTable}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'codex-workflow-'))); const project = join(root, 'project'); mkdirSync(project);
   const home = join(root, 'home'); mkdirSync(home); mkdirSync(join(home, 'sessions'));
   const database = join(root, 'measurement.sqlite'); const store = new Store(database); const f = makeFlexibleFixture();
-  if(nativeProfile){f.protocol.purpose=purpose; if(purpose==='functional_pilot'){delete f.protocol.minimum_effect;delete f.protocol.quality_margin;delete f.protocol.confidence_level;}f.protocol.source_profiles=[{product:'codex',product_version:'0.160.0',profile_id:nativeProfile}];f.metadata.product='codex';}
+  if(native?.priceTable){f.priceTable=native.priceTable;f.protocol.price_table_id=native.priceTable.id;}
+  if(nativeProfile){f.protocol.purpose=purpose; if(purpose==='functional_pilot'){delete f.protocol.minimum_effect;delete f.protocol.quality_margin;delete f.protocol.confidence_level;}f.protocol.source_profiles=[{product:native?.product??'codex',product_version:native?.productVersion??'0.160.0',profile_id:nativeProfile}];f.metadata.product=native?.product??'codex';}
   const now = Date.now(); f.protocol.recruitment_start = new Date(now - 60000).toISOString(); f.protocol.recruitment_end = new Date(now + 3600000).toISOString();
   new Lifecycle(store).registerProject('project-1', project);
   const artifacts = f.variants.map((variant, index) => {
@@ -22,7 +24,7 @@ export function codexWorkflowFixture(nativeProfile?: string, purpose: 'real_expe
     registerVariant(store, variant); return { variant_id: variant.id, selected_artifacts: [{ artifact_id: 'instruction', path }] };
   });
   registerPriceTable(store, f.priceTable); registerProtocol(store, f.protocol); freezeProtocol(store, f.protocol.id, new Date(now - 120000).toISOString());
-  const input = { schema_version: 1, assignment: { ...assignmentInput, schema_version: 2, metadata: f.metadata }, product_version: nativeProfile?'0.160.0':'1.0.0', confirmation_id: 'confirmation-1', artifacts };
+  const input = { schema_version: 1, assignment: { ...assignmentInput, schema_version: 2, metadata: f.metadata }, product_version: nativeProfile?(native?.productVersion??'0.160.0'):'1.0.0', confirmation_id: 'confirmation-1', artifacts };
   const prompt = join(root, 'prompt.txt'); writeFileSync(prompt, 'SYNTHETIC_PRIVATE_TASK'); const script = join(root, 'fake-codex.mjs');
   writeFileSync(script, `import {readFileSync,writeFileSync,appendFileSync} from 'node:fs'; import {join} from 'node:path'; import {randomUUID} from 'node:crypto'; import {spawnSync} from 'node:child_process';
 const args=process.argv.slice(2);const cwd=process.cwd();let prompt='';for await(const chunk of process.stdin)prompt+=chunk;

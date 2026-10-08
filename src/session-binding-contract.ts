@@ -52,6 +52,8 @@ export interface SessionBindingProvider {
   product: BindingProduct;
   capabilities(): BindingCapabilities;
   resolveCurrent(input: CurrentIdentityRequest): Promise<VerifiedSessionIdentity>;
+  /** Revalidate a persisted live root; never authorizes a new binding. */
+  revalidateBound?(input: CurrentIdentityRequest, expected: VerifiedSessionIdentity): Promise<VerifiedSessionIdentity>;
   discoverChildren(parent: VerifiedSessionIdentity): Promise<ChildDiscovery>;
   /** Metadata-only deletion cleanup. Native transcripts are never deleted. */
   forgetSession?(nativeSessionId: string): Promise<void>;

@@ -20,7 +20,7 @@ import type { CandidateScope } from './nested-candidate.js';
 import type { Store } from './store.js';
 import { assertBindingQualification, bindingQualificationOwnerLive, noteBindingQualificationTransition, checkBindingQualificationIdentity, checkBindingQualificationRecord, type BindingQualificationLease } from './session-binding-qualification-lease.js';
 import type { ExternalTaskSetup } from './external-session-service.js';
-import { assertCodexHumanPilotScope, checkCodexHumanPilotIdentity, type CodexHumanPilotScope } from './session-binding-human-pilot.js';
+import { assertHumanPilotScope, checkHumanPilotIdentity, type HumanPilotScope } from './session-binding-human-pilot.js';
 
 interface BindingRow { session_id: string; task_id: string; root_id: string; identity: string;
   relation_evidence_id: string | null; connect_receipt: string | null; cursor: string | null; observed_since: string; generation: number; state: string; gaps: string }
@@ -28,7 +28,7 @@ export interface SessionBindingServiceOptions {
   store: Store; providers: SessionBindingProvider[]; setupFor(taskId: string): ExternalTaskSetup; clock?: Clock;
   providersForTask?(taskId: string, deletedProjectRoot?: string): SessionBindingProvider[];
   qualificationLease?: BindingQualificationLease;
-  humanPilot?: CodexHumanPilotScope;
+  humanPilot?: HumanPilotScope;
   syntheticProviderForTask?(provider: SessionBindingProvider, taskId: string): boolean;
 }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -93,7 +93,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     if(control?.revoked_at)throw new Error('binding_scope_revoked');
     if ((!control || options.qualificationLease) && contract.ends_at && Date.parse(clock()) >= Date.parse(contract.ends_at)) throw new Error('external_window_closed');
     if (options.qualificationLease) assertBindingQualification(options.qualificationLease, store, taskId);
-    else if(options.humanPilot)assertCodexHumanPilotScope(options.humanPilot,store,taskId,providerFor('codex',taskId));
+    else if(options.humanPilot)assertHumanPilotScope(options.humanPilot,store,taskId,providerFor(parseTaskMetadata(JSON.parse(life.task(taskId).metadata) as unknown).product as BindingProduct,taskId));
     else if (!bindingSourceSupported(store, taskId)) throw new Error('binding_source_unqualified');
     return task;
   };
@@ -116,7 +116,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     if (bound && bindingIdentityKey(identityFor(bound)) !== bindingIdentityKey(value)) throw new Error('binding_identity_mismatch');
     if (old && !bound) throw new Error('binding_session_conflict');
     checkBindingQualificationIdentity(options.qualificationLease, store, taskId, value, false);
-    if(options.humanPilot)checkCodexHumanPilotIdentity(options.humanPilot,store,taskId,value);
+    if(options.humanPilot)checkHumanPilotIdentity(options.humanPilot,store,taskId,value);
     return value;
   };
   const bind = (taskId: string, value: VerifiedSessionIdentity, rootId: string, relation: string | null, generation: number) => {
@@ -149,7 +149,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
   };
   const read = async (taskId: string, row: BindingRow, baseline: boolean) => {
     authorizeObservation(taskId,row); const value = identityFor(row); const provider = providerFor(value.product, taskId);
-    if(options.humanPilot)checkCodexHumanPilotIdentity(options.humanPilot,store,taskId,value);
+    if(options.humanPilot)checkHumanPilotIdentity(options.humanPilot,store,taskId,value);
     if(options.humanPilot&&baseline) {
       // Baselines also need a metadata-only family preflight. Initial connect
       // and resume must not read a root body before noticing rejected members.
@@ -214,10 +214,13 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     };
     const summarize=(events:UsageEvent[])=>{
       const priced=capture?(tableId&&store.get('SELECT price_table_id FROM price_catalog_bases WHERE price_table_id=?',[tableId])?
-        projectCatalogCost(events,readPriceBasis(store,tableId),taskId,clock(),'output-only-v1'):
-        projectObservedCost(events,capture.report.price_table,taskId,clock(),'output-only-v1')):null;
+        projectCatalogCost(events,readPriceBasis(store,tableId),taskId,clock(),'output-only-v1',{referenceBinding:true,runtimeEvidence:capture.runtimeEvidence}):
+        projectObservedCost(events,capture.report.price_table,taskId,clock(),'output-only-v1',capture.runtimeEvidence)):null;
       return {requests:events.length||null,input_total:total(events,'input_total'),output_total:total(events,'output_total'),
-        partial_amount:priced?.partial_amount??null,unpriced_events:priced?.unpriced_events??0,
+        partial_amount:priced?.partial_amount??null,
+        compatibility_unverified_partial_amount:priced?.compatibility_unverified_partial_amount??null,
+        legacy_unverified_partial_amount:priced?.legacy_unverified_partial_amount??null,
+        compatibility:priced?.compatibility??null,unpriced_events:priced?.unpriced_events??0,
         currency:priced?.currency??null,price_table_id:tableId,cost_coverage:'partial' as const,complete_cost:null};
     };
     return { state: all.some(row => row.state === 'observing' && row.generation === task.generation) && task.state === 'active' ? 'observing' : all.length ? 'stopped' : 'unconnected',
@@ -256,7 +259,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
       await flushForgotten();
       if (options.qualificationLease && !bindingQualificationOwnerLive(options.qualificationLease)) throw new Error('binding_qualification_live_root_required');
       const before = authorizeConnection(taskId); const provider = providerFor(product, taskId); const input = CurrentIdentityRequestSchema.parse(request);
-      if (options.qualificationLease || options.humanPilot) {
+      if (options.qualificationLease || options.humanPilot && provider instanceof CodexSessionBindingProvider) {
         if (!(provider instanceof CodexSessionBindingProvider)) throw new Error('binding_qualification_scope_invalid');
         const root=rows(taskId).find(r=>identityFor(r).parentSessionId===null);
         provider.assertRootReceipt(input,root?.session_id??null);
@@ -264,7 +267,9 @@ export function createSessionBindingService(options: SessionBindingServiceOption
       // An injected dependency is used only inside an explicitly synthetic
       // protocol. Native manifest providers remain gated even in that workspace.
       if (!options.qualificationLease && !options.humanPilot && !sourceSupported(taskId, product)) throw new Error('binding_source_unqualified');
-      const resolved = await provider.resolveCurrent(input);
+      const pinned = rows(taskId).find(row => row.connect_receipt === input.receipt && identityFor(row).parentSessionId === null && identityFor(row).product === product);
+      const boundRoot = expectedRoot ?? (pinned ? identityFor(pinned) : undefined);
+      const resolved = boundRoot && pinned && 'revalidateBound' in provider && provider.revalidateBound ? await provider.revalidateBound(input, boundRoot) : await provider.resolveCurrent(input);
       authorizeConnection(taskId, before.generation);
       const value = checkIdentity(taskId, resolved);
       if (expectedRoot && bindingIdentityKey(value) !== bindingIdentityKey(expectedRoot)) throw new Error('binding_identity_mismatch');

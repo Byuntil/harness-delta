@@ -101,11 +101,13 @@ Claude records future members through SubagentStart/Stop hooks and validates
 their own transcript ownership. All evidenced members, including nested members,
 are flattened under the root: the documented hook fields do not establish their
 direct nested parent. Child re-calls only confirm an active independently discovered
-family. A paused family requires parent reconnect. Native profile/counter/source
+family. A paused family requires parent reconnect unless its code-owned human UI pilot
+authority permits same-live-root UI resume as described below. Native profile/counter/source
 formats remain candidate-only; no model or effort setting is imposed.
 
 The UI refreshes family counts and partial usage. Pause/server restart stops collection;
-invoke again once in the parent for a fresh baseline. A new parent can join the same
+use an authorized same-live-root UI resume, or invoke again once in the parent for
+a fresh baseline. A new parent can join the same
 open task with its original arm and price pin. Earlier/unobserved intervals are not
 backfilled. A discovered older member records `late_linked_member`. Unsupported descendants and missing usage remain gaps, not zero. Complete
 cost and inference stay unavailable; metadata hooks can continue during pause
@@ -155,3 +157,42 @@ exclusions. Already observed counter conflicts stop collection.
 For the isolated ordinary Codex CLI qualification runner and its explicit native approval boundary, see [qualification procedure](../validation/codex-ordinary-binding-qualification.md). Preparation and Node-only fixtures do not open production admission.
 
 For the isolated qualification runner, the UI also shows parent/child own request, input/output and partial cost rows with an observed sum. Its same-live-root resume and separate owned-AI emergency stop preserve the original deadline and safety counters; paused source counters remain unverified. See [the bounded procedure](../validation/codex-ordinary-binding-qualification.md).
+
+## Claude human-operated UI pilot
+
+The local operator may select one prepared `functional_pilot` task using the
+`claude-ordinary-human-pilot` source profile, with an exact candidate version
+listed by the ordinary provider (currently 2.1.291 or 2.1.293). Existing file and
+launch-workflow version compatibility does not qualify ordinary family sources.
+The profile, binary version, project source directory and receipt directory must
+be reviewed before installation or native observation. A browser or manifest
+cannot grant collection authority. The existing `ui --pilot-task` local command
+prepares either product; `--pilot-observe --pilot-until-stop` additionally grants
+only that selected task's explicit-stop observation. It does not launch an agent.
+
+The human opens a fresh Claude terminal after the observer is ready, invokes
+`/harness-connect` once in the parent, then creates up to two new family members.
+No child invocation, fixed model, effort or child type is required. Own requests
+and partial estimates are shown separately per member and as an observed sum.
+Claude membership is flattened under the root; nested direct parents are not
+proven. Unsupported members and intervals remain explicit gaps.
+
+Pause, completion and revocation stop collection without terminating Claude.
+Collection has no elapsed-time cutoff; the frozen comparison follow-up remains
+separate. UI resume revalidates the exact persisted live root binding, project,
+preparation, source identity, process and deletion/revocation state, even when
+its original receipt is old. Restart stays paused. Resume establishes a new
+baseline and excludes paused/offline requests without backfill.
+
+New connections still require a fresh receipt. An old receipt alone cannot
+select a new root, project or task, and it does not authorize history discovery.
+Legacy bindings missing retained process proof fail closed; create a separately
+prepared task and fresh Claude root rather than replacing their stored identity.
+Native process exit/relaunch is a separate boundary, not measurement resume.
+Skill metadata hooks may continue while collection is paused. Receipt lifetime
+is separate from the hook timeout and the helper's fresh-receipt lookup window.
+
+This preparation has synthetic evidence only. Actual 2.1.293 skill loading,
+family counters, pause/resume and human completion still need an explicitly
+approved native trial. Ordinary production admission, full task cost and
+inferential decisions remain unavailable.

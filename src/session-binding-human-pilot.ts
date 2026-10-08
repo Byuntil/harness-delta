@@ -60,3 +60,11 @@ export function checkCodexHumanPilotIdentity(scope: CodexHumanPilotScope, store:
   if(!Number.isFinite(bornAt)||bornAt<Date.parse(value.openedAt))throw new Error('binding_pilot_family_scope');
  }
 }
+
+
+export { claudeHumanPilotProfileId, assertClaudeHumanPilotSource } from './session-binding-claude-human-pilot.js';
+import { isClaudeHumanPilotProtocol, isClaudeHumanPilotScope, assertClaudeHumanPilotScope, checkClaudeHumanPilotIdentity, type ClaudeHumanPilotScope } from './session-binding-claude-human-pilot.js';
+export type HumanPilotScope = CodexHumanPilotScope | ClaudeHumanPilotScope;
+export const isHumanPilotProtocol = (protocol: FlexibleProtocol) => isCodexHumanPilotProtocol(protocol) || isClaudeHumanPilotProtocol(protocol);
+export const assertHumanPilotScope = (scope: HumanPilotScope, store: Store, taskId: string, provider?: SessionBindingProvider) => isClaudeHumanPilotScope(scope) ? assertClaudeHumanPilotScope(scope, store, taskId, provider) : assertCodexHumanPilotScope(scope, store, taskId, provider);
+export const checkHumanPilotIdentity = (scope: HumanPilotScope, store: Store, taskId: string, identity: VerifiedSessionIdentity) => isClaudeHumanPilotScope(scope) ? checkClaudeHumanPilotIdentity(scope, store, taskId, identity) : checkCodexHumanPilotIdentity(scope, store, taskId, identity);

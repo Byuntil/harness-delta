@@ -39,7 +39,7 @@ export function registerLocalWebCommand(program: Command, store: () => Store, pr
     .option('--port <number>', '127.0.0.1 listen port', '4318')
     .option('--metadata <file>', 'private UI metadata database (separate from measurement data)')
     .option('--setup <file>', 'existing reviewed local UI setup manifest')
-    .option('--pilot-task <id>', 'prepare UI for one unverified native Codex pilot; no source reads')
+    .option('--pilot-task <id>', 'prepare UI for one unverified native Codex or Claude pilot; no source reads')
     .option('--pilot-until-stop', 'collect until explicit pause, completion or revocation; comparison deadline is retained')
     .option('--pilot-observe', 'authorize the exact pilot task receipt sources after installation/source scope review')
     .action(async (options: WebCommandOptions) => { await serve(store(), options, print); });

@@ -27,7 +27,9 @@ node dist/cli.js --db local.db session link SESSION_ID --task task1 --source /pa
 node dist/cli.js --db local.db collect --task task1
 ```
 
-`--version` must be the exact registered version for that product.
+`--version` must match the actual product version. An exact registered version or
+a stable release inside its declared file-source compatibility window is eligible;
+conditional reuse remains unverified. See the version controls below.
 
 Only explicit linked files are opened, after registered/active scope is checked.
 No global transcript discovery occurs. The first poll establishes a baseline.

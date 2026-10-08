@@ -59,7 +59,9 @@ then baselines the surviving family before future collection. Multiple linked
 roots require explicit parent reconnect rather than an arbitrary root choice.
 Older persisted bindings without a retained receipt require explicit parent
 reconnect. Migration022 adds only the nullable private receipt; existing identities,
-usage and assignment remain unchanged. No paused/offline usage is backfilled. Receipt expiry, source change, configuration
+usage and assignment remain unchanged. No paused/offline usage is backfilled. Fresh connections still reject receipt expiry;
+the Claude human pilot below permits only exact persisted live-binding revalidation
+without an age cutoff. Source change, configuration
 drift, closed windows and deleted/revoked scope remain blockers.
 
 The isolated qualification runner optionally adds its opaque owner lease,
@@ -71,7 +73,7 @@ as the collector; provider/browser `productionSupported` assertions cannot open 
 
 Ordinary native family admission remains closed. Codex 0.160.0 needs actual
 hook/materialized-path/header and own-counter conformance for the supported
-family/history scope. Claude 2.1.291 remains a candidate and needs actual transcript,
+family/history scope. Claude 2.1.291 and 2.1.293 remain candidates and need actual transcript,
 hook loading, family membership and own-counter conformance; nested immediate
 parents are unverified. Existing admitted workflow profiles and root-only
 `no_child_activity` conformance cannot substitute for that evidence. A future
@@ -125,8 +127,8 @@ baselines retain up to 1,024 distinct excluded own request IDs separately from t
 rolling observed replay window; overflow, unreadable or partial baseline fails
 closed with a fixed blocker. Missing baseline counters still retain an owned ID.
 Changed counters on an already observed request stop collection as a conflict. Child
-re-calls confirm independently discovered active members; paused families require
-parent reconnect. Candidate formats/counters and actual hook loading remain
+re-calls confirm independently discovered active members; paused families use
+authorized same-live-root UI resume or parent reconnect. Candidate formats/counters and actual hook loading remain
 qualification-pending. Same-user metadata files are a local trust boundary and
 cannot prevent deliberate same-user forgery; they are not remote authentication.
 
@@ -176,3 +178,21 @@ preparation, generation, window, dedup and pause fences still apply. Assignment
 preparation alone may use the candidate; normal activation/adapter execution and
 real allocation remain gated. See the
 [collaborative pilot procedure](../validation/codex-human-session-pilot.md).
+
+## Claude human pilot preparation
+
+The local operator's existing human-pilot authority now supports the separate
+`claude-ordinary-human-pilot` profile at an exact ordinary candidate version.
+Production admission stays closed. Source metadata freshness and family pins
+precede transcript row scans; the pilot permits one new root and two members,
+with flattened membership rather than an asserted nested direct-parent topology.
+
+Claude UI resume uses only the persisted binding's pinned receipt and full live
+process/source identity. Receipt age and source inactivity do not expire that
+existing authorization. New connection still requires a fresh receipt; scope,
+preparation, source replacement, revocation and deletion continue to fail closed.
+Missing legacy process proof fails closed and requires a separately prepared task
+and fresh Claude root without replacing the old stored identity. Explicit-stop
+collection never imposes a native deadline or process termination. Baselines
+exclude unobserved usage after pause/restart. Synthetic evidence is not actual
+native qualification; see the paired [pilot procedure](../runbooks/harness-connect.md#claude-human-operated-ui-pilot).

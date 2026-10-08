@@ -90,7 +90,7 @@ export function projectFlexibleComparison(input: FlexibleSnapshotInput, historic
     if (a.gaps.some(g => Date.parse(g.started_at) < end && Date.parse(g.ended_at ?? new Date(end).toISOString()) >= start && Date.parse(g.recorded_at) <= evaluation)) facts.continuous_observation = 'violated';
     if (Date.parse(a.coverage.window_start) !== start || Date.parse(a.coverage.window_end) !== Date.parse(a.followup_ends_at)) throw new Error('coverage_window_mismatch');
     if (observed.some(u => !runtime.some(r => r.id === u.event.payload.runtime_evidence_id && r.session_id === u.event.session_id && r.model === u.event.payload.model && r.source !== 'self_attested'))) facts.configuration_accounting = 'unknown';
-    const cost = start < end ? aggregateTaskCost(observed.map(u => u.event), config.price_table, { ...a.coverage, window_start: new Date(start).toISOString(), window_end: new Date(end).toISOString(), facts }, historicalReplay)
+    const cost = start < end ? aggregateTaskCost(observed.map(u => u.event), config.price_table, { ...a.coverage, window_start: new Date(start).toISOString(), window_end: new Date(end).toISOString(), facts }, runtime, historicalReplay)
       : { currency: config.price_table.currency, price_table_id: config.price_table.id, complete_amount: null, partial_amount: null, usage_complete: false, price_complete: false, reasons: ['missing_value' as const] };
     const outcome = a.outcome && window(a.outcome.assessed_at) ? a.outcome : null;
     if (outcome?.criteria_met.some(id => !a.metadata.criterion_ids.includes(id))) throw new Error('invalid_criteria');

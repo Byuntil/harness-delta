@@ -4,16 +4,17 @@ export interface Project { id: string; name: string; directory: string; baseline
 export interface Setup { id: string; name: string; project_id: string; arm_a: string; arm_b: string; types: string[]; sizes: string[]; support: string }
 export interface TaskAction { code: string; enabled: boolean; reason: string | null }
 export interface BindingReading {status: 'observed'|'partial'|'missing';value:number|null;statuses:string[];reasons:string[]}
-export interface BindingSummary {requests:number|null;input_total:BindingReading;output_total:BindingReading;partial_amount:string|null;currency:string|null;unpriced_events:number;price_table_id:string|null;complete_cost:null}
+export interface CostAmounts { partial_amount:string|null;currency:string|null;compatibility_unverified_partial_amount?:string|null;legacy_unverified_partial_amount?:string|null;compatibility?:{invalidated_events:number}|null }
+export interface BindingSummary extends CostAmounts {requests:number|null;input_total:BindingReading;output_total:BindingReading;unpriced_events:number;price_table_id:string|null;complete_cost:null}
 export interface Task {
  id: string; name: string; project_id: string; setup_id: string; version: string; state: string; status: string;
  measurement: { end_condition?: 'explicit_stop' | 'followup_deadline'; state: string; active_ms: number | null; requests: number | null; window: { started_at: string | null; ends_at: string | null } };
  outcome: { status: string; assessed_at: string } | null; attempt: number;
  preparation: { state: string; configuration_evidence: string; native_context_evidence: string; freshness_evidence: string; tool_use_evidence: string; assigned_variant_id: string | null };
- price: { partial_amount: string | null; currency: string; unpriced_events: number; basis: string | null };
+ price: CostAmounts & { currency: string; unpriced_events: number; basis: string | null };
  actions: TaskAction[]; startup: { start_command: string; ticket_id: string } | null;
  criteria: string[]; source: { handle: string; label: string } | null; reason: string | null;
- binding?: { state: string; roots: number; children: number; requests: number | null; gaps: string[]; cost_coverage: 'partial'; support: string; sessions: (BindingSummary & {session_id:string;parent_session_id:string|null;agent_metadata?:AgentDisplayMetadata|null;models?:string[]})[];summary:BindingSummary };
+ binding?: { product?: 'codex'|'claude_code'; state: string; roots: number; children: number; requests: number | null; gaps: string[]; cost_coverage: 'partial'; support: string; sessions: (BindingSummary & {session_id:string;parent_session_id:string|null;agent_metadata?:AgentDisplayMetadata|null;models?:string[]})[];summary:BindingSummary };
 }
 export interface Catalog { status: string; catalog_version: number | null; verified_at: string | null; verification_age_days?: number | null;
  online_source?: { status: string; publisher_id: string | null }; reason: string | null; can_attempt_online_refresh?: boolean }

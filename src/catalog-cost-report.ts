@@ -8,7 +8,7 @@ import { priceUsage, sumAmounts, type LegacyInputBasis } from './pricing.js';
 /** Pure metadata projection. Provider bindings are an explicit reference policy, not billing evidence. */
 export function projectCatalogCost(events: readonly UsageEvent[], basis: PriceBasis, taskId: string, cutoff: string, inputBasis: LegacyInputBasis,
   context: MatchContext = { referenceBinding: true }, historicalReplay = false) {
-  const report = projectObservedCost(events, basis.table, taskId, cutoff, inputBasis, historicalReplay);
+  const report = projectObservedCost(events, basis.table, taskId, cutoff, inputBasis, context.runtimeEvidence, historicalReplay);
   const unique = new Map<string, UsageEvent>();
   for (const raw of events) {
     const event = EventSchema.parse(raw) as UsageEvent;
@@ -28,12 +28,12 @@ export function projectCatalogCost(events: readonly UsageEvent[], basis: PriceBa
     if (!accepted.size) { amounts.push(null); unavailableEvents++; reasons.add('unpriced_component'); continue; }
     // A transient rate view prevents rejected matches entering arithmetic. It is never registered
     // or serialized as a replacement table; the output retains the complete frozen basis/hash.
-    const priced = priceUsage(event, { ...basis.table, entries: basis.table.entries.filter(entry => entry.product === usage.product && entry.model === usage.model ? accepted.has(entry.component) : true) }, inputBasis);
+    const priced = priceUsage(event, { ...basis.table, entries: basis.table.entries.filter(entry => entry.product === usage.product && entry.model === usage.model ? accepted.has(entry.component) : true) }, inputBasis, context.runtimeEvidence);
     priced.reasons.forEach(reason => reasons.add(reason));
     amounts.push(priced.partial_amount); if (priced.partial_amount === null) unavailableEvents++;
   }
   const unknown = matches.filter(match => match.status !== 'matched');
-  return { ...report, report_version: 'catalog-observed-cost-v1', price_basis_hash: basis.basis_hash, catalog_hash: basis.catalog_hash,
+  return { ...report, report_version: basis.catalog.schema_version === 1 ? 'catalog-observed-cost-v1' : 'catalog-observed-cost-request-tiers-v2', price_basis_hash: basis.basis_hash, catalog_hash: basis.catalog_hash,
     catalog_id: basis.catalog.catalog_id, reference_policy_id: basis.policy_id, matching_version: basis.matching_version,
     reference_conditions: basis.conditions, matches, unknown_price_components: unknown.length,
     price_reasons: [...new Set(unknown.flatMap(match => match.reason ? [match.reason] : []))].sort(),
