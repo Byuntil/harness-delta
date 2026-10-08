@@ -33,7 +33,7 @@ test('CLI register/link/foreground collect/human outcome/report/delete keeps raw
  }finally{if(collecting){process.emit('SIGINT');await collecting;}rmSync(root,{recursive:true,force:true});}
 });
 
-test('CLI rejects an unregistered session version without a session row', async () => {
+test('CLI rejects an out-of-window session version without a session row', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cli-unregistered-'));
   const file = join(root, 'local.db');
   const run = (args: string[]) => main(['--db', file, ...args]);
@@ -47,7 +47,7 @@ test('CLI rejects an unregistered session version without a session row', async 
     expect(await run(['task', 'register', 't1', '--project', 'p1', '--type', 'feature', '--size', 'small', '--assignee', 'u1', '--product', 'codex', '--model', 'synthetic', '--criteria', 'c1'])).toBe(0);
     expect(await run([
       'session', 'link', 's9', '--task', 't1', '--source', '/synthetic/does-not-exist-unregistered.jsonl',
-      '--product', 'codex', '--version', '0.159.0',
+      '--product', 'codex', '--version', '0.164.0',
     ])).toBe(2);
     expect(errors.join('')).toBe('unsupported\n');
     const store = new Store(file);

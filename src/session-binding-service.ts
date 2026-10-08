@@ -217,7 +217,10 @@ export function createSessionBindingService(options: SessionBindingServiceOption
         projectCatalogCost(events,readPriceBasis(store,tableId),taskId,clock(),'output-only-v1',{referenceBinding:true,runtimeEvidence:capture.runtimeEvidence}):
         projectObservedCost(events,capture.report.price_table,taskId,clock(),'output-only-v1',capture.runtimeEvidence)):null;
       return {requests:events.length||null,input_total:total(events,'input_total'),output_total:total(events,'output_total'),
-        partial_amount:priced?.partial_amount??null,unpriced_events:priced?.unpriced_events??0,
+        partial_amount:priced?.partial_amount??null,
+        compatibility_unverified_partial_amount:priced?.compatibility_unverified_partial_amount??null,
+        legacy_unverified_partial_amount:priced?.legacy_unverified_partial_amount??null,
+        compatibility:priced?.compatibility??null,unpriced_events:priced?.unpriced_events??0,
         currency:priced?.currency??null,price_table_id:tableId,cost_coverage:'partial' as const,complete_cost:null};
     };
     return { state: all.some(row => row.state === 'observing' && row.generation === task.generation) && task.state === 'active' ? 'observing' : all.length ? 'stopped' : 'unconnected',

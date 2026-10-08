@@ -29,7 +29,9 @@ node dist/cli.js --db local.db session link SESSION_ID --task task1 --source /pa
 node dist/cli.js --db local.db collect --task task1
 ```
 
-`--version`에는 해당 제품의 등록된 정확한 버전만 쓸 수 있습니다.
+`--version`에는 실제 제품 버전을 입력하세요. 등록된 정확한 버전 또는 해당 파일 원본의
+명시된 호환성 범위 안에 있는 안정 릴리스를 사용할 수 있습니다. 조건부 재사용은
+미검증 상태를 유지합니다. 아래 버전 제어 절차를 확인하세요.
 
 등록된 프로젝트인지, 작업이 활성 상태인지 확인한 뒤 명시적으로 연결한 파일만 읽습니다.
 전체 세션 로그를 자동으로 검색하지 않습니다. 첫 수집에서는 이후 측정을 위한 기준점을 잡습니다.
@@ -114,7 +116,44 @@ DB 데이터·설정·보고 기준시각이 같으면 같은 기간 보고서�
 
 ## 버전, 적합성 확인, 업데이트 제어
 
-등록된 파일 어댑터는 부분 관측입니다. 현재 허용 버전은 Codex CLI 0.156.1/0.158.0과 Claude Code 2.1.283입니다. 등록되지 않은 버전, 범위, 접미사는 파일을 읽기 전에 거절되며 세션으로 저장되지 않습니다. Codex 0.158.0은 M2 경계 내 단일 세션의 순차적 부분 사용량 수집용으로 등록되었습니다. 자세한 기준은 [ADR 007](../decisions/007-adapter-version-profiles.md)을 참고하세요.
+2026-10-08 구현: [ADR 013](../decisions/013-forward-version-compatibility.md)에 따라
+명시된 유한 범위의 안정 릴리스에 기존 파서를 자동으로 조건부 재사용합니다.
+파일 수집은 Codex 0.158.0 이후 0.164.0 미만 버전에 0.158.0 파서를 사용하고,
+Claude Code 2.1.283 이후 2.2.0 미만 버전에 2.1.283 파서를 사용합니다.
+따라서 Codex CLI 0.161.0과 Claude Code 2.1.293은 기본적으로
+`compatibility_unverified` 신뢰 상태로 등록됩니다. 등록된 정확한 버전은 검증 상태를
+유지합니다. 사전 릴리스, 접미사, 등록되지 않은 이전 버전, 범위 밖 릴리스는
+원본 접근 전에 거부됩니다.
+
+사용량 기록은 실제 제품 버전, 파서/프로필, 규칙 리비전을 보존합니다.
+작업 보고서는 미검증 토큰을 `usage.compatibility_unverified`에 표시합니다.
+`usage.partial_tokens`에는 검증된 관측만 포함됩니다. 원본 출처 정보가 없는 과거
+native 사용량은 `usage.legacy_unverified`에 표시됩니다. 비용 보고서는
+`compatibility_unverified_partial_amount`와 `legacy_unverified_partial_amount`를
+분리합니다. 모든 관측이 미검증인 작업의 검증된 합계는 0이 아닌 null입니다.
+모든 데이터는 부분 관측을 유지합니다.
+
+```sh
+node dist/cli.js --db ./local.db compatibility status
+node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.161.0 --source file
+node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.293 --source file
+node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.161.0 --source file --reason semantic_incompatibility
+```
+
+예상 결과: inspect는 실제 버전, 선택된 파서, 신뢰 상태를 반환합니다. invalidate는
+`invalidated`를 반환합니다. 필수 계약 검증에 실패하면 해당 버전/원본 집단을 차단하고,
+추가 읽기를 중지하며, 이후 보고서와 가격 재평가에서 기존 추정값도 제외합니다.
+차단은 재시작 후에도 유지됩니다. 진단에는 고정된 메타데이터 범주만 사용합니다.
+영향을 받은 내보내기 스냅샷은 신뢰할 수 없는 상태로 보존하세요. 로컬 무효화는
+외부 사본을 회수하지 못합니다. 차단을 해제하기 전에 합성 재현, 의미가 바뀐 경우
+검토된 명명 파서 변형, 집중 테스트, 전체 검증이 필요합니다.
+자동 또는 사용자용 차단 해제 단축 경로는 없습니다.
+
+등록된 정확한 파일 어댑터도 부분 관측입니다. Codex CLI 0.156.1/0.158.0과
+Claude Code 2.1.283이 해당됩니다. Codex 0.158.0은 M2 경계 안의 순차적 부분 사용량을
+다룹니다. [ADR 007](../decisions/007-adapter-version-profiles.md)을 확인하세요.
+파일 호환성은 native 실행을 허용하지 않습니다.
+[native 작업 안내](task-native-workflow.md)의 별도 작업 흐름 범위를 사용하세요.
 
 저장소의 적합성 확인 스크립트 `scripts/conformance/`는 수동으로만 실행합니다. 설치, 수집, 훅, CI는 이 스크립트를 실행하지 않습니다. CI는 오프라인 합성 단위 테스트로 보고서 투영, 후보 파서, 확인·훅 신뢰 도우미, exec 출력 축약기를 실행합니다. CI는 적합성 확인 실행기를 실행하지 않습니다. 설계 승인은 실제 제품 실행 승인이 아닙니다.
 

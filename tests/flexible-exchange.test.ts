@@ -83,3 +83,19 @@ test('v2_retention_purges_cost_runtime_headers_snapshots_and_blocks_replay',asyn
     expect(()=>importExchangePackage(f.destination,f.pkg,'destination-1',()=> '2026-01-03T01:00:00Z')).toThrow('deleted_identifier');
   }finally{f.cleanup();}
 });
+
+test('synthetic exchange rejects native compatibility provenance and reference estimates atomically',()=>{
+  const f=fixture();try{
+    if(f.pkg.schema_version!==2)throw new Error('expected_flexible');
+    const fields=[{compatibility:{verified_events:0,compatibility_unverified_events:1,legacy_unverified_events:0,invalidated_events:0,sources:[{
+      state:'compatibility_unverified',product:'codex',product_version:'0.161.0',source:'codex_workflow',parser_version:'0.160.0',
+      parser_revision:'synthetic-parser',profile_id:'synthetic-profile',rule_revision:'synthetic-rule',event_count:1}]}},
+      {compatibility_unverified_partial_amount:'0.26'},{legacy_unverified_partial_amount:'0.26'}];
+    for(const field of fields){
+      const pkg={...f.pkg,assignments:f.pkg.assignments.map(a=>({...a,evidence:{...a.evidence,cost:{...a.evidence.cost,...field}}}))};
+      expect(()=>importExchangePackage(f.destination,pkg,'destination-1',()=> '2026-01-01T04:00:00Z')).toThrow('invalid_exchange_package');
+    }
+    expect(f.destination.all('SELECT * FROM exchange_tasks')).toEqual([]);
+    expect(f.destination.all('SELECT * FROM exchange_import_receipts')).toEqual([]);
+  }finally{f.cleanup();}
+});

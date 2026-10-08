@@ -1,3 +1,4 @@
+import { resolveSourceCompatibility } from '../src/source-compatibility.js';
 import { expect, test } from 'vitest';
 import { bundledPriceCatalog, compilePriceBasis, matchCatalogComponent } from '../src/price-catalog.js';
 import { projectCatalogCost } from '../src/catalog-cost-report.js';
@@ -5,7 +6,7 @@ import { makeFlexibleFixture } from './helpers/flexible-fixture.js';
 
 function event(model = 'gpt-6.1-sol') {
   const original = makeFlexibleFixture().events[0]!;
-  return { ...original, payload: { ...original.payload, product: 'codex' as const, model } };
+  return { ...original, payload: { ...original.payload, product: 'codex' as const, product_version:'0.160.0', source_compatibility:resolveSourceCompatibility('codex','0.160.0','codex_workflow')!, model } };
 }
 test('standardized matched cost uses observed disjoint components and inclusive output once', () => {
   const basis = compilePriceBasis(bundledPriceCatalog()); const e = event();

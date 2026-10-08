@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { authorizeCandidateScope, checkedCandidateScope, type CandidateScope } from './nested-candidate.js';
 import { parseCodexCandidateRollout, type CodexCandidateSources } from './codex-candidate-rollout.js';
+import { assertCompatibilityAllowed, invalidateCompatibility, lookupCompatibleFileProfile, resolveSourceCompatibility, sessionCompatibility } from './source-compatibility.js';
 import { lookupFileProfile } from './adapter-profiles.js';
 import { parseSnapshot, metadataKey, type SourceScope, type Snapshot } from './adapters.js';
 import { TimestampSchema } from './contracts.js';
@@ -174,20 +175,28 @@ export class Collector {
           let previous=pending.get(link.id);
           if(previous && previous.generation!==link.generation)previous=undefined;
           let stage:SourceDiagnosticCategory='read_failed';
+          const compatibility=sessionCompatibility(this.store,link.id);
           try {
             if(this.store.get('SELECT 1 FROM claude_workflow_runs WHERE task_id=?',[taskId]))throw new SourceFailure('unsupported_source','unsupported');
+            if(compatibility && (compatibility.product!==link.product || compatibility.product_version!==link.product_version))throw new Error('unsupported');
+            // Access checks also apply to old exact sessions without provenance.
+            // Resolving here grants no historical trust and does not persist a pin.
+            const accessCompatibility=compatibility??resolveSourceCompatibility(link.product,link.product_version,'file');
+            if(accessCompatibility)assertCompatibilityAllowed(this.store,accessCompatibility);
             const taskMetadata = parseTaskMetadata(JSON.parse(link.metadata) as unknown);
             if ('schema_version' in taskMetadata && taskMetadata.schema_version === 2) {
               const checkpoint = this.collectFlexible(link, now, previous);
               if (checkpoint) pending.set(link.id, checkpoint); else pending.delete(link.id);
               continue;
             }
-            if (lookupFileProfile(link.product, link.product_version) === 'unsupported') throw new Error('unsupported');
+            if (lookupCompatibleFileProfile(link.product, link.product_version,compatibility??undefined) === 'unsupported' ||
+              !compatibility && lookupFileProfile(link.product,link.product_version)==='unsupported') throw new Error('unsupported');
             bytes=this.read(link.source_path);
             if(previous && bytes.identity!==previous.identity)throw new SourceFailure('identity_changed');
             if(previous && bytes.size<previous.size)throw new SourceFailure('source_truncated');
             if(previous && now<previous.lastAt)throw new SourceFailure('clock_regressed');
-            stage='parse_failed';snapshot=parseSnapshot(bytes.text,scope);
+            stage='parse_failed';snapshot=parseSnapshot(bytes.text,scope,compatibility??undefined);
+            if(snapshot.blocked && compatibility?.state==='compatibility_unverified')throw new SourceFailure('parse_failed','unsupported');
             // A stable same-size Claude rewrite may leave every measurement
             // field unchanged. Preserve the interval only with positive semantic
             // equality; new/revised metadata and other products still fail closed.
@@ -197,8 +206,9 @@ export class Collector {
             if(metadata.product!==link.product || snapshot.model && snapshot.model!==metadata.model ||
               snapshot.records.some(r=>r.payload.kind==='usage' && r.payload.model!==metadata.model))throw new SourceFailure('model_mismatch','unsupported');
           }catch(error){
+            if(compatibility?.state==='compatibility_unverified' && stage==='parse_failed')invalidateCompatibility(this.store,compatibility,'contract_failed');
             const reason=error instanceof Error && ['unsupported','scope_mismatch'].includes(error.message)?error.message:'source_error';
-            diagnostics.push({session_id:link.id,at:now,category:sourceCategory(error,reason==='scope_mismatch'?'scope_mismatch':reason==='unsupported'?'unsupported_source':stage)});
+            diagnostics.push({session_id:link.id,at:now,category:error instanceof Error&&error.message==='compatibility_invalidated'?'compatibility_invalidated':sourceCategory(error,reason==='scope_mismatch'?'scope_mismatch':reason==='unsupported'?'unsupported_source':stage)});
             this.observe(taskId,now,now,'error',reason);pending.delete(link.id);
             this.store.execute('DELETE FROM cursors WHERE session_id=?',[link.id]);continue;
           }
@@ -206,6 +216,7 @@ export class Collector {
           if(!current || current.state!=='active' || current.generation!==link.generation){pending.delete(link.id);continue;}
           const fingerprints=Object.fromEntries(snapshot.records.map(row=>[row.key,metadataKey(JSON.stringify(row))]));
           if(previous && Object.entries(previous.fingerprints).some(([key,value])=>fingerprints[key]!==value)){
+            if(compatibility?.state==='compatibility_unverified')invalidateCompatibility(this.store,compatibility,'contract_failed');
             diagnostics.push({session_id:link.id,at:now,category:'record_changed'});
             this.observe(taskId,now,now,'error','source_error');pending.delete(link.id);
             this.store.execute('DELETE FROM cursors WHERE session_id=?',[link.id]);continue;

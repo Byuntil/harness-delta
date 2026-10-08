@@ -176,8 +176,8 @@ Claude 기준선의 제외 own request ID는 실시간 replay 목록과 별도�
 
 ## Claude 사용자 조작 UI pilot
 
-로컬 운영자는 ordinary provider에 나열된 정확한 후보 버전(현재 2.1.291 또는
-2.1.293)과 `claude-ordinary-human-pilot` source profile을 사용한 준비된
+로컬 운영자는 ordinary provider에 나열된 정확한 후보 버전(현재 2.1.291,
+2.1.293 또는 2.1.294)과 `claude-ordinary-human-pilot` source profile을 사용한 준비된
 `functional_pilot` 작업 하나를 선택할 수 있습니다. 기존 file·실행 workflow의
 버전 호환성은 일반 가족 원본의 지원 검증이 아닙니다. 설치·실제 관측 전에
 profile, binary 버전, 프로젝트 원본 디렉터리와 receipt 디렉터리를 검토하세요.
@@ -207,6 +207,12 @@ native 프로세스 종료·재실행은 측정 재개와 별도 경계입니다
 skill metadata hook은 계속될 수 있습니다. receipt 수명은 hook timeout이나
 helper의 신선한 receipt 탐색 구간과 별개입니다.
 
-이 준비는 합성 증거만 갖습니다. 실제 2.1.293 skill 로딩, 가족 counter,
+[2.1.294 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21294)은
+`prompt`와 `agent` hook 판단 수정을 설명합니다. native transcript 필드,
+command hook 로딩이나 counter 호환성을 증명하지 않습니다. ordinary parser는
+변경하지 않았으며, 2.1.294 후보는 연결, 가족 usage, pause/resume과 사용자 완료의
+합성 검증 범위를 갖습니다.
+
+이 준비는 합성 증거만 갖습니다. 실제 2.1.293 또는 2.1.294 skill 로딩, 가족 counter,
 pause/resume과 사용자 완료는 별도로 승인된 native 시험이 필요합니다.
 일반 제품 수집 지원, 전체 작업 비용과 추론 결정은 아직 사용할 수 없습니다.

@@ -12,14 +12,14 @@ export const millis = (value: number) => new Date(Date.parse('2026-01-01T00:00:0
 export const jsonLines = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\n') + '\n';
 
 /** Independently authored metadata-only source rows; no real session contents. */
-export function collectionFixture(product: Product) {
+export function collectionFixture(product: Product, requestedVersion?: string) {
   const root = mkdtempSync(join(tmpdir(), 'deferred-collection-'));
   const store = new Store(':memory:');
   let now = 0;
   let reads = 0;
   const clock = () => millis(now);
   const life = new Lifecycle(store, clock);
-  const version = product === 'codex' ? '0.156.1' : '2.1.283';
+  const version = requestedVersion ?? (product === 'codex' ? '0.156.1' : '2.1.283');
   life.registerProject('p1', root);
   life.createTask('p1', 't1', { type: 'feature', expected_size: 'small', assignee: 'u1', product, model: 'synthetic', criterion_ids: ['c1'] });
   const common = (sessionId: string) => ({ sessionId, cwd: root, version });
@@ -30,7 +30,7 @@ export function collectionFixture(product: Product) {
     ? { type: 'event_msg', timestamp: millis(start), payload: { type: 'task_started', turn_id: id } }
     : { ...common(sessionId), type: 'user', promptId: id, timestamp: millis(start), message: { content: [] } };
   const usage = (end: number, units = 1, id = 'message1', sessionId = 's1'): unknown[] => product === 'codex'
-    ? [{ type: 'turn_context', payload: { model: 'synthetic' } }, { type: 'event_msg', timestamp: millis(end), payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100 * units, cached_input_tokens: 40 * units, output_tokens: 30 * units, reasoning_output_tokens: 0 } } } }]
+    ? [{ type: 'turn_context', payload: { model: 'synthetic', ...(version === '0.156.1' ? {} : {turn_id:id,collaboration_mode:{mode:'default'},multi_agent_version:'disabled'}) } }, { type: 'event_msg', timestamp: millis(end), payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100 * units, cached_input_tokens: 40 * units, output_tokens: 30 * units, reasoning_output_tokens: 0, ...(version === '0.156.1' ? {} : {cache_write_input_tokens:0}) } } } }]
     : [{ ...common(sessionId), type: 'assistant', timestamp: millis(end), message: { id, model: 'synthetic', content: [], usage: { input_tokens: 20, cache_creation_input_tokens: 40, cache_read_input_tokens: 40, output_tokens: 30 } } }];
   const close = (end: number, id = 'turn1'): unknown[] => product === 'codex'
     ? [{ type: 'event_msg', timestamp: millis(end), payload: { type: 'task_complete', turn_id: id } }]

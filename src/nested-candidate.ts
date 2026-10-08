@@ -1,3 +1,5 @@
+import type { SourceCompatibility } from './contracts.js';
+import { assertCompatibilityAllowed, resolveSourceCompatibility } from './source-compatibility.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { addTokens, IdSchema, ModelSchema, TimestampSchema, TokenSchema, type Reading } from './contracts.js';
@@ -17,7 +19,7 @@ import { claudeProbeProductVersion, claudeWorkflowProductVersions, type ClaudeWo
  * This module is deliberately absent from index.ts and production defaults.
  */
 /** Versions a Claude trace may carry: the pinned probe version plus the workflow list, read at call time. */
-export type ClaudeTraceProductVersion = ClaudeWorkflowProductVersion | typeof claudeProbeProductVersion;
+export type ClaudeTraceProductVersion = ClaudeWorkflowProductVersion;
 export function claudeTraceProductVersions(): readonly ClaudeTraceProductVersion[] {
   return [...new Set<ClaudeTraceProductVersion>([claudeProbeProductVersion, ...claudeWorkflowProductVersions])];
 }
@@ -81,7 +83,7 @@ const tokensSchema = z.object({ input_tokens: TokenSchema, cached_input_tokens: 
   cache_write_input_tokens: TokenSchema.default(0), output_tokens: TokenSchema,
   reasoning_output_tokens: TokenSchema, total_tokens: TokenSchema });
 const codexSchema = z.object({ kind: z.literal('codex_response'), occurredAt: TimestampSchema,
-  sessionMeta: z.object({ id: IdSchema, session_id: IdSchema, cli_version: z.literal('0.160.0'),
+  sessionMeta: z.object({ id: IdSchema, session_id: IdSchema, cli_version: z.string(),
     parent_thread_id: optionalId, source: z.union([z.enum(['cli', 'exec', 'vscode', 'mcp']),
       z.object({ subagent: z.object({ thread_spawn: z.object({ parent_thread_id: IdSchema, depth: z.number().int().positive() }) }) })]),
     forked_from_id: optionalId, forked_from_ordinal_exclusive: TokenSchema.nullish(), history_base: z.unknown().optional(),
@@ -94,7 +96,7 @@ const codexSchema = z.object({ kind: z.literal('codex_response'), occurredAt: Ti
 const claudeUsageSchema = z.object({ model: ModelSchema, effort: optionalId, request_id: IdSchema,
   client_request_id: optionalId, input_tokens: TokenSchema.nullish(), cache_read_tokens: TokenSchema.nullish(),
   cache_creation_tokens: TokenSchema.nullish(), output_tokens: TokenSchema.nullish() });
-const claudeSchema = z.object({ kind: z.literal('claude_trace'), productVersion: z.string().refine(isClaudeTraceProductVersion),
+const claudeSchema = z.object({ kind: z.literal('claude_trace'), productVersion: z.string(),
   processId: IdSchema, nativeSessionId: IdSchema, occurredAt: TimestampSchema, completed: z.boolean(),
   span: claudeUsageSchema.extend({ name: z.literal('claude_code.llm_request'), agent_id: optionalId, parent_agent_id: optionalId,
     success: z.boolean(), attempt: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
@@ -128,8 +130,9 @@ function usageProjection(scope: CandidateScope, mapping: Mapping, version: strin
       attribution: 'verified', billing_components: components } });
   return { kind: 'usage', event, runtime };
 }
-function projectCodex(scope: CandidateScope, mapping: Mapping, input: unknown, recordedAt: string): CandidateProjection {
+function projectCodex(scope: CandidateScope, mapping: Mapping, input: unknown, recordedAt: string, compatibility?: SourceCompatibility): CandidateProjection {
   const data = parse(codexSchema, input); const meta = data.sessionMeta;
+  if(meta.cli_version!==(compatibility?.product_version??'0.160.0'))throw new Error('candidate_invalid_metadata');
   const root = scope.sessions.find(s => s.sessionId === mapping.rootSessionId)!;
   const parent = scope.sessions.find(s => s.sessionId === mapping.parentSessionId);
   if (meta.id !== mapping.nativeSessionId || meta.session_id !== root.nativeSessionId ||
@@ -176,14 +179,15 @@ function projectCodex(scope: CandidateScope, mapping: Mapping, input: unknown, r
   const cached = checkedSum([usage.cached_input_tokens, usage.cache_write_input_tokens]);
   if (cached > usage.input_tokens || usage.reasoning_output_tokens > usage.output_tokens ||
     checkedSum([usage.input_tokens, usage.output_tokens]) !== usage.total_tokens) throw new Error('candidate_invalid_metadata');
-  return usageProjection(scope, mapping, '0.160.0', data.occurredAt, recordedAt, record.response_id, record.turn_id,
+  return usageProjection(scope, mapping, meta.cli_version, data.occurredAt, recordedAt, record.response_id, record.turn_id,
     turn.model, turn.effort ?? null, [record.session_id, record.turn_id, record.root_turn_id],
     { input: observed(usage.input_tokens), cache: observed(usage.cached_input_tokens), output: observed(usage.output_tokens), reasoning: observed(usage.reasoning_output_tokens) },
     [{ kind: 'ordinary_input', reading: observed(usage.input_tokens - cached) }, { kind: 'cache_read', reading: observed(usage.cached_input_tokens) },
       { kind: 'cache_write', reading: observed(usage.cache_write_input_tokens) }, { kind: 'output', reading: observed(usage.output_tokens) }]);
 }
-function projectClaude(scope: CandidateScope, mapping: Mapping, input: unknown, recordedAt: string): CandidateProjection {
+function projectClaude(scope: CandidateScope, mapping: Mapping, input: unknown, recordedAt: string, compatibility?: SourceCompatibility): CandidateProjection {
   const data = parse(claudeSchema, input); const span = data.span;
+  if(compatibility?data.productVersion!==compatibility.product_version:!isClaudeTraceProductVersion(data.productVersion))throw new Error('candidate_invalid_metadata');
   const parent = scope.sessions.find(s => s.sessionId === mapping.parentSessionId);
   if (data.processId !== mapping.processId || data.nativeSessionId !== mapping.nativeSessionId ||
     (span.agent_id ?? null) !== mapping.agentId || (span.parent_agent_id ?? null) !== (parent?.agentId ?? null)) throw new Error('candidate_scope_mismatch');
@@ -205,23 +209,31 @@ function projectClaude(scope: CandidateScope, mapping: Mapping, input: unknown, 
     [{ kind: 'ordinary_input', reading: reading(span.input_tokens) }, { kind: 'cache_read', reading: reading(span.cache_read_tokens) },
       { kind: 'cache_write', reading: reading(span.cache_creation_tokens) }, { kind: 'output', reading: reading(span.output_tokens) }]);
 }
-export function projectCandidateObservation(inputScope: CandidateScope, sourceId: string, metadata: unknown, recordedAt: string): CandidateProjection {
+export function projectCandidateObservation(inputScope: CandidateScope, sourceId: string, metadata: unknown, recordedAt: string, compatibility?: SourceCompatibility): CandidateProjection {
   const scope = checkedCandidateScope(inputScope); const mapping = sourceMapping(scope, sourceId);
+  if(compatibility)checkWorkflowCompatibility(scope,compatibility);
   parse(TimestampSchema, recordedAt);
   const kind = parse(kindSchema, metadata).kind;
   if (kind === 'claude_api_log' && mapping.product === 'claude_code') return { kind: 'unattributed', reason: 'trace_identity_required' };
-  if (kind === 'codex_response' && mapping.product === 'codex') return projectCodex(scope, mapping, metadata, recordedAt);
-  if (kind === 'claude_trace' && mapping.product === 'claude_code') return projectClaude(scope, mapping, metadata, recordedAt);
+  if (kind === 'codex_response' && mapping.product === 'codex') return projectCodex(scope, mapping, metadata, recordedAt,compatibility);
+  if (kind === 'claude_trace' && mapping.product === 'claude_code') return projectClaude(scope, mapping, metadata, recordedAt,compatibility);
   throw new Error('candidate_scope_mismatch');
 }
-export function authorizeCandidateScope(store: Store, scope: CandidateScope): void {
+function checkWorkflowCompatibility(scope:CandidateScope,compatibility:SourceCompatibility):void {
+  const source=scope.sessions[0]?.product==='codex'?'codex_workflow':'claude_workflow';
+  const resolved=resolveSourceCompatibility(compatibility.product,compatibility.product_version,source,compatibility.profile_id);
+  if(!resolved||JSON.stringify(resolved)!==JSON.stringify(compatibility)||scope.sessions.some(s=>s.product!==compatibility.product)||
+    compatibility.state==='compatibility_unverified'&&(source==='claude_workflow'?scope.sessions.length!==1:scope.sessions.length>2||scope.sessions.some(s=>s.parentSessionId!==null&&s.parentSessionId!==s.rootSessionId)))throw new Error('candidate_scope_mismatch');
+}
+export function authorizeCandidateScope(store: Store, scope: CandidateScope, compatibility?:SourceCompatibility): void {
+  if(compatibility){checkWorkflowCompatibility(scope,compatibility);assertCompatibilityAllowed(store,compatibility);}
   for (const s of scope.sessions) {
     let active;
     try { active = requireActiveScope(store, scope.taskId, s.sessionId); }
     catch { throw new Error('candidate_inactive_scope'); }
     const linked = store.get<{ parent_id: string | null; product_version: string | null }>('SELECT parent_id,product_version FROM sessions WHERE id=?', [s.sessionId]);
     if (active.project_id !== scope.projectId || active.product !== s.product || linked?.parent_id !== s.parentSessionId ||
-      (s.product === 'codex' ? linked.product_version !== '0.160.0' : !isClaudeTraceProductVersion(linked.product_version))) throw new Error('candidate_scope_mismatch');
+      (compatibility?linked.product_version!==compatibility.product_version:s.product === 'codex' ? linked.product_version !== '0.160.0' : !isClaudeTraceProductVersion(linked.product_version))) throw new Error('candidate_scope_mismatch');
   }
   // A candidate task cannot share usage accounting with production channels.
   // No new registration/migration is introduced for this offline-only guard.
@@ -240,22 +252,21 @@ export function authorizeCandidateScope(store: Store, scope: CandidateScope): vo
  * This callback does not grant permission to read a native source or its contents.
  */
 export function ingestCandidateObservation(store: Store, inputScope: CandidateScope, sourceId: string,
-  readMetadata: () => unknown, recordedAt: string): CandidateProjection & { inserted?: boolean } {
+  readMetadata: () => unknown, recordedAt: string, compatibility?:SourceCompatibility): CandidateProjection & { inserted?: boolean } {
   const scope = checkedCandidateScope(inputScope); sourceMapping(scope, sourceId); parse(TimestampSchema, recordedAt);
   return store.immediateTransaction(() => {
-    authorizeCandidateScope(store, scope);
+    authorizeCandidateScope(store, scope,compatibility);
     let metadata: unknown;
     try { metadata = readMetadata(); } catch { throw new Error('candidate_source_error'); }
-    authorizeCandidateScope(store, scope);
-    const projection = projectCandidateObservation(scope, sourceId, metadata, recordedAt);
+    authorizeCandidateScope(store, scope,compatibility);
+    const projection = projectCandidateObservation(scope, sourceId, metadata, recordedAt,compatibility);
     if (projection.kind !== 'usage') return projection;
     // Usage carries the version its source reported; it must be the linked session's version.
     if (store.get<{ product_version: string | null }>('SELECT product_version FROM sessions WHERE id=?', [projection.event.session_id])?.product_version !==
       projection.event.payload.product_version) throw new Error('candidate_scope_mismatch');
     // The key includes the version, so one native request must not also exist under another
     // accepted version label. Primary-key lookups over the current trace versions only.
-    if (projection.event.payload.product === 'claude_code' && claudeTraceProductVersions().some(version => version !== projection.event.payload.product_version &&
-      store.get('SELECT 1 FROM events WHERE id=?', [hash(['offline-nested-candidate-v1', 'claude_code', version, projection.runtime.request_id])]))) throw new Error('candidate_conflict');
+    if (projection.event.payload.product === 'claude_code' && store.get("SELECT 1 FROM runtime_evidence WHERE json_extract(payload,'$.product')='claude_code' AND json_extract(payload,'$.request_id')=? AND json_extract(payload,'$.product_version')!=? LIMIT 1",[projection.runtime.request_id,projection.event.payload.product_version])) throw new Error('candidate_conflict');
     let failure: string;
     try { return { ...projection, inserted: putUsageWithEvidence(store, projection.event, projection.runtime) }; }
     catch (error) {

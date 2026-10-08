@@ -1,3 +1,4 @@
+import { overlayEventCompatibility } from '../source-compatibility.js';
 import { captureFlexibleInput, FlexibleSnapshotInputSchema, projectFlexibleComparison, type FlexibleComparisonReport } from './flexible-comparison.js';
 import { parseProtocol } from '../flexible-contracts.js';
 import { createHash } from 'node:crypto';
@@ -34,8 +35,13 @@ function storedReport(row: SnapshotRow): ComparisonReport | FlexibleComparisonRe
     if (FlexibleSnapshotInputSchema.safeParse(raw).success) {
       const input = parseComparison(FlexibleSnapshotInputSchema,raw,'invalid_snapshot');
       const report = projectFlexibleComparison(input);
-      if(report.snapshot_hash !== row.snapshot_hash || canonicalJson(report) !== row.report_json)throw new Error('invalid_snapshot');
-      return report;
+      if(report.snapshot_hash !== row.snapshot_hash)throw new Error('invalid_snapshot');
+      if(canonicalJson(report) === row.report_json)return report;
+      // Old snapshots have no source provenance. Validate their original algorithm,
+      // then expose a conservative current view without rewriting frozen evidence.
+      if(input.assignments.some(a=>a.usages.some(u=>u.event.payload.source_compatibility)))throw new Error('invalid_snapshot');
+      if(canonicalJson(projectFlexibleComparison(input,true)) !== row.report_json)throw new Error('invalid_snapshot');
+      return {...report,limitations:[...report.limitations,'legacy_snapshot_source_trust_unverified']};
     }
     const input = parseComparison(ComparisonSnapshotInputSchema, JSON.parse(row.input_json) as unknown, 'invalid_snapshot');
     const hash = createHash('sha256').update(canonicalJson(input)).digest('hex');
@@ -54,8 +60,19 @@ export function readComparisonSnapshot(store: Store, reportId: string): Comparis
     const protocol = protocolRow(store, row.protocol_id);
     if (protocol.status === 'invalidated_by_deletion' || protocol.status === 'identity_conflict') return invalidated(reportId, protocol.status === 'identity_conflict' ? 'identity_conflict' : 'deletion');
     if (protocol.status !== 'frozen') throw new Error('protocol_not_active');
-    return storedReport(row);
+    return currentCompatibilityReport(store,row);
   });
+}
+function currentCompatibilityReport(store: Store, row: SnapshotRow): ComparisonReport | FlexibleComparisonReport {
+  const original = storedReport(row);
+  if (original.schema_version !== 2) return original;
+  const input = FlexibleSnapshotInputSchema.parse(JSON.parse(row.input_json) as unknown);
+  const effective = { ...input, assignments: input.assignments.map(a => ({ ...a,
+    usages: a.usages.map(u => ({ ...u, event: overlayEventCompatibility(store, u.event) })) })) };
+  if (canonicalJson(effective) === canonicalJson(input)) return original;
+  const report = projectFlexibleComparison(FlexibleSnapshotInputSchema.parse(effective));
+  return { ...report, snapshot_hash: original.snapshot_hash,
+    limitations: [...report.limitations, 'source_compatibility_invalidated_since_capture'] };
 }
 function captureAssignment(store: Store, assignment: AssignmentRow, cutoff: string, evaluatedAt: string): SnapshotAssignment {
   const task = store.get<TaskRow>('SELECT id,project_id,metadata,started_at,first_completed_at,first_assessed_at,first_success,finalized_at FROM tasks WHERE id=?', [assignment.task_id]);
@@ -147,7 +164,7 @@ function createFlexibleSnapshot(store:Store,request:ComparisonSnapshotRequest,cl
   if(row.status!=='frozen')throw new Error('protocol_not_active');
   const current=store.get<SnapshotRow>('SELECT report_id,protocol_id,input_json,report_json,snapshot_hash FROM flexible_report_snapshots WHERE report_id=?',[config.reportId]);
   if(store.get('SELECT report_id FROM comparison_report_snapshots WHERE report_id=?',[config.reportId]))throw new Error('report_conflict');
-  if(current){const prior=storedReport(current);if(prior.schema_version!==2 || prior.protocol_id!==config.protocolId || prior.cutoff!==config.cutoff || prior.revision_reason!==config.revisionReason || prior.supersedes_report_id!==(config.supersedesReportId??null))throw new Error('report_conflict');return prior;}
+  if(current){const prior=currentCompatibilityReport(store,current);if(prior.schema_version!==2 || prior.protocol_id!==config.protocolId || prior.cutoff!==config.cutoff || prior.revision_reason!==config.revisionReason || prior.supersedes_report_id!==(config.supersedesReportId??null))throw new Error('report_conflict');return prior;}
   const now=comparisonTimestamp(clock());
   if(Date.parse(config.cutoff)>Date.parse(now) || row.frozen_at===null || Date.parse(config.cutoff)<Date.parse(row.frozen_at))throw new Error('invalid_cutoff');
   if(config.revisionReason==='initial'){if(config.supersedesReportId)throw new Error('invalid_revision');}

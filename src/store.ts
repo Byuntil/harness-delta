@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import type { Event } from './contracts.js';
 import { EventSchema, TimestampSchema } from './contracts.js';
+import { assertCompatibilityAllowed, sessionCompatibility } from './source-compatibility.js';
 
 type EventRow = Omit<Event, 'payload'> & { payload: string };
 
@@ -15,7 +16,7 @@ export class Store {
     this.db = new Database(path);
     try {
       const version = this.db.pragma('user_version', { simple: true });
-      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql', '004_managed_observation.sql', '005_otel_receiver.sql', '006_task_comparison.sql', '007_comparison_reports.sql', '008_file_exchange_source.sql', '009_file_exchange_import.sql', '010_team_snapshots.sql', '011_flexible_runtime.sql', '012_flexible_comparison_scope.sql', '013_flexible_scope_validation.sql', '014_codex_workflow.sql', '015_codex_workflow_child.sql', '016_claude_workflow.sql', '017_external_preparation.sql', '018_price_catalog.sql', '019_external_connection_contract.sql', '020_session_bindings.sql', '021_session_binding_forgets.sql', '022_session_binding_connect_receipt.sql', '023_binding_collection_control.sql'];
+      const migrations = ['001_initial.sql', '002_lifecycle.sql', '003_assessment_time.sql', '004_managed_observation.sql', '005_otel_receiver.sql', '006_task_comparison.sql', '007_comparison_reports.sql', '008_file_exchange_source.sql', '009_file_exchange_import.sql', '010_team_snapshots.sql', '011_flexible_runtime.sql', '012_flexible_comparison_scope.sql', '013_flexible_scope_validation.sql', '014_codex_workflow.sql', '015_codex_workflow_child.sql', '016_claude_workflow.sql', '017_external_preparation.sql', '018_price_catalog.sql', '019_external_connection_contract.sql', '020_session_bindings.sql', '021_session_binding_forgets.sql', '022_session_binding_connect_receipt.sql', '023_binding_collection_control.sql', '024_source_compatibility.sql'];
       if (typeof version !== 'number' || !Number.isInteger(version) || version < 0 || version > migrations.length) {
         throw new Error('unsupported_schema_version');
       }
@@ -55,6 +56,20 @@ export class Store {
     if (!parsed.success) throw new Error('invalid_event');
     const event = parsed.data;
     return this.transaction(() => {
+      if (event.payload.kind === 'usage') {
+        if (event.payload.source_invalidated) throw new Error('invalid_event');
+        const pinned = sessionCompatibility(this, event.session_id);
+        const supplied = event.payload.source_compatibility;
+        // The exact legacy file profile cannot qualify an injected flexible parser.
+        const applies = pinned && (pinned.source !== 'file' || !('schema_version' in event.payload));
+        if (supplied && (!applies || JSON.stringify(supplied) !== JSON.stringify(pinned))) throw new Error('compatibility_scope_mismatch');
+        if (pinned) {
+          if (pinned.product !== event.payload.product || pinned.product_version !== event.payload.product_version) throw new Error('compatibility_scope_mismatch');
+          const linked = this.get<{product:string;product_version:string}>('SELECT product,product_version FROM sessions WHERE id=?', [event.session_id]);
+          if (!linked || linked.product !== pinned.product || linked.product_version !== pinned.product_version) throw new Error('compatibility_scope_mismatch');
+          if (applies) event.payload = EventSchema.parse({ ...event, payload: { ...event.payload, source_compatibility: pinned } }).payload;
+        }
+      }
       if (event.payload.kind === 'usage' && 'schema_version' in event.payload) {
         const scope = this.get<{state:string;product:string|null}>("SELECT t.state,s.product FROM tasks t JOIN sessions s ON s.task_id=t.id AND s.project_id=t.project_id WHERE t.id=? AND t.project_id=? AND s.id=?", [event.task_id,event.project_id,event.session_id]);
         if (!scope || scope.state !== 'active') throw new Error('inactive_scope');
@@ -77,6 +92,7 @@ export class Store {
         if (!same) throw new Error('event_conflict');
         return false;
       }
+      if (event.payload.kind === 'usage' && event.payload.source_compatibility) assertCompatibilityAllowed(this, event.payload.source_compatibility);
       this.execute('INSERT INTO events(id, project_id, task_id, session_id, source_key, occurred_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [event.id, event.project_id, event.task_id, event.session_id, event.source_key, event.occurred_at, payload]);
       const receipt = TimestampSchema.safeParse(this.receiptClock());

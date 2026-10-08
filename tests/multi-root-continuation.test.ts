@@ -154,7 +154,7 @@ test.each(['collected', 'uncollected'] as const)('Codex candidate multiple roots
     life.linkSession('t1', 'root-2', path('root-2'), 'codex', '0.158.0');
     const restarted = collector();
     expect(restarted.tick('t1')).toMatchObject([{ session_id: 'root-1', category: 'read_failed' }]);
-    expect(aggregateTaskCost(usages(store), table, coverage())).toMatchObject({ partial_amount: loss === 'collected' ? '0.29' : null, complete_amount: null });
+    expect(aggregateTaskCost(usages(store), table, coverage())).toMatchObject({ partial_amount:null, ...(loss==='collected'?{legacy_unverified_partial_amount:'0.29'}:{}), complete_amount: null });
     if (loss === 'uncollected') expect(aggregateTaskCost(usages(store), table, coverage()).reasons).toContain('missing_value');
     writeFileSync(path('root-2'), jsonLines([header('root-2'), ...turn(7, 'model-b')]));
     now = 9;
@@ -170,11 +170,13 @@ test.each(['collected', 'uncollected'] as const)('Codex candidate multiple roots
     ]);
     for (const event of persisted) {
       expect(event.payload.attribution).toBe('verified');
+      // Runtime attribution does not qualify an injected candidate file parser.
+      expect(event.payload.source_compatibility).toBeUndefined();
       expect(putUsageWithEvidence(store, event, readRuntimeHistory(store, 't1', at(20)).find(runtime => runtime.id === event.payload.runtime_evidence_id)!)).toBe(false);
     }
     const cost = aggregateTaskCost(persisted, table, coverage());
-    expect(cost).toMatchObject({ partial_amount: loss === 'collected' ? '0.58' : '0.29', complete_amount: null, usage_complete: false, price_complete: false });
-    expect(cost.partial_amount).toBe(sumAmounts(persisted.map(event => priceUsage(event, table).partial_amount!)));
+    expect(cost).toMatchObject({ partial_amount:null, legacy_unverified_partial_amount:loss === 'collected' ? '0.58' : '0.29', complete_amount: null, usage_complete: false, price_complete: false, compatibility:{verified_events:0,legacy_unverified_events:loss==='collected'?2:1} });
+    expect(cost.legacy_unverified_partial_amount).toBe(sumAmounts(persisted.map(event => priceUsage(event, table).partial_amount!)));
     expect(cost.reasons).toContain('unsupported_profile');
     expect(store.all("SELECT reason FROM observations WHERE status='error'")).toContainEqual({ reason: 'source_error' });
     expect(store.all("SELECT session_id,reason FROM observation_gaps WHERE reason='offline' ORDER BY session_id")).toEqual([
@@ -185,7 +187,7 @@ test.each(['collected', 'uncollected'] as const)('Codex candidate multiple roots
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test('native assignment, exact-version and fork gates remain closed', () => {
+test('conditional version selection preserves registration, native assignment and fork gates', () => {
   const root = mkdtempSync(join(tmpdir(), 'multi-root-gates-'));
   const store = new Store(':memory:');
   try {
@@ -193,7 +195,9 @@ test('native assignment, exact-version and fork gates remain closed', () => {
     expect(() => assignTask(store, { ...f.input, metadata: { ...f.metadata, product: 'codex' } }, { clock: () => at(0) })).toThrow('synthetic_only');
     expect(flexibleProductionProfiles).toEqual([]);
     expect(lookupFileProfile('codex', '0.160.0')).toBe('unsupported');
-    expect(() => new Lifecycle(store).linkSession('unregistered-task', 'native-root', join(root, 'never-created.jsonl'), 'codex', '0.160.0')).toThrow('unsupported');
+    expect(() => new Lifecycle(store).linkSession('unregistered-task', 'native-root', join(root, 'never-created.jsonl'), 'codex', '0.160.0')).toThrow('unknown_task');
+    expect(() => new Lifecycle(store).linkSession('unregistered-task', 'outside-window', join(root, 'never-created.jsonl'), 'codex', '0.164.0')).toThrow('unsupported');
+    expect(store.all('SELECT id FROM sessions')).toEqual([]);
     const scope = { taskId: 't1', projectId: 'p1', sessionId: 's1', projectRoot: root, product: 'codex' as const, version: '0.158.0' };
     expect(() => parseFlexibleSnapshot(jsonLines([{ type: 'session_meta', payload: { id: 's1', cwd: root, source: 'exec', cli_version: '0.158.0', forked_from_id: 'parent' } }]), scope, at(0))).toThrow('unsupported');
     const child = parseFlexibleSnapshot(jsonLines([

@@ -1,5 +1,6 @@
 import type { BindingSummary, Locale, Task } from './types.js';
 import { sessionDisplayLabels } from './session-labels.js';
+import { CostAmounts } from './CostAmounts.js';
 
 export function SessionUsageTable({ sessions, summary, locale }: {
   sessions: NonNullable<Task['binding']>['sessions']; summary: BindingSummary; locale: Locale;
@@ -12,7 +13,7 @@ export function SessionUsageTable({ sessions, summary, locale }: {
     <td>{value.requests ?? '—'}</td>
     <td title={value.input_total.statuses.join(', ')}>{reading(value.input_total)}</td>
     <td title={value.output_total.statuses.join(', ')}>{reading(value.output_total)}</td>
-    <td>{value.partial_amount === null ? t('Unavailable', '미확정') : `${value.currency ?? 'USD'} ${value.partial_amount}`}
+    <td><CostAmounts value={value} locale={locale} />
       {value.unpriced_events > 0 && <span className="block text-xs text-muted-foreground">{t(`${value.unpriced_events} unpriced`, `단가 없음 ${value.unpriced_events}개`)}</span>}
     </td>
   </>;

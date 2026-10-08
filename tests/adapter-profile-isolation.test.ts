@@ -18,7 +18,8 @@ test('production sources cannot see the conformance candidate', () => {
   expect(source).not.toContain('scripts/conformance');
   expect(source).not.toContain('ConformanceCandidate');
   expect(source).not.toContain('conformance_candidate');
-  expect(source).not.toContain('0.158.0');
+  // Forward windows may name verified versions, but candidate code stays isolated.
+  expect(source).not.toContain('codex01580Candidate');
   expect(source).not.toContain('dangerously-bypass-hook-trust');
   expect(readFileSync('src/otel-journal.ts', 'utf8')).not.toContain('adapter-profiles');
   expect(readFileSync('src/otel-projection.ts', 'utf8')).not.toContain('adapter-profiles');
@@ -29,8 +30,8 @@ test('production sources cannot see the conformance candidate', () => {
     productionUsageField: 'total_token_usage', inspectedUsageField: 'last_token_usage',
     excludedTypes: ['token_usage_record'],
   });
-  expect(parseSnapshot.length).toBe(2);
+  expect(parseSnapshot.length).toBe(3);
   expect(() => parseSnapshot('', {
-    sessionId: 's1', projectRoot: '/synthetic', product: 'codex', version: '0.159.0',
+    sessionId: 's1', projectRoot: '/synthetic', product: 'codex', version: '0.164.0',
   })).toThrow(/^unsupported$/);
 });

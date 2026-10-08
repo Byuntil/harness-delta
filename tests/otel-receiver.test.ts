@@ -151,7 +151,7 @@ test('an ordered batch stores allowlisted records and api_request usage as parti
     'repl_main_thread', 'synthetic private error text', '/synthetic/private', 'synthetic-private-agent', '500000', 'synthetic-user-credential',
     receiver.exporterHeaders()['x-harness-delta-token']!]) expect(text).not.toContain(value);
   const report = aggregateTask(store, 't1', '2026-01-01T01:00:00.000Z');
-  expect(report.usage).toMatchObject({ status: 'partial', complete_tokens: null, partial_tokens: 39 });
+  expect(report.usage).toMatchObject({ status: 'missing', complete_tokens: null, partial_tokens: null, legacy_unverified:{partial_tokens:39} });
 });
 
 test('metrics and traces are acknowledged without decoding and never become usage', async () => {
@@ -235,7 +235,8 @@ test('a sequence gap keeps the contiguous prefix and opens an unmeasurable windo
   expect(processRow(store)).toMatchObject({ state: 'revoked', ordering: 'uncertain', uncertain_reason: 'sequence_gap', next_sequence: 2 });
   expect(store.get('SELECT started_at,status,reason FROM observations')).toEqual({ started_at: '2026-01-01T00:00:01.000Z', status: 'unmeasurable', reason: 'incomplete' });
   const report = aggregateTask(store, 't1', '2026-01-01T01:00:00.000Z');
-  expect(report.usage.status).toBe('partial');
+  expect(report.usage.status).toBe('missing');
+  expect(report.usage.compatibility.legacy_unverified_events).toBeGreaterThan(0);
   expect(report.observation_windows).toContainEqual(expect.objectContaining({ status: 'unmeasurable', reason: 'incomplete' }));
 });
 

@@ -4,6 +4,7 @@ export const sourceDiagnosticCategories = [
   'scope_mismatch', 'invalid_json', 'record_conflict', 'parse_failed',
   'identity_changed', 'source_truncated', 'same_size_modified',
   'clock_regressed', 'model_mismatch', 'record_changed',
+  'compatibility_invalidated',
 ] as const;
 export type SourceDiagnosticCategory = typeof sourceDiagnosticCategories[number];
 export class SourceFailure extends Error {

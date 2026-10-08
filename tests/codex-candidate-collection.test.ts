@@ -6,6 +6,7 @@ import { Collector, readSource } from '../src/collection.js';
 import { Store } from '../src/store.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import { candidateCostCoverage, type CandidateScope } from '../src/nested-candidate.js';
+import { sessionCompatibility } from '../src/source-compatibility.js';
 import { lookupFileProfile } from '../src/adapter-profiles.js';
 
 const at = (seconds: number) => `2026-01-01T00:00:${String(seconds).padStart(2, '0')}Z`;
@@ -18,7 +19,7 @@ function fixture() {
     { sessionId: 'child', rootSessionId: 'root', parentSessionId: 'root', sourceId: 'child-source', product: 'codex', nativeSessionId: 'native-child', processId: null, agentId: null },
   ] };
   const sources = { projectRoot: dir, paths: { 'root-source': join(dir, 'root.jsonl'), 'child-source': join(dir, 'child.jsonl') } };
-  // Disposable prelinked DB fixture ONLY. Lifecycle does not admit this native version or parent link.
+  // Disposable prelinked candidate fixture ONLY. Conditional file enrollment does not admit this parent link or candidate topology.
   store.execute('INSERT INTO projects(id,local_root) VALUES (?,?)', ['p', dir]);
   store.execute("INSERT INTO tasks(id,project_id,state,metadata) VALUES ('t','p','active',?)", [JSON.stringify({ product: 'codex' })]);
   for (const s of scope.sessions) store.execute('INSERT INTO sessions(id,task_id,project_id,parent_id,product,product_version,source_path) VALUES (?,?,?,?,?,?,?)', [s.sessionId, 't', 'p', s.parentSessionId, 'codex', '0.160.0', sources.paths[s.sourceId as keyof typeof sources.paths]]);
@@ -123,11 +124,16 @@ test('explicit fork markers are rejected unless a paginated direct-child suffix 
   } finally { f.cleanup(); }
 });
 
-test('production version admission and default Collector path remain closed', () => {
+test('conditional file enrollment preserves exact admission and the closed default flexible Collector path', () => {
   const f = fixture(); try {
-    expect(lookupFileProfile('codex', '0.160.0')).toBe('unsupported');
-    expect(() => new Lifecycle(f.store).linkSession('t', 'new', f.path(), 'codex', '0.160.0')).toThrow('unsupported');
-    f.collector.tick('t'); expect(f.reads()).toBe(0); expect(f.store.eventCount()).toBe(0);
+    expect(lookupFileProfile('codex', '0.161.0')).toBe('unsupported');
+    f.store.execute("UPDATE tasks SET metadata=? WHERE id='t'",[JSON.stringify({schema_version:2,type:'feature',expected_size:'small',assignee:'synthetic-user',product:'codex',initial_model:null,criterion_ids:['criterion']})]);
+    expect(() => new Lifecycle(f.store).linkSession('t', 'new', join(f.dir,'never-created.jsonl'), 'codex', '0.161.0')).not.toThrow();
+    expect(sessionCompatibility(f.store,'new')).toMatchObject({state:'compatibility_unverified',source:'file',product_version:'0.161.0',parser_version:'0.158.0'});
+    expect(f.collector.tick('t')).toMatchObject([{session_id:'root',category:'unsupported_source'},{session_id:'new',category:'unsupported_source'}]);
+    expect(f.reads()).toBe(0); expect(f.store.eventCount()).toBe(0);
+    // Conditional file support does not authorize the separate candidate topology.
+    expect(()=>f.tick()).toThrow('candidate_scope_mismatch');expect(f.reads()).toBe(0);
   } finally { f.cleanup(); }
 });
 

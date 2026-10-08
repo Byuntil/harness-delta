@@ -47,10 +47,10 @@ test('invalidated, mixed, unknown and synthetic-purpose claims cannot use the na
   }
 });
 
-function fixture() {
+function fixture(version='0.160.0',purpose:'real_experiment'|'functional_pilot'='real_experiment') {
   const root = realpathSync(mkdtempSync('/tmp/hdw-admission-')); const home = join(root, 'home'); mkdirSync(home); mkdirSync(join(home, 'sessions'));
   const database = join(root, 'measurement.sqlite'); const store = new Store(database); new Lifecycle(store).registerProject('project-1', root);
-  const f = makeFlexibleFixture(); const now = Date.now(); f.protocol.purpose = 'real_experiment'; f.protocol.source_profiles = [profile];
+  const f = makeFlexibleFixture(); const now = Date.now(); f.protocol.purpose = purpose;if(purpose==='functional_pilot'){delete f.protocol.minimum_effect;delete f.protocol.quality_margin;delete f.protocol.confidence_level;} f.protocol.source_profiles = [{...profile,product_version:version}];
   f.protocol.recruitment_start = new Date(now - 10000).toISOString(); f.protocol.recruitment_end = new Date(now + 3600000).toISOString();
   const artifacts = f.variants.map((v, index) => {
     const path = join(root, v.id + '.md'); const content = 'SYNTHETIC_PRIVATE_ADMISSION_' + String(index); writeFileSync(path, content);
@@ -60,7 +60,7 @@ function fixture() {
   // Synthetic price/protocol values exist only in this isolated offline test.
   registerPriceTable(store, f.priceTable); registerProtocol(store, f.protocol); freezeProtocol(store, f.protocol.id, new Date(now - 20000).toISOString());
   const input = { schema_version: 1, assignment: { ...assignmentInput, schema_version: 2, metadata: { ...f.metadata, product: 'codex' } },
-    product_version: '0.160.0', confirmation_id: 'begin-confirmation', artifacts };
+    product_version: version, confirmation_id: 'begin-confirmation', artifacts };
   const config = join(root, 'workflow.json'); const runtime = join(root, 'runtime.json'); const execution = join(root, 'execution.json');
   writeFileSync(runtime, JSON.stringify({ model: null, effort: null })); const prompt = join(root, 'prompt.txt'); writeFileSync(prompt, 'SYNTHETIC_PRIVATE_PROMPT');
   let stdout = ''; let stderr = '';
@@ -69,14 +69,14 @@ function fixture() {
   const call = async (args: string[]) => { stdout = ''; stderr = ''; const code = await main(['--db', database, ...args]); return { code, stdout, stderr }; };
   const configure = (id: string, operation: 'launch' | 'resume' | 'link' | 'collect', session?: string, source?: string) => {
     writeFileSync(config, JSON.stringify({ ...input, confirmation_id: id + '-confirmation' }));
-    writeFileSync(execution, JSON.stringify({ run_id: id, operation,
+    writeFileSync(execution, JSON.stringify({ run_id: id, operation, product_version:version,
       // Node's bytes differ from the native pinned hash: launch/resume must fail before spawn.
       binary: { path: realpathSync(process.execPath), sha256: pinnedCodexWorkflowBinarySha }, codex_home: home,
       hook_recorder: realpathSync(resolve('scripts/conformance/candidate-start-recorder.mjs')), prompt_file: prompt,
       sandbox: 'read-only', timeout_ms: 3000, poll_ms: 10, ...(session ? { session_id: session } : {}), ...(source ? { source_path: source } : {}) }));
     return ['workflow', 'codex', operation, '--config', config, '--runtime', runtime, '--execution', execution];
   };
-  const source = (origin = 'exec') => { const id = randomUUID(); const path = join(home, 'sessions', id + '.jsonl'); writeFileSync(path, JSON.stringify({ type: 'session_meta', payload: { id, session_id: id, cwd: root, cli_version: '0.160.0', source: origin, history_mode: 'paginated' }, ordinal: 0 }) + '\n'); return { id, path }; };
+  const source = (origin = 'exec') => { const id = randomUUID(); const path = join(home, 'sessions', id + '.jsonl'); writeFileSync(path, JSON.stringify({ type: 'session_meta', payload: { id, session_id: id, cwd: root, cli_version: version, source: origin, history_mode: 'paginated' }, ordinal: 0 }) + '\n'); return { id, path }; };
   const appendUsage = (s: { id: string; path: string }) => {
     const turn = randomUUID(); const request = randomUUID(); let ordinal = 1; // One future request after the baseline header.
     const row = (type: string, payload: unknown) => JSON.stringify({ type, payload, ordinal: ordinal++, timestamp: new Date().toISOString() }) + '\n';
@@ -176,4 +176,37 @@ test('production CLI links only an explicit synthetic root, observes future own 
     expect(JSON.parse(report.stdout)).toMatchObject({ adoption: { status: 'inconclusive' } });
     expect(report.stdout).not.toContain('SYNTHETIC_PRIVATE');
   } finally { f.cleanup(); }
+});
+
+test('conditional native pilot links actual 0.161.0 and collects labeled future usage without exact admission', async () => {
+  const f=fixture('0.161.0','functional_pilot');try{
+    expect(comparisonReadiness(f.store,'comparison-1')).toMatchObject({real_allocation:false,complete_cost:false,inference:false});
+    const status=await f.call(['workflow','status','comparison-1']);expect(JSON.parse(status.stdout)).toMatchObject({native_execution:true,readiness:{real_allocation:false}});
+    const s=f.source();expect(await f.call(f.configure('forward-link','link',s.id,s.path))).toMatchObject({code:0});
+    expect(f.store.get('SELECT product_version FROM sessions WHERE id=?',[s.id])).toEqual({product_version:'0.161.0'});
+    const collecting=f.call(f.configure('forward-collect','collect',s.id));const deadline=Date.now()+2000;
+    while(!f.store.get("SELECT 1 FROM codex_workflow_runs WHERE id='forward-collect' AND identity_verified=1")&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,10));
+    f.appendUsage(s);
+    while(f.store.eventCount()===0&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,10));
+    expect(await main(['--db',join(f.root,'measurement.sqlite'),'workflow','codex','stop','forward-collect'])).toBe(0);expect((await collecting).code).toBe(0);
+    expect(f.store.eventCount()).toBe(1);
+    expect(f.store.get("SELECT json_extract(payload,'$.product_version') AS version,json_extract(payload,'$.source_compatibility.state') AS state FROM events")).toEqual({version:'0.161.0',state:'compatibility_unverified'});
+  }finally{f.cleanup();}
+});
+test('a conditional native version cannot run under a frozen real experiment',async()=>{
+  const f=fixture('0.161.0');try{
+    const s=f.source();expect((await f.call(f.configure('forward-experiment','link',s.id,s.path))).code).toBe(2);
+    expect(f.store.all('SELECT id FROM comparison_assignments')).toHaveLength(0);expect(f.store.eventCount()).toBe(0);
+  }finally{f.cleanup();}
+});
+
+test.each(['0.160.0','0.161.0'])('durable native block disables %s readiness and pilot execution before source reads',async version=>{
+  const f=fixture(version,version==='0.160.0'?'real_experiment':'functional_pilot');try{
+    const {resolveSourceCompatibility,invalidateCompatibility}=await import('../src/source-compatibility.js');
+    const compatibility=resolveSourceCompatibility('codex',version,'codex_workflow',codexWorkflowProfileId)!;
+    invalidateCompatibility(f.store,compatibility,'semantic_incompatibility');
+    expect(comparisonReadiness(f.store,'comparison-1')).toMatchObject({real_allocation:false,complete_cost:false,inference:false});
+    const status=await f.call(['workflow','status','comparison-1']);expect(JSON.parse(status.stdout)).toMatchObject({native_execution:false,source_compatibility:[{state:'invalidated',product_version:version}]});
+    const s=f.source();expect((await f.call(f.configure('blocked-native','link',s.id,s.path))).code).toBe(2);expect(f.store.eventCount()).toBe(0);expect(f.store.all('SELECT id FROM sessions')).toHaveLength(0);
+  }finally{f.cleanup();}
 });

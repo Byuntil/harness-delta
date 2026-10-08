@@ -28,7 +28,8 @@ function summarizeCounts(tasks:TaskReport[]){
  const criterionMet=assessed.reduce((total,task)=>total+task.criteria_met.length,0);
  const partial=tasks.flatMap(task=>task.usage.partial_tokens===null?[]:[task.usage.partial_tokens]).sort((a,b)=>a-b);
  const median=partial.length?partial.length%2?partial[Math.floor(partial.length/2)]!:partial[partial.length/2-1]!/2+partial[partial.length/2]!/2:null;
- return {outcomes,eligible_count:tasks.length,complete_usage_count:0,partial_usage_count:tasks.filter(t=>t.usage.status==='partial').length,
+ const references=(field:'compatibility_unverified'|'legacy_unverified')=>{const values=tasks.flatMap(task=>task.usage[field].partial_tokens===null?[]:[task.usage[field].partial_tokens]).sort((a,b)=>a-b);return {partial_tokens_distribution:values,mean_partial_tokens:values.length?addTokens(values)/values.length:null};};
+ return {compatibility_unverified:references('compatibility_unverified'),legacy_unverified:references('legacy_unverified'),invalidated_events:tasks.reduce((sum,t)=>sum+t.usage.compatibility.invalidated_events,0),outcomes,eligible_count:tasks.length,complete_usage_count:0,partial_usage_count:tasks.filter(t=>t.usage.status==='partial').length,
    missing_usage_count:tasks.filter(t=>t.usage.status==='missing').length,mean_complete_tokens:null,median_complete_tokens:null,
    tokens_per_success:null,partial_tokens_distribution:partial,mean_partial_tokens:partial.length?addTokens(partial)/partial.length:null,median_partial_tokens:median,
    first_attempt:{success:firstSuccess,failed:firstFailed,pending:tasks.length-firstSuccess-firstFailed,assessed:firstSuccess+firstFailed,success_rate:firstSuccess+firstFailed?firstSuccess/(firstSuccess+firstFailed):null},

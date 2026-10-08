@@ -1,3 +1,4 @@
+import type { SourceCompatibility } from './contracts.js';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { IdSchema, TimestampSchema, TokenSchema } from './contracts.js';
@@ -22,7 +23,7 @@ const contextSchema = z.object({ turn_id: IdSchema.nullish(), root_turn_id: IdSc
 const responseIdentity = z.object({ turn_id: IdSchema, thread_id: IdSchema });
 const eventType = z.object({ type: z.string() });
 export function parseCodexCandidateRollout(text: string, scope: CandidateScope, sourceId: string,
-  projectRoot: string, recordedAt: string): CodexCandidateSnapshot {
+  projectRoot: string, recordedAt: string, compatibility?:SourceCompatibility): CodexCandidateSnapshot {
   const lines = text.split('\n'); const partial = lines.pop()!;
   if (lines.length === 0 || lines.length > 65536) throw new Error('candidate_invalid_metadata');
   let meta: unknown; let context: unknown = null; let contextAt: string | null = null;
@@ -53,7 +54,7 @@ export function parseCodexCandidateRollout(text: string, scope: CandidateScope, 
         nextOrdinal = row.ordinal;
       } else if (row.ordinal != null) throw new Error('candidate_unsupported_history');
       const identity = projectCandidateObservation(scope, sourceId, { kind: 'codex_response', occurredAt: recordedAt,
-        sessionMeta: meta, turnContext: null, record: null, ...(ownStart === null ? {} : { recordOrdinal: ownStart }) }, recordedAt);
+        sessionMeta: meta, turnContext: null, record: null, ...(ownStart === null ? {} : { recordOrdinal: ownStart }) }, recordedAt,compatibility);
       if (identity.kind === 'unattributed' && identity.reason === 'unsupported_history') throw new Error('candidate_unsupported_history');
     } else if (row.type === 'session_meta') throw new Error('candidate_unsupported_history');
     if (nextOrdinal !== null) {
@@ -82,7 +83,7 @@ export function parseCodexCandidateRollout(text: string, scope: CandidateScope, 
       if (!paired) { context = null; contextAt = null; }
       const projection = projectCandidateObservation(scope, sourceId, { kind: 'codex_response', occurredAt: row.timestamp,
         sessionMeta: meta, turnContext: paired ? context : null, record: row.payload,
-        ...(row.ordinal == null ? {} : { recordOrdinal: row.ordinal }) }, recordedAt);
+        ...(row.ordinal == null ? {} : { recordOrdinal: row.ordinal }) }, recordedAt,compatibility);
       if (projection.kind === 'usage') {
         const fingerprint = JSON.stringify({ event: projection.event, runtime: { ...projection.runtime, recorded_at: null } });
         const before = seen.get(projection.event.id);

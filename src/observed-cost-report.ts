@@ -6,12 +6,14 @@ import { PriceTableSchema, type PriceTable, type UsageEvent, type RuntimeEvidenc
 import { Lifecycle } from './lifecycle.js';
 import { costFormulaVersion, priceUsage, readPriceTable, sumAmounts, type LegacyInputBasis } from './pricing.js';
 import type { Store } from './store.js';
+import { partitionCost } from './report-source-trust.js';
+import { overlayEventCompatibility } from './source-compatibility.js';
 import { readRuntimeHistory } from './runtime-history.js';
 import { linkedRequestPriceEvidence } from './request-price-evidence.js';
 import { observedCostCoverage } from './observed-cost-coverage.js';
 
 /** Metadata-only descriptive projection; no coverage or source admission implied. */
-export function projectObservedCost(events: readonly UsageEvent[], inputTable: PriceTable, taskId: string, cutoff: string, inputBasis: LegacyInputBasis, runtimeEvidence: readonly RuntimeEvidence[] = []) {
+export function projectObservedCost(events: readonly UsageEvent[], inputTable: PriceTable, taskId: string, cutoff: string, inputBasis: LegacyInputBasis, runtimeEvidence: readonly RuntimeEvidence[] = [], historicalReplay = false) {
   parseComparison(IdSchema, taskId);
   const end = parseComparison(TimestampSchema, cutoff);
   if (!['output-only-v1', 'cache-read-remainder-ordinary-v1'].includes(inputBasis)) throw new Error('invalid_input_basis');
@@ -28,19 +30,23 @@ export function projectObservedCost(events: readonly UsageEvent[], inputTable: P
   }
   const rows = [...unique.values()].sort((a, b) => a.source_key < b.source_key ? -1 : a.source_key > b.source_key ? 1 : 0);
   const priced = rows.map(event => priceUsage(event, table, inputBasis, runtimeEvidence));
-  const amounts = priced.flatMap(value => value.partial_amount === null ? [] : [value.partial_amount]);
+  const trust = partitionCost(rows, priced.map(value => value.partial_amount));
+  // Old serialized reports omit trust fields; live projections include them.
+  const cost: { partial_amount: string | null } & Partial<Omit<typeof trust, 'partial_amount'>> = historicalReplay
+    ? { partial_amount: priced.some(p => p.partial_amount !== null) ? sumAmounts(priced.flatMap(p => p.partial_amount === null ? [] : [p.partial_amount])) : null }
+    : trust;
   return {
     schema_version: 1, report_version: 'observed-cost-v1', task_id: taskId, cutoff: end,
     currency: table.currency, price_table: table,
     price_table_hash: createHash('sha256').update(canonicalJson(table)).digest('hex'),
     usage_snapshot_hash: createHash('sha256').update(canonicalJson(rows)).digest('hex'),
     formula_version: costFormulaVersion, input_basis: inputBasis,
-    complete_amount: null, partial_amount: amounts.length ? sumAmounts(amounts) : null,
+    complete_amount: null, ...cost,
     event_count: rows.length, session_count: new Set(rows.map(event => event.session_id)).size,
     assumed_input_events: rows.filter(event => !('schema_version' in event.payload) && inputBasis === 'cache-read-remainder-ordinary-v1' && event.payload.input_total.status === 'observed' && event.payload.cached_input.status === 'observed').length,
     unpriced_events: priced.filter(value => value.reasons.includes('unpriced_component')).length,
     unavailable_events: priced.filter(value => value.partial_amount === null).length,
-    reasons: [...new Set(['incomplete', 'unsupported_profile', ...(!rows.length ? ['missing_value'] : []), ...priced.flatMap(value => value.reasons)])].sort(),
+    reasons: [...new Set(['incomplete', 'unsupported_profile', ...(!rows.length ? ['missing_value'] : []), ...(!historicalReplay && trust.compatibility.invalidated_events ? ['invalidated'] : []), ...(!historicalReplay && trust.compatibility.compatibility_unverified_events + trust.compatibility.legacy_unverified_events > 0 ? ['source_unverified'] : []), ...priced.flatMap(value => value.reasons)])].sort(),
     limitations: ['standardized_estimated_cost_is_not_actual_billing', 'whole_task_cost_unconfirmed_without_coverage',
       'parent_child_counter_overlap_unverified', ...(inputBasis === 'cache-read-remainder-ordinary-v1' ? ['legacy_cache_write_split_assumed'] : [])],
   };
@@ -59,7 +65,7 @@ export function captureObservedCostInput(store: Store, taskId: string, tableId: 
     const coverageOnly = (reason: string | null) => reason === 'incomplete' || reason === 'not_available';
     const loss = [...uncertain.filter(row => !(row.status === 'unmeasurable' && coverageOnly(row.reason))), ...gaps.filter(row => !coverageOnly(row.reason))];
     const candidates = store.all<{ payload: string } & Omit<UsageEvent, 'payload'>>('SELECT id, project_id, task_id, session_id, source_key, occurred_at, payload FROM events WHERE task_id=? ORDER BY occurred_at, source_key', [taskId])
-      .map(row => parseComparison(EventSchema, { ...row, payload: JSON.parse(row.payload) as unknown }, 'invalid_event'))
+      .map(row => overlayEventCompatibility(store, parseComparison(EventSchema, { ...row, payload: JSON.parse(row.payload) as unknown }, 'invalid_event')))
       .flatMap(event => event.payload.kind === 'usage' && task.started_at !== null && Date.parse(event.occurred_at) >= Date.parse(task.started_at) && Date.parse(event.occurred_at) < Date.parse(until) ? [event as UsageEvent] : []);
     const contains = (interval: { started_at: string; ended_at: string | null }, at: number) => at >= Date.parse(interval.started_at) && at < Date.parse(interval.ended_at ?? until);
     const events = candidates.filter(event => {

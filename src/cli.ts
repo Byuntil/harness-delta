@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { registerExchangeCommands, ExchangeCliError } from './exchange/cli.js';
+import { registerCompatibilityCommands } from './source-compatibility-cli.js';
+import { sessionCompatibility } from './source-compatibility.js';
 import { Command, CommanderError } from 'commander';
 import { describeCliError } from './cli-errors.js';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -54,6 +56,7 @@ export async function main(argv: string[], workflowDependencies:WorkflowCommandD
     .requiredOption('--product <codex|claude_code>').requiredOption('--version <version>').option('--confirmation <id>', 'Explicit task configuration confirmation')
     .action((id: string, options: { task: string; source: string; product: string; version: string; confirmation?: string }) => {
       life().linkSession(options.task, id, options.source, options.product, options.version, options.confirmation);
+      print({ session_id:id, source_compatibility:sessionCompatibility(db(),id) });
     });
   const remove = program.command('delete');
   remove.command('task <id>').action((id: string) => { deletion().deleteTask(id); });
@@ -67,7 +70,7 @@ export async function main(argv: string[], workflowDependencies:WorkflowCommandD
       life().task(options.task);
       const collector=new Collector(db());const controller=new AbortController();
       const stop=()=>{controller.abort();};process.once('SIGINT',stop);process.once('SIGTERM',stop);
-      try{do{collector.tick(options.task);if(options.once)break;
+      try{do{const diagnostics=collector.tick(options.task);if(diagnostics.length)print({collection_diagnostics:diagnostics});if(options.once)break;
         const state=db().get<{state:string}>('SELECT state FROM tasks WHERE id=?',[options.task]);if(!state||state.state==='finalized')break;
         try{await delay(interval,undefined,{signal:controller.signal});}catch{if(!controller.signal.aborted)throw new Error('collection_error');}
       }while(!controller.signal.aborted);}finally{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}
@@ -82,6 +85,7 @@ export async function main(argv: string[], workflowDependencies:WorkflowCommandD
       else process.stdout.write(renderReport(aggregateTask(db(),id,options.cutoff),options.format));});
   report.command('period <id>').requiredOption('--cutoff <UTC>').option('--format <json|markdown>','output format','json')
     .action((id:string,options:{cutoff:string;format:string})=>{process.stdout.write(renderReport(periodReport(db(),id,options.cutoff),options.format));});
+  registerCompatibilityCommands(program, db, print);
   registerComparisonCommands(program, db, print);
   registerTaskWorkflowCommands(program, db, print, workflowDependencies);
   registerExchangeCommands(program, db, print);

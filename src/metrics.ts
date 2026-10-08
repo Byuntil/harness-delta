@@ -1,3 +1,5 @@
+import { partitionCost, reportCompatibility, reportSourceTrust } from './report-source-trust.js';
+import { overlayEventCompatibility } from './source-compatibility.js';
 import { CostCoverageEvidenceSchema, CostFactsSchema, PriceTableSchema, type UsageEvent, type PriceTable, type CostCoverageEvidence, type TaskCost, type RuntimeEvidence, parseTaskMetadata } from './flexible-contracts.js';
 import { evaluateCostCoverage, syntheticCostProfileId } from './cost-coverage.js';
 import { parseComparison } from './comparison-contracts.js';
@@ -25,17 +27,19 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
   const outcome=store.get<{status:Outcome;first_success:number|null;criteria_met:string;assessed_at:string}>('SELECT * FROM outcomes WHERE task_id=?',[taskId]);
   const knownOutcome=outcome && Date.parse(outcome.assessed_at)<=cutoffMs?outcome:null;
   const events=store.all<Record<string,unknown>>('SELECT * FROM events WHERE task_id=? ORDER BY occurred_at,source_key',[taskId])
-    .map(row=>EventSchema.parse({...row,payload:JSON.parse(String(row.payload)) as unknown}))
+    .map(row=>overlayEventCompatibility(store,EventSchema.parse({...row,payload:JSON.parse(String(row.payload)) as unknown})))
     .filter(row=>start && Date.parse(row.occurred_at)>=Date.parse(start) && Date.parse(row.occurred_at)<=Date.parse(until));
   const usages=events.flatMap(row=>row.payload.kind==='usage'?[row.payload]:[]);
   const tools=events.flatMap(row=>row.payload.kind==='tool'?[row.payload]:[]);
-  const readings=(field:'input_total'|'cached_input'|'output_total'|'reasoning_output')=>{
-    const values=usages.flatMap(row=>row[field].status==='observed'?[row[field].value]:[]);
+  const verifiedUsages=usages.filter(row=>reportSourceTrust(row)==='verified');
+  const readings=(field:'input_total'|'cached_input'|'output_total'|'reasoning_output', selected=verifiedUsages)=>{
+    const values=selected.flatMap(row=>row[field].status==='observed'?[row[field].value]:[]);
     const statuses={observed:0,missing:0,error:0,excluded:0,unmeasurable:0};
     const reasons:Record<string,number>={};
-    for(const row of usages){const reading=row[field];statuses[reading.status]++;if(reading.reason)reasons[reading.reason]=(reasons[reading.reason]??0)+1;}
-    return {observed_sum:values.length?addTokens(values):null,observed_events:values.length,unavailable_events:usages.length-values.length,status_counts:statuses,reason_counts:reasons};
+    for(const row of selected){const reading=row[field];statuses[reading.status]++;if(reading.reason)reasons[reading.reason]=(reasons[reading.reason]??0)+1;}
+    return {observed_sum:values.length?addTokens(values):null,observed_events:values.length,unavailable_events:selected.length-values.length,status_counts:statuses,reason_counts:reasons};
   };
+  const reference=(state:'compatibility_unverified'|'legacy_unverified')=>{const rows=usages.filter(row=>reportSourceTrust(row)===state);const input=readings('input_total',rows);const output=readings('output_total',rows);return {partial_tokens:input.observed_sum!==null&&output.observed_sum!==null?addTokens([input.observed_sum,output.observed_sum]):null,input_total:input,cached_input:readings('cached_input',rows),output_total:output,reasoning_output:readings('reasoning_output',rows)};};
   const input=readings('input_total');const output=readings('output_total');
   const partialTokens=input.observed_sum!==null && output.observed_sum!==null?addTokens([input.observed_sum,output.observed_sum]):null;
   const observations=store.all<{started_at:string;ended_at:string|null;status:string;reason:string|null}>('SELECT started_at,ended_at,status,reason FROM observations WHERE task_id=? ORDER BY started_at,id',[taskId])
@@ -47,6 +51,8 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
   const reasons=[...new Set([...observations.flatMap(row=>row.reason?[row.reason]:[]),...usages.flatMap(row=>[row.input_total,row.cached_input,row.output_total,row.reasoning_output].flatMap(reading=>reading.reason?[reading.reason]:[]))])].sort();
   // Current verified adapters cannot prove complete topology or whole-task coverage.
   // Complete values are intentionally unavailable, even when observed sums are zero.
+  if(usages.some(row=>reportSourceTrust(row)==='invalidated'))reasons.push('invalidated');
+  if(usages.some(row=>['compatibility_unverified','legacy_unverified'].includes(reportSourceTrust(row))))reasons.push('source_unverified');
   if(!reasons.includes('incomplete'))reasons.push('incomplete');
   const intervals=store.all<{started_at:string;ended_at:string|null}>('SELECT started_at,ended_at FROM active_intervals WHERE task_id=? ORDER BY started_at',[taskId]);
   let activeMs=0;let previousEnd=start?Date.parse(start):0;
@@ -55,7 +61,7 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
     outcome:knownOutcome?.status??null,first_success:task.first_assessed_at && Date.parse(task.first_assessed_at)<=cutoffMs && task.first_success!==null?task.first_success===1:null,
     criteria_met:knownOutcome?JSON.parse(knownOutcome.criteria_met) as string[]:[],
     rework_count:store.all<{started_at:string}>("SELECT started_at FROM attempts WHERE task_id=? AND kind='rework'",[taskId]).filter(r=>Date.parse(r.started_at)<=cutoffMs).length,
-    usage:{status:usages.length?'partial' as const:'missing' as const,partial_tokens:partialTokens,complete_tokens:null,
+    usage:{compatibility:reportCompatibility(usages,events.flatMap(e=>e.payload.kind==='usage'?[e.occurred_at]:[])),compatibility_unverified:reference('compatibility_unverified'),legacy_unverified:reference('legacy_unverified'),status:verifiedUsages.length?'partial' as const:'missing' as const,partial_tokens:partialTokens,complete_tokens:null,
       input_total:input,cached_input:readings('cached_input'),output_total:output,reasoning_output:readings('reasoning_output'),reasons:reasons.sort()},
     tools:{status:tools.length?'partial':'missing',confirmed_execution_count:tools.length?tools.filter(r=>r.execution==='confirmed').length:null,
       failed_tool_call_count:null,observed_failure_count:tools.length?tools.filter(r=>r.execution==='confirmed'&&r.outcome==='failed').length:null,
@@ -77,7 +83,7 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
 export type TaskReport=ReturnType<typeof aggregateTask>;
 
 /** Cost coverage is separate from the permanently partial legacy token report. */
-export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence, runtimeEvidence: readonly RuntimeEvidence[] = []): TaskCost {
+export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence, runtimeEvidence: readonly RuntimeEvidence[] = [], historicalReplay = false): TaskCost {
   const evidence = parseComparison(CostCoverageEvidenceSchema, inputEvidence, 'invalid_cost_coverage');
   const table = parseComparison(PriceTableSchema, inputTable, 'invalid_price_table');
   const unique = new Map<string, UsageEvent>();
@@ -90,18 +96,21 @@ export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: Pri
     if (previous && JSON.stringify({ ...previous, id: event.id }) !== JSON.stringify(event)) throw new Error('event_conflict');
     if (!previous) unique.set(event.source_key, event as UsageEvent);
   }
-  const rows = [...unique.values()];
+  const allRows = [...unique.values()];
+  const rows = historicalReplay ? allRows : allRows.filter(row => reportSourceTrust(row.payload) === 'verified');
+  const allPriced = allRows.map(row => priceUsage(row, table, 'output-only-v1', runtimeEvidence));
+  const trust = partitionCost(allRows, allPriced.map(row => row.partial_amount));
   const decision = evaluateCostCoverage({ ...evidence, has_observed_value: evidence.has_observed_value && rows.length > 0 });
-  const priced = rows.map(e => priceUsage(e, table, 'output-only-v1', runtimeEvidence));
+  const priced = allPriced.filter((_,index)=>historicalReplay||reportSourceTrust(allRows[index]!.payload)==='verified');
   const partial = priced.flatMap(e => e.partial_amount === null ? [] : [e.partial_amount]);
-  const synthetic = evidence.profile_id === syntheticCostProfileId && rows.every(e => e.payload.product === 'synthetic');
+  const synthetic = evidence.profile_id === syntheticCostProfileId && allRows.every(e => e.payload.product === 'synthetic');
   const usageComplete = synthetic && rows.length > 0 && evidence.has_observed_value && CostFactsSchema.keyof().options
     .filter(fact => fact !== 'price_coverage').every(fact => evidence.facts[fact] === 'verified') &&
     rows.every(e => e.payload.input_total.status === 'observed' && e.payload.output_total.status === 'observed' &&
       'schema_version' in e.payload && e.payload.attribution === 'verified');
   const priceComplete = rows.length > 0 && evidence.facts.price_coverage === 'verified' && priced.every(e => e.amount !== null);
-  const reasons: TaskCost['reasons'] = [...new Set([...decision.reasons, ...priced.flatMap(e => e.reasons), ...(!synthetic ? ['unsupported_profile' as const] : [])])].sort();
+  const reasons: TaskCost['reasons'] = [...new Set([...decision.reasons, ...allPriced.flatMap(e => e.reasons), ...(!historicalReplay && allRows.some(e=>reportSourceTrust(e.payload)==='invalidated') ? ['invalidated' as const] : []), ...(!historicalReplay && allRows.some(e=>['compatibility_unverified','legacy_unverified'].includes(reportSourceTrust(e.payload))) ? ['source_unverified' as const] : []), ...(!synthetic ? ['unsupported_profile' as const] : [])])].sort();
   const total = partial.length > 0 ? sumAmounts(partial) : null;
   return { currency: table.currency, price_table_id: table.id, complete_amount: decision.eligible && usageComplete && priceComplete ? total : null,
-    partial_amount: total, usage_complete: usageComplete, price_complete: priceComplete, reasons };
+    partial_amount: total, ...(!historicalReplay && allRows.some(row => row.payload.product !== 'synthetic') ? trust : {}), usage_complete: usageComplete, price_complete: priceComplete, reasons };
 }

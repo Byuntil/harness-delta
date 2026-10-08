@@ -49,6 +49,30 @@ explicitly. A source that cannot establish scope before access is unsupported.
 Acceptance: private fields are rejected at sharing boundaries; unsupported sources
 and uncertain intervals cannot be reported as successfully measured data.
 
+### Forward-version compatibility policy (accepted 2026-10-08)
+
+For ordinary local measurement, a newer regular release within a reviewed,
+source-specific compatibility window may reuse the previous verified parser
+before exact-version qualification. Apply the same scope, privacy, identity and
+counter checks. Passing those checks permits a compatibility-unverified reference
+estimate, not verified support. A known incompatible version or failed required
+contract stops the affected observation and invalidates its uncertain data.
+File-parser compatibility does not establish native execution compatibility.
+
+Preserve actual product version, applied parser/profile revision, compatibility
+rule revision and trust state in observations and supported reports/exchanges.
+Keep unverified estimates separate from verified aggregates and cost claims;
+missing or invalidated data must not become zero. A later incompatibility must
+invalidate the affected version/parser cohort unless a narrower reliable boundary
+can be established. New qualification is prospective, with no silent promotion
+of historical observations or backfill. Frozen experiments keep R09's exact
+versions and deviation policy; fallback does not authorize inference under R10.
+
+Acceptance: in-window parser reuse, out-of-window/blocked-version rejection,
+runtime contract failures, provenance, separate totals and later invalidation
+have explicit evidence before fallback is enabled. This policy is implemented
+with finite source-specific windows and conservative historical provenance. See [ADR 013](decisions/013-forward-version-compatibility.md).
+
 ## R03 - Task lifecycle and outcomes
 
 A task has fixed completion criteria and may contain attempts, sessions, child

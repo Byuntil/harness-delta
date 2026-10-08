@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { PriceTable } from '../../src/flexible-contracts.js';
 import { Store } from '../../src/store.js';
 import { Lifecycle } from '../../src/lifecycle.js';
 import { registerVariant, registerProtocol, freezeProtocol } from '../../src/comparison.js';
@@ -9,10 +10,11 @@ import { registerPriceTable } from '../../src/pricing.js';
 import { makeFlexibleFixture } from './flexible-fixture.js';
 import { assignmentInput } from './comparison-fixture.js';
 
-export function codexWorkflowFixture(nativeProfile?: string, purpose: 'real_experiment' | 'functional_pilot' = 'real_experiment', native?: {product: 'codex' | 'claude_code'; productVersion: string}) {
+export function codexWorkflowFixture(nativeProfile?: string, purpose: 'real_experiment' | 'functional_pilot' = 'real_experiment', native?: {product: 'codex' | 'claude_code'; productVersion: string; priceTable?: PriceTable}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'codex-workflow-'))); const project = join(root, 'project'); mkdirSync(project);
   const home = join(root, 'home'); mkdirSync(home); mkdirSync(join(home, 'sessions'));
   const database = join(root, 'measurement.sqlite'); const store = new Store(database); const f = makeFlexibleFixture();
+  if(native?.priceTable){f.priceTable=native.priceTable;f.protocol.price_table_id=native.priceTable.id;}
   if(nativeProfile){f.protocol.purpose=purpose; if(purpose==='functional_pilot'){delete f.protocol.minimum_effect;delete f.protocol.quality_margin;delete f.protocol.confidence_level;}f.protocol.source_profiles=[{product:native?.product??'codex',product_version:native?.productVersion??'0.160.0',profile_id:nativeProfile}];f.metadata.product=native?.product??'codex';}
   const now = Date.now(); f.protocol.recruitment_start = new Date(now - 60000).toISOString(); f.protocol.recruitment_end = new Date(now + 3600000).toISOString();
   new Lifecycle(store).registerProject('project-1', project);

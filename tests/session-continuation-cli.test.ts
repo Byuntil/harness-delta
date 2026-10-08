@@ -53,10 +53,18 @@ function fixture() {
   const count = () => inspect(store => store.eventCount());
   const baseline = (id: string) => inspect(store => store.get<{ checkpoint: string }>('SELECT checkpoint FROM cursors WHERE session_id=?', [id]));
   const collect = () => launch(['collect', '--task', 't1', '--interval', '100']);
-  const stop = async (process: ReturnType<typeof launch>) => {
+  const stop = async (process: ReturnType<typeof launch>, missingSource?: string) => {
     process.child.kill('SIGTERM');
     const result = await process.exited;
-    expect(result).toMatchObject({ code: 0, signal: null, stdout: '', stderr: '' });
+    expect(result).toMatchObject({ code: 0, signal: null, stderr: '' });
+    if (missingSource) {
+      const lines=result.stdout.trim().split('\n');
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) expect(JSON.parse(line) as unknown).toEqual({collection_diagnostics:[{
+        session_id:missingSource,at:expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) as unknown,category:'read_failed',
+      }]});
+      expect(result.stdout).not.toContain(root);
+    } else expect(result.stdout).toBe('');
   };
   const append = (id: string, rows: unknown[]) => appendFileSync(join(root, `${id}.jsonl`), jsonLines(rows));
   const header = (id: string, extra = {}) => ({ type: 'session_meta', payload: {
@@ -126,7 +134,7 @@ test.each(['collected', 'uncollected'] as const)('CLI processes retain %s origin
     await f.waitFor(() => f.inspect(store => store.all('SELECT id FROM observations').length) > observationCount);
     expect(f.count()).toBe(initialCount);
     expect((await f.report()).usage.reasons).toContain('source_error');
-    await f.stop(second);
+    await f.stop(second,'root-1');
     f.append('root-2', f.turn('offline-restart', 400, 40));
     const oldCheckpoint = f.baseline('root-2')!.checkpoint;
     const third = f.collect();
@@ -147,7 +155,7 @@ test.each(['collected', 'uncollected'] as const)('CLI processes retain %s origin
     await f.run(['task', 'rework', 't1']);
     f.append('root-2', f.turn('rework-turn', 625, 65));
     await f.waitFor(() => f.count() === initialCount + 3);
-    await f.stop(third);
+    await f.stop(third,'root-1');
     await f.run(['task', 'finalize', 't1', '--outcome', 'success', '--met', 'c1']);
     const report = await f.report();
     expect(report).toMatchObject({ task_id: 't1', outcome: 'success', first_success: false, rework_count: 1, cost: null,
@@ -176,7 +184,7 @@ test.each(['fork', 'child-activity'] as const)('CLI excludes %s in a new explici
     await f.stop(collector);
     expect((await f.report()).usage).toMatchObject({ partial_tokens: 110, complete_tokens: null, input_total: { observed_events: 1 } });
     expect(f.inspect(store => store.all('SELECT session_id FROM events'))).toEqual([{ session_id: 'root-1' }]);
-    expect(await f.run(['session', 'link', 'unadmitted', '--task', 't1', '--source', join(f.root, 'never-created.jsonl'), '--product', 'codex', '--version', '0.160.0'], 2)).toBe('');
+    expect(await f.run(['session', 'link', 'unadmitted', '--task', 't1', '--source', join(f.root, 'never-created.jsonl'), '--product', 'codex', '--version', '0.164.0'], 2)).toBe('');
     expect(f.inspect(store => store.get('SELECT id FROM sessions WHERE id=?', ['unadmitted']))).toBeUndefined();
   } finally { await f.cleanup(); }
 }, 15000);

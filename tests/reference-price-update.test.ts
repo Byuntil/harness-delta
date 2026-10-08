@@ -46,7 +46,7 @@ test('candidate prices Sonnet cache reads while Haiku tier ambiguity stays missi
   const sonnet = { ...original, payload: { ...original.payload, product: 'claude_code' as const, model: 'claude-sonnet-5-5' } };
   expect(matchCatalogComponent(sonnet, 'cache_read', basis)).toMatchObject({ status: 'matched', price_per_unit: '0.1' });
   // Synthetic disjoint usage: 100 ordinary input, 20 cache read, 10 inclusive output.
-  expect(projectCatalogCost([sonnet], basis, sonnet.task_id, now, 'output-only-v1')).toMatchObject({ partial_amount: '0.000302', complete_amount: null });
+  expect(projectCatalogCost([sonnet], basis, sonnet.task_id, now, 'output-only-v1')).toMatchObject({ partial_amount: null, legacy_unverified_partial_amount: '0.000302', complete_amount: null });
   const haiku = { ...sonnet, payload: { ...sonnet.payload, model: 'claude-haiku-5-5' } };
   for (const component of ['ordinary_input', 'cache_read', 'cache_write', 'output'] as const) {
     expect(matchCatalogComponent(haiku, component, basis)).toMatchObject({ canonical_model: 'claude-haiku-5-5', status: 'unavailable', reason: 'unverified_condition', price_per_unit: null });

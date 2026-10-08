@@ -15,6 +15,7 @@ import { compiledWorker } from './helpers/compiled-worker.js';
 function fixture(mode='child',version='2.1.291',appVersion=version) {
   const f=codexWorkflowFixture();const compiled=compiledWorker(f.root);const binary=join(f.root,'fake-claude');
   writeFileSync(binary,`#!${process.execPath}
+if(process.argv.includes('--version')){console.log(${JSON.stringify(version+' (Claude Code)')});process.exit(0);}
 const fs=require('node:fs');const cp=require('node:child_process');
 (async()=>{const args=process.argv.slice(2);const get=k=>args.includes(k)?args[args.indexOf(k)+1]:undefined;const settings=JSON.parse(fs.readFileSync(get('--settings'),'utf8'));const env=settings.env;const native=get('--session-id');const processId=JSON.parse(env.OTEL_RESOURCE_ATTRIBUTES_JSON??'null');
 const resource=env.OTEL_RESOURCE_ATTRIBUTES;const pid=resource.split(',').find(x=>x.startsWith('harness_delta.process_id=')).slice('harness_delta.process_id='.length);
@@ -172,4 +173,22 @@ test('a 2.1.291 binary runs the shared workflow when its telemetry reports 2.1.2
     const result=await runAssignedWorkflow(drift.store,drift.input,createSyntheticClaudeWorkflowAdapter(drift.store,drift.execution),{model:'root-model',effort:'high'});
     expect(result.adapter_result).toMatchObject({state:'stopped',observed_requests:0});expect(drift.store.eventCount()).toBe(0);
   }finally{drift.cleanup();}
+},20000);
+
+test.each(['root','wait'])('conditional native Claude pilot handles %s with pinned unverified usage and executable integrity',async mode=>{
+  const f=fixture(mode,'2.1.293');try{
+    const {registerProtocol,freezeProtocol}=await import('../src/comparison.js');
+    const {FlexibleProtocolSchema}=await import('../src/flexible-contracts.js');
+    const saved=FlexibleProtocolSchema.parse(JSON.parse(f.store.get<{settings:string}>('SELECT settings FROM comparison_protocols WHERE id=?',['comparison-1'])!.settings));
+    const protocol={...saved,id:'claude-forward-pilot',purpose:'functional_pilot' as const,source_profiles:[{product:'claude_code' as const,product_version:'2.1.293',profile_id:'claude-workflow-own-trace-v1'}]};
+    delete protocol.minimum_effect;delete protocol.quality_margin;delete protocol.confidence_level;
+    registerProtocol(f.store,protocol);freezeProtocol(f.store,protocol.id,new Date(Date.now()-120000).toISOString());
+    const input={...f.input,product_version:'2.1.293',assignment:{...f.input.assignment,protocol_id:protocol.id,metadata:{...f.input.assignment.metadata,product:'claude_code'}}};
+    const running=runAssignedWorkflow(f.store,input,createClaudeWorkflowAdapter(f.store,f.execution),{model:'root-model',effort:'high'});
+    if(mode==='wait'){const deadline=Date.now()+4000;while(f.store.eventCount()===0&&Date.now()<deadline)await new Promise(ok=>setTimeout(ok,10));expect(f.store.eventCount()).toBe(1);writeFileSync(f.execution.binary.path,'#!/bin/sh\nexit 0\n');}
+    const result=await running;
+    expect(result.adapter_result).toMatchObject({state:mode==='root'?'completed':'stopped',observed_requests:1});
+    if(mode==='wait')expect(result.adapter_result).toMatchObject({reason:'claude_probe_executable_mismatch'});
+    expect(f.store.get("SELECT json_extract(payload,'$.product_version') AS version,json_extract(payload,'$.source_compatibility.state') AS state FROM events")).toEqual({version:'2.1.293',state:'compatibility_unverified'});
+  }finally{f.cleanup();}
 },20000);

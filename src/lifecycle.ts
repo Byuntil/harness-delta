@@ -4,7 +4,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { requireConfigurationConfirmation, bindConfigurationToSession } from './config-confirmation.js';
-import { lookupFileProfile } from './adapter-profiles.js';
+import { assertCompatibilityAllowed, pinSessionCompatibility, resolveSourceCompatibility } from './source-compatibility.js';
 import { IdSchema, ProductVersionSchema, TimestampSchema } from './contracts.js';
 import type { Store } from './store.js';
 import { interruptManagedRuns } from './managed-journal.js';
@@ -142,7 +142,8 @@ export class Lifecycle {
 
   linkSession(taskId: string, sessionId: string, sourcePath: string, product: string, version: string, confirmationId?: string): void {
     IdSchema.parse(sessionId); z.enum(['codex', 'claude_code']).parse(product); ProductVersionSchema.parse(version);
-    if (lookupFileProfile(product, version) === 'unsupported') throw new Error('unsupported');
+    const compatibility = resolveSourceCompatibility(product, version, 'file');
+    if (!compatibility) throw new Error('unsupported');
     const path = resolve(sourcePath);
     this.store.immediateTransaction(() => {
       const task = this.task(taskId);
@@ -153,8 +154,11 @@ export class Lifecycle {
       if (this.store.get('SELECT id FROM comparison_assignments WHERE task_id = ?', [taskId]) && !confirmationId) throw new Error('configuration_confirmation_required');
       // OTel and file adapter observations must never be summed in one task report.
       if (this.store.get('SELECT id FROM otel_processes WHERE task_id = ?', [taskId])) throw new Error('source_conflict');
+      assertCompatibilityAllowed(this.store, compatibility);
+      if (compatibility.state !== 'verified' && this.store.get('SELECT id FROM comparison_assignments WHERE task_id=?', [taskId])) throw new Error('unsupported');
       this.store.execute('INSERT INTO sessions(id,project_id,task_id,source_path,product,product_version) VALUES (?,?,?,?,?,?)',
         [sessionId, task.project_id, taskId, path, product, version]);
+      pinSessionCompatibility(this.store, sessionId, compatibility);
       if (confirmationId) bindConfigurationToSession(this.store, confirmationId, sessionId);
     });
   }

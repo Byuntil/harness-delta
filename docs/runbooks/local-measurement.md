@@ -27,7 +27,9 @@ node dist/cli.js --db local.db session link SESSION_ID --task task1 --source /pa
 node dist/cli.js --db local.db collect --task task1
 ```
 
-`--version` must be the exact registered version for that product.
+`--version` must match the actual product version. An exact registered version or
+a stable release inside its declared file-source compatibility window is eligible;
+conditional reuse remains unverified. See the version controls below.
 
 Only explicit linked files are opened, after registered/active scope is checked.
 No global transcript discovery occurs. The first poll establishes a baseline.
@@ -99,7 +101,42 @@ the generated report if you need a historical snapshot after deletion or new dat
 
 ## Versions, conformance, and update controls
 
-Registered file adapters are partial. They currently accept Codex CLI 0.156.1/0.158.0 and Claude Code 2.1.283 only. An unregistered version, range, or suffix is rejected before the file is read and is not stored. Codex 0.158.0 is registered for sequential partial usage under the M2 boundaries. See [ADR 007](../decisions/007-adapter-version-profiles.md).
+Implemented 2026-10-08: [ADR 013](../decisions/013-forward-version-compatibility.md)
+enables automatic conditional parser reuse for stable releases inside finite windows.
+File collection uses Codex 0.158.0 for newer versions below 0.164.0, and Claude Code
+2.1.283 for newer versions below 2.2.0. Codex CLI 0.161.0 and Claude Code 2.1.293
+therefore enroll by default with `compatibility_unverified` trust. Exact registered
+versions remain verified; prereleases, suffixes, old unregistered versions and
+out-of-window releases fail before source access.
+
+Usage records preserve actual product version, parser/profile and rule revision.
+Task reports show unverified tokens under `usage.compatibility_unverified`;
+`usage.partial_tokens` includes only verified observations. Provenance-less historical
+native usage appears under `usage.legacy_unverified`. Cost reports separate
+`compatibility_unverified_partial_amount` and `legacy_unverified_partial_amount`.
+An all-unverified task has a null verified total, not a false zero. All data stays partial.
+
+```sh
+node dist/cli.js --db ./local.db compatibility status
+node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.161.0 --source file
+node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.293 --source file
+node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.161.0 --source file --reason semantic_incompatibility
+```
+
+Expected: inspect returns actual version, selected parser and trust; invalidate
+returns `invalidated`. Required-contract failures block that version/source cohort,
+stop further reads, and exclude its earlier estimates on subsequent reports and
+repricing. Blocks survive restart. Diagnostics use fixed metadata-only categories.
+Preserve affected exported snapshots as unreliable; local invalidation cannot recall
+external copies. A repair requires synthetic reproduction, a reviewed named parser
+variant where semantics changed, focused tests and the full check before clearing a
+block. There is no automatic or user-facing unblock shortcut.
+
+Registered exact file adapters remain partial: Codex CLI 0.156.1/0.158.0 and Claude
+Code 2.1.283. Codex 0.158.0 covers sequential partial usage under the M2 boundaries.
+See [ADR 007](../decisions/007-adapter-version-profiles.md). File compatibility does
+not authorize native launch; use the separate workflow windows in the
+[native workflow guide](task-native-workflow.md).
 
 The repository runner at `scripts/conformance/` is manual. Installation, collection, hooks, and CI do not invoke it. CI runs offline synthetic unit tests of the report projector, the candidate parser, the confirmation and hook-trust helpers, and the exec-stream reducer. CI never runs the runner. Design approval is not live-run approval.
 

@@ -1,3 +1,4 @@
+import { ReportCompatibilitySchema } from './report-source-trust-contracts.js';
 import { z } from 'zod';
 import { BillingComponentSchema, eventFields, IdSchema, ModelSchema, MonetaryAmountSchema, ProductVersionSchema, TaskMetadataSchema, TimestampSchema, UsageSchema, UsageV2Schema, type Event } from './contracts.js';
 import { ManifestHashSchema, parseComparison, protocolFields, ProtocolSchema } from './comparison-contracts.js';
@@ -75,6 +76,8 @@ export const CostCoverageEvidenceSchema = z.strictObject({ profile_id: IdSchema,
 export const CostCoverageDecisionSchema = z.strictObject({ eligible: z.boolean(), reasons: z.array(z.union([CostReasonSchema, CostFactsSchema.keyof()])) });
 export const TaskCostSchema = z.strictObject({ currency: PriceTableSchema.shape.currency, price_table_id: IdSchema,
   complete_amount: MonetaryAmountSchema.nullable(), partial_amount: MonetaryAmountSchema.nullable(),
+  compatibility: ReportCompatibilitySchema.optional(), compatibility_unverified_partial_amount: MonetaryAmountSchema.nullable().optional(),
+  legacy_unverified_partial_amount: MonetaryAmountSchema.nullable().optional(),
   usage_complete: z.boolean(), price_complete: z.boolean(), reasons: CostCoverageDecisionSchema.shape.reasons });
 export const FlexibleAssignmentInputSchema = z.strictObject({
   schema_version: z.literal(2), protocol_id: IdSchema, project_id: IdSchema, logical_task_id: IdSchema,

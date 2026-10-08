@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { constants, closeSync, fstatSync, lstatSync, mkdtempSync, openSync, readSync, realpathSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -10,7 +10,7 @@ import { readSource, type SourceBytes } from './collection.js';
 import { parseCodexCandidateRollout } from './codex-candidate-rollout.js';
 import { verifyExternalContext } from './external-session-context.js';
 import { codexWorkflowProfileId, codexWorkflowChildProfileId, codexWorkflowRun, stopCodexWorkflow, type CodexWorkflowRun } from './codex-workflow-journal.js';
-import { productionSourceEvidence } from './readiness.js';
+import { resolveSourceCompatibility, assertCompatibilityAllowed, pinSessionCompatibility, invalidateCompatibility } from './source-compatibility.js';
 import { putUsageWithEvidence, recordObservationGap, requireActiveScope } from './runtime-history.js';
 import { bindConfigurationToSession } from './config-confirmation.js';
 import { checkCandidatePermissions } from './codex-candidate-permissions.js';
@@ -21,6 +21,7 @@ import type { WorkflowAdapter, WorkflowAdapterResult, WorkflowExecutionContext, 
 
 const pathSchema = z.string().min(1).max(4096).refine(p => isAbsolute(p) && resolve(p) === p && !/[\0\r\n]/.test(p));
 export const CodexWorkflowExecutionSchema = z.strictObject({
+  product_version: z.string().refine(v => resolveSourceCompatibility('codex',v,'codex_workflow',codexWorkflowProfileId)!==null).default('0.160.0'),
   run_id: IdSchema, operation: z.enum(['launch','resume','link','collect']),
   binary: z.strictObject({path:pathSchema,sha256:z.string().regex(/^[a-f0-9]{64}$/)}),
   codex_home:pathSchema, hook_recorder:pathSchema, prompt_file:pathSchema.optional(),
@@ -83,7 +84,7 @@ export async function runCodexQualificationPhase(store:Store,input:unknown,c:Wor
   const instructionHash=hash(JSON.stringify(c.instructions.map(i=>({artifact_id:i.artifact_id,sha256:hash(i.content)})).sort((a,b)=>a.artifact_id.localeCompare(b.artifact_id))));
   const validate=()=>{
     const live=store.get<{reserved:number;deadline:number;phase:string;topology?:string}>('SELECT * FROM codex_workflow_qualification WHERE singleton=1');
-    if(!lease||lease.intent_sha256!==q.intent_sha256||lease.reserved!==1||live?.reserved!==1||lease.deadline!==q.deadline||live.deadline!==q.deadline||lease.phase!==phase||live.phase!==phase||live.topology!==lease.topology||
+    if(e.product_version!=='0.160.0'||!lease||lease.intent_sha256!==q.intent_sha256||lease.reserved!==1||live?.reserved!==1||lease.deadline!==q.deadline||live.deadline!==q.deadline||lease.phase!==phase||live.phase!==phase||live.topology!==lease.topology||
       lease.project_id!==c.projectId||lease.task_id!==c.taskId||lease.cwd!==c.projectRoot||lease.codex_home!==e.codex_home||lease.binary_path!==e.binary.path||lease.binary_sha!==e.binary.sha256||
       lease.manifest_hash!==c.instructionManifestHash||instructionHash!==lease.manifest_hash||lease.hook_recorder!==e.hook_recorder||e.sandbox!=='read-only'||e.run_id!==`qualification-${phase}`||
       (phase==='replay'&&e.operation!=='collect')||
@@ -117,6 +118,10 @@ function fileIdentity(path:string):string {
   const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
   try{const st=fstatSync(fd,{bigint:true});if(!st.isFile())throw new Error('unsafe_file');return [st.dev,st.ino,st.size,st.mtimeNs,st.ctimeNs].join(':');}
   finally{closeSync(fd);}
+}
+function verifyCodexVersion(e:Execution):void {
+  const result=spawnSync(e.binary.path,['--version'],{encoding:'utf8',timeout:10000,maxBuffer:4096,env:{PATH:process.env.PATH??'',HOME:e.codex_home,CODEX_HOME:e.codex_home},stdio:['ignore','pipe','ignore']});
+  if(result.error||result.status!==0||result.stdout.trim()!==`codex-cli ${e.product_version}`)throw new Error('binary_mismatch');
 }
 interface VerifiedBinary {path:string;sha256:string;identity:string}
 const quote=(value:string)=>"'"+value.replaceAll("'","'\\''")+"'";
@@ -157,12 +162,13 @@ function adapter(store:Store,input:unknown,synthetic:boolean,script?:string):Wor
     const execution=CodexWorkflowExecutionSchema.parse(input);
     const family=!synthetic&&(hasFamily()||storedFamily());
     const profile=family?codexWorkflowChildProfileId:codexWorkflowProfileId;
-    if(!synthetic&&!productionSourceEvidence.some(e=>e.product==='codex'&&e.product_version==='0.160.0'&&e.profile_id===profile))throw new Error('codex_workflow_source_unqualified');
-    if(!synthetic&&execution.binary.sha256!==pinnedCodexWorkflowBinarySha)throw new Error('binary_mismatch');
+    const compatibility=resolveSourceCompatibility('codex',execution.product_version,'codex_workflow',profile);
+    if(!synthetic){if(!compatibility)throw new Error('codex_workflow_source_unqualified');assertCompatibilityAllowed(store,compatibility);}
+    if(!synthetic&&execution.product_version==='0.160.0'&&execution.binary.sha256!==pinnedCodexWorkflowBinarySha)throw new Error('binary_mismatch');
     if(synthetic&&(realpathSync(execution.binary.path)!==realpathSync(process.execPath)||!script))throw new Error('synthetic_store_required');
     return {execution,family};
   };
-  return {product:synthetic?'synthetic':'codex',productVersion:synthetic?'1.0.0':'0.160.0',
+  return {product:synthetic?'synthetic':'codex',get productVersion(){return synthetic?'1.0.0':CodexWorkflowExecutionSchema.parse(input).product_version;},
     get profileId(){return synthetic?'synthetic-flexible-v1':hasFamily()||storedFamily()?codexWorkflowChildProfileId:codexWorkflowProfileId;},
     preflight(){
       let checked:ReturnType<typeof admitted>;
@@ -176,6 +182,8 @@ function adapter(store:Store,input:unknown,synthetic:boolean,script?:string):Wor
         try{identity=fileIdentity(e.binary.path);binary=hash(file(e.binary.path,256*1024*1024));if(fileIdentity(e.binary.path)!==identity)throw new Error('unstable_file');}
         catch{throw new Error('binary_unreadable');}
         if(binary!==e.binary.sha256)throw new Error('binary_mismatch');
+        if(!synthetic)verifyCodexVersion(e);
+        if(fileIdentity(e.binary.path)!==identity)throw new Error('binary_mismatch');
         verifiedBinary={path:e.binary.path,sha256:binary,identity};
         let recorder:string;try{recorder=hash(file(e.hook_recorder,65536));}catch{throw new Error('invalid_hook_recorder');}
         if(recorder!==hookRecorderSha)throw new Error('invalid_hook_recorder');
@@ -205,7 +213,7 @@ function nativeChildExecution(store:Store,e:Execution,c:WorkflowExecutionContext
     e.source_path!==undefined&&e.source_path!==bound.root_path||e.direct_child&&(e.direct_child.session_id!==bound.session_id||e.direct_child.source_path!==bound.source_path))throw new Error('codex_workflow_child_binding_invalid');
   const recorded=(id:string)=>{
     const rows=store.all<{payload:string}>('SELECT payload FROM runtime_evidence WHERE task_id=? AND session_id=?',[c.taskId,id]).map(r=>RuntimeEvidenceSchema.parse(JSON.parse(r.payload)));
-    const first=rows[0];if(!first||first.turn_id===null||rows.some(r=>r.product!=='codex'||r.product_version!=='0.160.0'||r.turn_id!==first.turn_id||r.model!==first.model||r.effort!==first.effort))throw new Error('codex_workflow_child_binding_invalid');
+    const first=rows[0];if(!first||first.turn_id===null||rows.some(r=>r.product!=='codex'||r.product_version!==e.product_version||r.turn_id!==first.turn_id||r.model!==first.model||r.effort!==first.effort))throw new Error('codex_workflow_child_binding_invalid');
     return {turn:first.turn_id,runtime:{model:first.model,effort:first.effort}};
   };
   const root=recorded(e.session_id!);const child=recorded(bound.session_id);
@@ -215,7 +223,9 @@ function nativeChildExecution(store:Store,e:Execution,c:WorkflowExecutionContext
 async function execute(store:Store,execution:Execution,c:WorkflowExecutionContext,synthetic:boolean,script?:string,
   qualification?:{validate():void;expectedMarker:string|null;replay:boolean;onMarker():void;onSpawn():void;maxOwnResponses:number},nativeFamily?:NativeFamily,verifiedBinary?:VerifiedBinary):Promise<WorkflowAdapterResult>{
   const e=structuredClone(execution);
-  const started=new Date().toISOString();const product=synthetic?'synthetic':'codex';const version=synthetic?'1.0.0':'0.160.0';
+  const started=new Date().toISOString();const product=synthetic?'synthetic':'codex';const version=synthetic?'1.0.0':e.product_version;
+  const compatibility=synthetic?null:resolveSourceCompatibility('codex',version,'codex_workflow',nativeFamily||e.direct_child||e.child_runtime?codexWorkflowChildProfileId:codexWorkflowProfileId);
+  if(compatibility)assertCompatibilityAllowed(store,compatibility);
   let session:string|null=null;let source:string|null=null;let previous:SourceBytes|undefined;let initialTurn:string|undefined=nativeFamily?.rootTurn??undefined;
   let childPrevious:SourceBytes|undefined;let childInitialTurn:string|undefined=nativeFamily?.childTurn??undefined;
   const permissionSignatures=new Map<string,string>();const spawnCalls=new Map<string,string>();
@@ -227,7 +237,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
   let exited=false;let exitCode:number|null=null;let hookSeen=false;let failure:string|null=null;
   let stage:CodexWorkflowDiagnostic['stage']='scope';let diagnostic:CodexWorkflowDiagnostic|null=null;
   let hookWork:Promise<void>|undefined;const hookJobs=new Set<Promise<void>>();let childHookSeen=false;let closing=false;let metadataReady=false;
-  let lastVerifiedAt=started;
+  let lastVerifiedAt=started;let activeBinaryIdentity:string|undefined;
   const capture=(at:CodexWorkflowDiagnostic['stage'],error:unknown,eventKind?:CodexWorkflowDiagnostic['event_kind'])=>{diagnostic??={...safeDiagnostic(at,error),...(eventKind!==undefined?{event_kind:eventKind}:{})};};
   const rejectHeader=(code:CodexWorkflowDiagnostic['code'])=>{capture('root_header',new Error(code));throw new Error('unsupported_session');};
   const application=e.operation==='link'||e.operation==='collect'?'external_unverified':'invocation_settings_verified';
@@ -235,7 +245,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     [e.run_id,c.taskId,c.projectId,qualification?null:c.confirmationId,qualification?'qualification':'development',c.generation,e.operation,c.instructionManifestHash,'pending',started]);});
   const interrupt=()=>{try{stopCodexWorkflow(store,e.run_id);}catch{/* deleted or revoked */}};
   process.once('SIGINT',interrupt);process.once('SIGTERM',interrupt);
-  function guard(){stage='scope';c.assertActive();qualification?.validate();const run=codexWorkflowRun(store,e.run_id);if(!run||run.state!=='running')throw new Error('scope_revoked');
+  function guard(){stage='scope';if(activeBinaryIdentity!==undefined){try{if(fileIdentity(e.binary.path)!==activeBinaryIdentity)throw new Error('changed');}catch{throw new Error('binary_mismatch');}}if(compatibility)assertCompatibilityAllowed(store,compatibility);c.assertActive();qualification?.validate();const run=codexWorkflowRun(store,e.run_id);if(!run||run.state!=='running')throw new Error('scope_revoked');
     if(run.stop_requested)throw new Error('stop_requested');
     if(session){const row=requireActiveScope(store,c.taskId,session);if(row.project_id!==c.projectId||row.product!==product)throw new Error('scope_revoked');
       const linked=store.get<{source_path:string|null}>('SELECT source_path FROM sessions WHERE id=?',[session]);
@@ -253,6 +263,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       }else{if(existing)throw new Error('session_not_linked');store.execute('INSERT INTO sessions(id,project_id,task_id,source_path,product,product_version) VALUES (?,?,?,?,?,?)',[id,c.projectId,c.taskId,synthetic?null:path,product,version]);}
       if(store.get("SELECT 1 FROM tombstones WHERE kind='session' AND id=?",[id]))throw new Error('scope_revoked');
       session=id;source=path;store.execute('UPDATE codex_workflow_runs SET session_id=?,source_path=? WHERE id=?',[id,path,e.run_id]);
+      if(compatibility)pinSessionCompatibility(store,id,compatibility);
       if(!qualification)bindConfigurationToSession(store,c.confirmationId,id);
     });
   }
@@ -280,7 +291,8 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,source_path,product,product_version) VALUES (?,?,?,?,?,?,?)',[id,c.projectId,c.taskId,session,synthetic?null:path,product,version]);
     }
     store.execute('INSERT INTO codex_workflow_children(run_id,session_id,task_id,project_id,source_path) VALUES (?,?,?,?,?)',[e.run_id,id,c.taskId,c.projectId,path]);
-    if(!qualification)bindConfigurationToSession(store,c.confirmationId,id);guardChild();
+    if(compatibility)pinSessionCompatibility(store,id,compatibility);
+      if(!qualification)bindConfigurationToSession(store,c.confirmationId,id);guardChild();
   });}
   function verifyPermissions(id:string,p:Record<string,unknown>){
     const signature=checkCandidatePermissions(p,'default').signature;
@@ -314,7 +326,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     const rows=lines.map(line=>rowSchema.parse(JSON.parse(line)));
     const meta=rows[0]?.payload;
     stage='root_header';
-    if(rows[0]?.type!=='session_meta'||meta?.id!==session||meta.session_id!==session||meta.cli_version!=='0.160.0'||meta.cwd!==c.projectRoot||typeof meta.source!=='string')rejectHeader('invalid_root_identity');
+    if(rows[0]?.type!=='session_meta'||meta?.id!==session||meta.session_id!==session||meta.cli_version!==e.product_version||meta.cwd!==c.projectRoot||typeof meta.source!=='string')rejectHeader('invalid_root_identity');
     if(meta!.source!=='cli'&&meta!.source!=='exec')rejectHeader('unsupported_session');
     if(meta!.parent_thread_id!=null||meta!.forked_from_id!=null||meta!.forked_from_ordinal_exclusive!=null||meta!.history_base!=null||meta!.subagent_history_start_ordinal!=null)rejectHeader('unsupported_root_history');
     // Root pagination is native 0.160 syntax, independent of fork/child history.
@@ -374,7 +386,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       stage='envelope';const childLines=childBytes.text.split('\n');childLines.pop();const childRows=childLines.map(line=>rowSchema.parse(JSON.parse(line)));const childMeta=childRows[0]?.payload;
       if(baselineChild&&(childRows.length===0||!childRows.some(row=>row.type==='turn_context'))){childPrevious=childBytes;return false;}
       if(baselineChild&&childRows.some(row=>row.type==='token_usage_record'))throw new Error('unsupported_session');
-      if(childRows[0]?.type!=='session_meta'||childMeta?.id!==e.direct_child.session_id||childMeta.session_id!==session||childMeta.cwd!==c.projectRoot||childMeta.cli_version!=='0.160.0'||childMeta.parent_thread_id!==session)throw new Error('unsupported_session');
+      if(childRows[0]?.type!=='session_meta'||childMeta?.id!==e.direct_child.session_id||childMeta.session_id!==session||childMeta.cwd!==c.projectRoot||childMeta.cli_version!==e.product_version||childMeta.parent_thread_id!==session)throw new Error('unsupported_session');
       if(childMeta.forked_from_id!=null||childMeta.forked_from_ordinal_exclusive!=null||childMeta.history_base!=null||childMeta.subagent_history_start_ordinal!=null||childMeta.history_mode==='paginated'&&childRows[0].ordinal!==0)throw new Error('unsupported_session');
       if(childRows.some(row=>row.type==='compacted'||row.type==='retained_context'||['subagent_start','collab_agent_spawn_begin','sub_agent_activity'].includes(String(row.payload.type))||row.type==='event_msg'&&z.object({item:z.object({type:z.literal('SubAgentActivity')})}).safeParse(row.payload).success))throw new Error('unsupported_session');
       if(e.child_runtime||nativeFamily){
@@ -391,8 +403,8 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     // recorded_at after all reads, so a newly read child response cannot be
     // rejected solely because its timestamp follows an earlier root read.
     const now=new Date().toISOString();
-    stage='projection';const snapshots=[{id:session,snapshot:parseCodexCandidateRollout(bytes.text,scope,session,c.projectRoot,now)}];
-    if(e.direct_child&&childBytes)snapshots.push({id:e.direct_child.session_id,snapshot:parseCodexCandidateRollout(childBytes.text,scope,e.direct_child.session_id,c.projectRoot,now)});
+    stage='projection';const snapshots=[{id:session,snapshot:parseCodexCandidateRollout(bytes.text,scope,session,c.projectRoot,now,compatibility??undefined)}];
+    if(e.direct_child&&childBytes)snapshots.push({id:e.direct_child.session_id,snapshot:parseCodexCandidateRollout(childBytes.text,scope,e.direct_child.session_id,c.projectRoot,now,compatibility??undefined)});
     // Validate both sources before any usage insertion; conflicts roll back the
     // family tick, including runtime evidence, counts and source checkpoints.
     const pendingSettled=new Set(settled);
@@ -447,6 +459,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       // Re-hash unless this exact file identity was hashed by preflight.
       guard();const unchanged=verifiedBinary!==undefined&&verifiedBinary.path===e.binary.path&&verifiedBinary.sha256===e.binary.sha256&&verifiedBinary.identity===fileIdentity(e.binary.path);
       if(!unchanged&&hash(file(e.binary.path,256*1024*1024))!==e.binary.sha256)throw new Error('binary_mismatch');
+      if(!synthetic&&!qualification)verifyCodexVersion(e);
       if(hash(file(e.hook_recorder,65536))!==hookRecorderSha)throw new Error('invalid_hook_recorder');
       const prompt=file(e.prompt_file!,1024*1024);const text=prompt.toString('utf8');if(!Buffer.from(text).equals(prompt)||text.includes('\0'))throw new Error('invalid_prompt');
       const instructions=c.instructions.length===1?c.instructions[0]!.content:c.instructions.map(i=>`[${i.artifact_id}]\n${i.content}`).join('\n\n');
@@ -504,7 +517,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
       if(c.runtime.model!==null)args.push('--model',c.runtime.model);if(c.runtime.effort!==null)args.push('-c',`model_reasoning_effort=${JSON.stringify(c.runtime.effort)}`);
       if(e.operation==='resume')args.push('resume',e.session_id!);args.push('-');
       if(JSON.parse(args.find(a=>a.startsWith('developer_instructions='))!.slice('developer_instructions='.length))!==instructions)throw new Error('instruction_mismatch');
-      guard();stage='process';child=spawn(e.binary.path,(synthetic||qualification&&script)?[script!,...args]:args,{cwd:c.projectRoot,env:{...process.env,CODEX_HOME:e.codex_home},detached:true,stdio:['pipe',qualification?'pipe':'ignore','ignore']});
+      guard();activeBinaryIdentity=fileIdentity(e.binary.path);stage='process';child=spawn(e.binary.path,(synthetic||qualification&&script)?[script!,...args]:args,{cwd:c.projectRoot,env:{...process.env,CODEX_HOME:e.codex_home},detached:true,stdio:['pipe',qualification?'pipe':'ignore','ignore']});
       if(child.pid!==undefined)qualification?.onSpawn();
       if(qualification){let pending='';let total=0;let markers=0;let spawnItem:string|undefined;
         child.stdout!.on('data',(chunk:Buffer)=>{
@@ -569,6 +582,7 @@ async function execute(store:Store,execution:Execution,c:WorkflowExecutionContex
     if(server)await new Promise<void>(ok=>server!.close(()=>ok()));if(dir)rmSync(dir,{recursive:true,force:true});
     process.removeListener('SIGINT',interrupt);process.removeListener('SIGTERM',interrupt);
   }
+  if(compatibility?.state==='compatibility_unverified'&&failure&&['source_changed','runtime_mismatch','unsupported_session','hook_missing','binary_mismatch','initial_source_incomplete','collection_failed'].includes(failure))invalidateCompatibility(store,compatibility,'contract_failed');
   const state=failure==='stop_requested'?'stopped':failure?'failed':'completed';
   if(failure&&failure!=='stop_requested'&&session){try{
     // A successful snapshot includes records at its millisecond boundary.

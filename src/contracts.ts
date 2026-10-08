@@ -15,12 +15,23 @@ export type Reading = z.infer<typeof ReadingSchema>;
 export const ComparisonModeSchema = z.enum(['randomized_task', 'observational_period']);
 export const ModelSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/);
 export const ProductVersionSchema = z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/);
+export const SourceCompatibilitySchema = z.strictObject({
+  state: z.enum(['verified', 'compatibility_unverified', 'invalidated']),
+  product: z.enum(['codex', 'claude_code']), product_version: ProductVersionSchema,
+  source: z.enum(['file', 'codex_workflow', 'claude_workflow']),
+  parser_version: ProductVersionSchema, parser_revision: IdSchema,
+  profile_id: IdSchema, rule_revision: IdSchema,
+});
+export type SourceCompatibility = z.infer<typeof SourceCompatibilitySchema>;
 export const UsageSchema = z.strictObject({
   kind: z.literal('usage'),
   input_total: ReadingSchema, cached_input: ReadingSchema,
   output_total: ReadingSchema, reasoning_output: ReadingSchema,
   product: z.enum(['codex', 'claude_code', 'synthetic']),
   product_version: ProductVersionSchema, model: ModelSchema, epoch: IdSchema,
+  source_compatibility: SourceCompatibilitySchema.optional(),
+  // Read-time exclusion of legacy observations whose source provenance is absent.
+  source_invalidated: z.literal(true).optional(),
 });
 export const ToolSchema = z.strictObject({
   kind: z.literal('tool'), call_id: IdSchema,
@@ -51,7 +62,8 @@ export const LegacyEventSchema = z.strictObject({ ...eventFields,
 });
 export const EventSchema = z.strictObject({ ...eventFields,
   payload: z.union([z.strictObject({ kind: z.literal('session_linked') }), UsageSchema, UsageV2Schema, ToolSchema]),
-});
+}).refine(event => event.payload.kind !== 'usage' || !event.payload.source_compatibility ||
+  event.payload.product === event.payload.source_compatibility.product && event.payload.product_version === event.payload.source_compatibility.product_version);
 export type Event = z.infer<typeof LegacyEventSchema>;
 
 export function addTokens(values: readonly number[]): number {

@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 const failureCategories = [
   'claude_probe_child_limit', 'claude_probe_child_scope', 'claude_probe_configuration_changed',
   'claude_probe_content_enabled', 'claude_probe_deadline', 'claude_probe_hook_scope',
-  'claude_probe_invalid_logs', 'claude_probe_invalid_traces', 'claude_probe_log_conflict',
+  'claude_probe_invalid_json', 'claude_probe_invalid_logs', 'claude_probe_invalid_traces', 'claude_probe_log_conflict',
   'claude_probe_log_gap', 'claude_probe_log_limit', 'claude_probe_log_scope', 'claude_probe_not_ready',
   'claude_probe_not_started', 'claude_probe_policy_override', 'claude_probe_request_boundary',
   'claude_probe_request_conflict', 'claude_probe_reservation_failed', 'claude_probe_restart',
