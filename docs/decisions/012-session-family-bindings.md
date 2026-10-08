@@ -73,7 +73,7 @@ as the collector; provider/browser `productionSupported` assertions cannot open 
 
 Ordinary native family admission remains closed. Codex 0.160.0 needs actual
 hook/materialized-path/header and own-counter conformance for the supported
-family/history scope. Claude 2.1.291 and 2.1.293 remain candidates and need actual transcript,
+family/history scope. Claude 2.1.291, 2.1.293 and 2.1.294 remain candidates and need actual transcript,
 hook loading, family membership and own-counter conformance; nested immediate
 parents are unverified. Existing admitted workflow profiles and root-only
 `no_child_activity` conformance cannot substitute for that evidence. A future

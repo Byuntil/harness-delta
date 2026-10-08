@@ -450,13 +450,13 @@ describe('Claude bound-session authorization', () => {
     expect(authorizeSource).toHaveBeenLastCalledWith(expect.objectContaining({ nativeSessionId: sid, agentId: 'denied', sourceRef: childPath(sid, 'denied') }));
   });
 
-  it('keeps Claude 2.1.293 a code-owned synthetic candidate', async () => {
+  it.each(['2.1.293', '2.1.294'])('keeps Claude %s a code-owned synthetic candidate', async version => {
     const sid = randomUUID(); writeRoot(sid);
-    writeFileSync(rootPath(sid), lines([userRow(sid, '2026-10-07T00:59:00.000Z', { version: '2.1.293' })]));
+    writeFileSync(rootPath(sid), lines([userRow(sid, '2026-10-07T00:59:00.000Z', { version })]));
     connect(sid); const receipt = locate(sid).receipt!;
-    expect((await provider().resolveCurrent({ receipt })).productVersion).toBe('2.1.293');
+    expect((await provider().resolveCurrent({ receipt })).productVersion).toBe(version);
     await expect(provider({ allowCandidateProfiles: false }).resolveCurrent({ receipt })).rejects.toThrow('claude_source_version_unsupported');
-    expect(claudeBindingProfiles.find(profile => profile.version === '2.1.293')?.status).toBe('candidate');
+    expect(claudeBindingProfiles.find(profile => profile.version === version)?.status).toBe('candidate');
   });
 
   it('keeps packaged hook root and Unicode agent-type projection synchronized', () => {

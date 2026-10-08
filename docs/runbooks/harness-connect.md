@@ -162,7 +162,7 @@ For the isolated qualification runner, the UI also shows parent/child own reques
 
 The local operator may select one prepared `functional_pilot` task using the
 `claude-ordinary-human-pilot` source profile, with an exact candidate version
-listed by the ordinary provider (currently 2.1.291 or 2.1.293). Existing file and
+listed by the ordinary provider (currently 2.1.291, 2.1.293 or 2.1.294). Existing file and
 launch-workflow version compatibility does not qualify ordinary family sources.
 The profile, binary version, project source directory and receipt directory must
 be reviewed before installation or native observation. A browser or manifest
@@ -192,7 +192,13 @@ Native process exit/relaunch is a separate boundary, not measurement resume.
 Skill metadata hooks may continue while collection is paused. Receipt lifetime
 is separate from the hook timeout and the helper's fresh-receipt lookup window.
 
-This preparation has synthetic evidence only. Actual 2.1.293 skill loading,
+The [2.1.294 change record](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21294)
+describes fixes to `prompt` and `agent` hook judgment. It does not establish native
+transcript fields, command-hook loading or counter compatibility. The ordinary
+parser is unchanged; 2.1.294 has synthetic candidate coverage for connection,
+family usage, pause/resume and human completion.
+
+This preparation has synthetic evidence only. Actual 2.1.293 or 2.1.294 skill loading,
 family counters, pause/resume and human completion still need an explicitly
 approved native trial. Ordinary production admission, full task cost and
 inferential decisions remain unavailable.
