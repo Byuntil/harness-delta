@@ -69,6 +69,8 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
 
 Expected: `price_selection`, catalog/table provenance, exact component matches,
 `partial_amount`, null `complete_amount`, reasons and window/coverage evidence.
+Read `compatibility_unverified_partial_amount` and `legacy_unverified_partial_amount`
+separately from verified `partial_amount`; see [source trust and coverage](observed-cost.md#4-read-amount-missingness-and-coverage-separately).
 An assigned V2 task uses its frozen comparison reference; a standalone task uses
 the current catalog. Explicit historical comparison tables still work. New V2
 comparison CLI configurations may omit `price_table_id`; registration fills it once.

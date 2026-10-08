@@ -117,9 +117,12 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
 
 | 필드/상태 | 뜻 |
 | --- | --- |
-| `partial_amount` | 적격 가격 성분의 합계; 명시적 입력 가정을 포함할 수 있음 |
-| `partial_amount: "0"` | 적격 가격 관측의 합계가 0 |
-| `partial_amount: null` | 적격 가격 금액 없음; 0이 아님 |
+| `partial_amount` | source 신뢰가 verified인 적격 가격 성분; 명시적 입력 가정을 포함할 수 있음 |
+| `compatibility_unverified_partial_amount` | 조건부 파서/프로필 재사용의 별도 추정액 |
+| `legacy_unverified_partial_amount` | source 출처 없는 과거 native 사용량의 별도 추정액 |
+| `compatibility` | 금액에서 제외한 invalidated 이벤트를 포함한 source/버전/파서 출처와 신뢰별 개수 |
+| `partial_amount: "0"` | 적격 verified 가격 관측의 합계가 0 |
+| `partial_amount: null` | 적격 verified 가격 금액 없음; 미검증 추정액은 있을 수 있음 |
 | `complete_amount: null` | 작업 전체 비용 제공 불가 |
 | `unpriced_events` | 기록 이벤트에 가격 없는 성분이 하나 이상 있음 |
 | `unavailable_events` | 부분 가격 금액을 계산할 수 없는 이벤트 |
@@ -127,7 +130,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
 | Missing / error / excluded / unmeasurable | 서로 다른 관측 상태이며 관측된 0이 아님 |
 | `observed_components_priced: true` | 적격 관측 성분에 가격 적용 가능; 작업 전체 관측 범위는 여전히 미확정 |
 
-금액과 함께 이유를 읽으세요. 관측이 비었거나 모두 unavailable이면 부분 비용은 null입니다.
+신뢰별 금액과 이유를 함께 읽으세요. 모든 관측이 미검증이면 미검증 추정액이 있어도
+`partial_amount`는 null입니다. 비었거나 가격을 계산할 수 없는 범주의 금액은 0이 아닌
+null입니다. 과거 고정 보고서는 원래 형식을 유지하며, 누락된 출처를 verified로 자동 승격하지 않습니다.
 사용량 부재·알 수 없는 귀속/성분·가격 누락을 표시해야 합니다.
 cached/reasoning 부분집합을 다시 더하거나 집계로 부모/자식 완전성을 추론하지 마세요.
 

@@ -2,9 +2,13 @@
 
 [English](external-session-workflow.md). [작업 흐름 빠른 시작](workflow-quickstart.ko.md)으로 프로젝트, variant, 검토한 실행 설정과 동결된 protocol을 등록하세요. 로컬 브라우저 경로는 typed external service를 재사용합니다. 아래 고급 CLI는 검토한 설정 파일을 읽습니다. 표시 이름과 비공개 template 기록은 측정 metadata와 분리됩니다.
 
+별도의 일반 세션 skill과 제한된 Claude 사용자 파일럿은
+[Harness Connect](harness-connect.ko.md)를 참고하세요. 파일·native launch의
+조건부 버전은 이 티켓 coordinator의 정확한 source 허용 범위를 넓히지 않습니다.
+
 ## 지원과 증거
 
-생산 source guard는 독립 `cli`/`exec` root의 정확한 Codex0.160.0 own-response profile입니다. 새 수동 coordinator는 오프라인 합성 검증을 거쳤으며, 첫 작업 전 startup 기록 시점은 별도 승인된 실제 검증이 필요합니다. IDE/app/MCP, fork, compaction, child는 이 경로에 허용되지 않습니다. Claude 수동 지원은 외부 process/telemetry qualification 대기 상태입니다. 이미 허용된 Claude 2.1.291 도구 소유 parent launch(2.1.288은 지원 종료)는 다른 경로이므로 수동 외부 source의 증거가 아닙니다. 설치된 새 버전을 조용히 허용하지 마세요.
+생산 source guard는 독립 `cli`/`exec` root의 정확한 Codex 0.160.0 own-response profile입니다. 새 수동 coordinator는 오프라인 합성 검증을 거쳤으며, 첫 작업 전 startup 기록 시점은 별도 승인된 실제 검증이 필요합니다. IDE/app/MCP, fork, compaction, child는 이 경로에 허용되지 않습니다. Claude 수동 지원은 외부 process/telemetry qualification 대기 상태입니다. 이미 허용된 Claude 2.1.291 도구 소유 parent launch(2.1.288은 지원 종료)는 다른 경로이므로 수동 외부 source의 증거가 아닙니다. 설치된 새 버전을 조용히 허용하지 마세요.
 
 증거를 구분하세요:
 

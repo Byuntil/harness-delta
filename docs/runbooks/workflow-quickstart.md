@@ -4,7 +4,8 @@
 
 Use this procedure for a small **functional pilot** with descriptive partial costs.
 It covers Codex 0.160.0 (`codex-workflow-own-response-v1`) and
-Claude Code 2.1.291 parent-only launch (`claude-workflow-own-trace-v1`).
+Claude Code 2.1.291 parent-only launch (`claude-workflow-own-trace-v1`), plus
+the conditional forward versions described below.
 Use one persistent A/B assignment for each logical task.
 Choose model and effort per invocation; a new session does not change the assignment.
 
@@ -14,27 +15,30 @@ Choose model and effort per invocation; a new session does not change the assign
 | --- | --- |
 | Codex 0.160.0 root workflow | Launch, same-session resume, explicit independent-root link, foreground collect, stop and recover; partial usage |
 | Codex 0.160.0 direct-child workflow | Separate profile: fresh root and one fresh child, pinned macOS arm64/Node24, read-only; no family resume or external child link |
-| Legacy file collector | Codex 0.156.1/0.158.0 and Claude Code 2.1.283 only; use [local measurement](local-measurement.md) |
-| Claude Code 2.1.291 parent-only workflow | Fresh launch per run (read-only or `workspace-edit`), another launch on the same task, stop and recover; partial usage. No child, native resume or other version; 2.1.288 was retired on 2026-10-06 |
+| Legacy file collector | Exact profiles: Codex 0.156.1/0.158.0 and Claude Code 2.1.283; conditional file versions also available; use [local measurement](local-measurement.md) |
+| Claude Code 2.1.291 parent-only workflow | Fresh launch per run (read-only or `workspace-edit`), another launch on the same task, stop and recover; partial usage. No child or native resume; 2.1.288 is retired |
 | App/IDE/MCP, forks, compaction, deeper descendants | Unsupported for this procedure |
 | Complete task cost, actual billing, savings or adoption inference | Unavailable |
 | Team file exchange | Synthetic validation only; functional-pilot results cannot use that exchange |
+
+Stable Codex versions `>0.160.0` and `<0.164.0`, and Claude Code versions
+`>2.1.291` and `<2.2.0` (including 2.1.293/2.1.294), may reuse their workflow
+profiles in a `functional_pilot`. They remain `compatibility_unverified`, with
+separate reference estimates. These windows do not qualify ticket connections or
+ordinary session families. See [version configuration and checks](task-native-workflow.md#conditional-forward-versions).
 
 **Execution notice:** Native launch/resume uses your existing authenticated product and can consume paid or subscription usage.
 Approve each actual run before execution. Timeout and stop are not provider spending caps.
 Preparing inputs, registering them and reading status do not launch a product.
 
-Initial admission qualifications were read-only. Later bounded workspace-write functional runs produced files.
-The first run failed configuration-scope verification because native startup created a persistent trust setting.
-A subsequent run with explicit `project_trust: "untrusted"` passed its monitored configuration-scope checks.
-These observations do not guarantee that all native or managed settings remain unchanged.
-That option disables project-local Codex configuration, hooks and rules for the invocation.
-Use it only when that effect is intended. It applies to fresh root launch, not resume/link/collect or child launch.
-See [execution details and limits](task-native-workflow.md).
+For Codex fresh-root launch, `project_trust: "untrusted"` disables project-local
+configuration, hooks and rules for that invocation. Use it only when intended;
+it does not apply to resume/link/collect or child launch. See
+[execution details and configuration-scope evidence](task-native-workflow.md#codex-launch-resume-link-and-collection).
 
 ## 1. Install from the checkout
 
-Prerequisites: Node.js 24, npm and the existing pinned Codex 0.160.0 or Claude Code 2.1.291 binary.
+Prerequisites: Node.js 24, npm and an existing pinned binary eligible for the selected workflow version.
 Local validation covers macOS arm64. Other platforms remain unverified.
 The package is private; there is no published-package installation procedure.
 
@@ -67,7 +71,7 @@ An installed local package can expose `hm`; `npm ci` alone does not put it on yo
 ## 2. Agree on the pilot inputs
 
 Before registration, have the team owner select the following inputs.
-The product supplies no experimental prices, durations, sample size or missingness limits.
+The product supplies a reference price catalog; durations, sample size and missingness limits remain explicit choices.
 
 | Decision | Where to record it |
 | --- | --- |
@@ -75,7 +79,7 @@ The product supplies no experimental prices, durations, sample size or missingne
 | Task output, permitted edits and human acceptance criteria | Private prompt file; criterion IDs in `workflow.json` |
 | Participants, environments, assignee strata and allocator ownership | `protocol.json`; each stratum has one assignee |
 | Recruitment dates, follow-up duration, sample budget and stopping/deviation rules | `protocol.json`; freeze before recruitment starts |
-| Explicit reference rates and legacy input basis | `prices.json` and the [cost guide](observed-cost.md) |
+| Reference catalog or explicit rates, and legacy input basis | [Catalog](reference-price-catalog.md), or `prices.json` and the [cost guide](observed-cost.md) |
 | Runtime model/effort, sandbox, timeout, run count and teardown | `runtime.json`, execution files and the actual-run approval |
 
 Choose follow-up long enough for work **and human review**.
@@ -109,24 +113,24 @@ Those values require the owner's choice; they do not establish statistical power
 
 | Files | Required replacements |
 | --- | --- |
-| `prices.json` | Synthetic rates/model/source/date with your explicit reference basis; no vendor prices are implied |
+| `prices.json` (explicit-table path) | Replace synthetic rates/model/source/date; omit this file and protocol `price_table_id` to pin the catalog at registration |
 | `variant-a.md`, `variant-b.md` | Reviewed A/B instructions; no personal source material in public fixtures |
 | `protocol.json` | Dates in 2099, example IDs, participants/environments/strata, follow-up/sample/missingness/stopping policies |
 | `workflow.json` | Matching IDs, logical task, criteria, environment, actual code-base commit and artifact paths |
 | `runtime.json` | User-selected model and effort, or `null` for unspecified; no diagnostic model is required |
 | `launch.json`, `resume.json` | Canonical absolute binary/home/recorder/prompt paths, approved sandbox and timeout |
 | `link.json`, `collect.json` | The same canonical setup; exact linked session UUID and source path where required |
-| `claude-launch.json` (Claude only) | Pinned 2.1.291 binary path/SHA, private mode-0700 workspace, built mediator, prompt, `permissions`, limits |
+| `claude-launch.json` (Claude only) | Selected binary path/version/SHA, private mode-0700 workspace, built mediator, prompt, `permissions`, limits |
 
-For Claude Code, also set `product: "claude_code"`, `product_version: "2.1.291"` in
-`workflow.json`, and the `claude_code / 2.1.291 / claude-workflow-own-trace-v1`
-source profile in `protocol.json`. A new protocol may list only one `claude_code`
-workflow source profile, at the newest admitted Claude Code version (now 2.1.291);
-otherwise registration fails with `claude_workflow_version_not_latest`. A registered
-protocol keeps its version until that version is retired. After retirement its tasks
-cannot launch and need a new protocol.
-Point `binary.path` at the exact 2.1.291 file
-(for a native install, under `~/.local/share/claude/versions/`), not the `claude` launcher.
+Keep the workflow configuration, protocol source profile and executable version
+identical. The checked-in Codex examples use 0.160.0; for a conditional version,
+set execution `product_version` and its actual `binary.sha256` too.
+For Claude, use `product: "claude_code"`, profile `claude-workflow-own-trace-v1`,
+and the selected version in `workflow.json`, `protocol.json` and `binary.version`.
+A functional protocol permits one Claude workflow profile at 2.1.291 or a version
+inside its conditional window. Other non-synthetic protocols require the newest
+exact admission; see [registration rules](task-native-workflow.md#claude-parent-only-workflow).
+Point `binary.path` at the exact versioned file, not the `claude` launcher.
 If that file is missing or changed, preflight fails with `claude_probe_executable_mismatch`
 before assignment.
 With `permissions: "workspace-edit"`, keep the workspace, harness-delta build (mediator), prompt, binary and
@@ -136,7 +140,7 @@ A `workspace` can be reused across launches; each run uses its own subdirectory.
 All JSON examples are complete schema inputs, but their choices are synthetic.
 Keep prompts, approved execution requests and databases under ignored local storage.
 Keep ordinary work products separate from measurement data.
-The native binary SHA must match the pinned value in the examples.
+Codex 0.160.0 must match its code-owned binary pin; conditional versions use the reviewed actual hash.
 Do not install, log in or update a product to make an example work without a separate decision.
 
 **Output notice:** The measurement CLI discards ordinary native stdout.
@@ -171,7 +175,9 @@ If registered inputs must change, use new IDs and an accepted prospective protoc
 ## 4. Register and freeze once
 
 Use a new dedicated database for this pilot. Keep synthetic trials in a different database.
-Run each command separately, in this order.
+The commands below use an explicit `prices-1` table. For the catalog path, omit
+`price_table_id` from `protocol.json` and skip `price-table register`; registration
+pins the current catalog once. Run the remaining commands in order.
 Replace the project root with its canonical absolute path.
 
 ```sh
@@ -184,7 +190,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison freeze pilot-
 node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow status pilot-1
 ```
 
-Expected: `native_execution: true` for the admitted root profile with complete accepted inputs.
+Expected: `native_execution: true` for an eligible workflow profile with complete
+accepted inputs. Conditional sources appear as `compatibility_unverified` under
+`source_compatibility`; `readiness.real_allocation` remains false for those sources.
 `whole_task_cost_unconfirmed` and `analysis_unverified` remain expected limitations.
 If `native_source_unqualified` or `native_adapter_not_wired` appears, stop before launch.
 If freeze fails, check every required field and ensure recruitment has not started.
@@ -296,7 +304,8 @@ Earlier, paused and offline usage is excluded; stored observations survive sourc
 There is no discovery, `--last`, retrospective backfill or automatic retry.
 A read racing a native append ingests nothing and retries at the next poll, at most 20 consecutive times or the invocation deadline.
 Identity, truncation and prefix changes still fail closed.
-Do not replace these commands with generic `session link`/`collect` for Codex 0.160.0.
+Keep assigned workflow tasks on `workflow codex`. Generic `session link`/`collect`
+is a separate file-parser lane with different scope and trust, even when the version is eligible there.
 The separate direct-child profile cannot resume its family; after pause, use a fresh root/child pair.
 
 ## 8. Record the human outcome
@@ -342,11 +351,11 @@ A late assessment appears as `late_outcome` in new `flexible-cost-descriptive-2`
 Stored version-1 snapshots retain their original shape.
 If more evidence arrives, create a new report ID with the appropriate revision reason; old snapshots do not change.
 
-Estimate the same task's observed components using the explicit reference table:
+Estimate the same task's observed components using its pinned comparison table:
 
 ```sh
 node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-task task-1 \
-  --price-table prices-1 --cutoff "$reportCutoff" --input-basis output-only-v1
+  --cutoff "$reportCutoff" --input-basis output-only-v1
 ```
 
 Read [the cost guide](observed-cost.md) before selecting an input assumption or comparing estimates.
@@ -410,9 +419,3 @@ Retention is opt-in; see [local deletion and retention](local-measurement.md#ass
 
 Use [flexible comparison](flexible-comparison.md) for configuration contracts and [native workflow](task-native-workflow.md) for advanced source/child boundaries.
 Use [v1 synthetic comparison](task-comparison.md), [synthetic exchange](team-file-exchange.md) and [method validation](comparison-analysis-validation.md) only for their stated development scopes.
-The former functional-pilot preparation guide is integrated into steps 2–5 and the flexible configuration reference.
-
-These procedures use an **STE-inspired** style. They have not been assessed for full ASD-STE100 compliance or certified by ASD.
-The Korean version uses the same structure and terms; it is not an ASD-STE100-conforming language version.
-See the [official current FAQ](https://asd-ste100.org/STE_faq.html) and [official Issue 9 standard](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf).
-The standard is available free of charge, but its copyright restricts reproduction. Link to it; do not redistribute its text or dictionary here.
