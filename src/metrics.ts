@@ -1,4 +1,4 @@
-import { CostCoverageEvidenceSchema, CostFactsSchema, PriceTableSchema, type UsageEvent, type PriceTable, type CostCoverageEvidence, type TaskCost, parseTaskMetadata } from './flexible-contracts.js';
+import { CostCoverageEvidenceSchema, CostFactsSchema, PriceTableSchema, type UsageEvent, type PriceTable, type CostCoverageEvidence, type TaskCost, type RuntimeEvidence, parseTaskMetadata } from './flexible-contracts.js';
 import { evaluateCostCoverage, syntheticCostProfileId } from './cost-coverage.js';
 import { parseComparison } from './comparison-contracts.js';
 import { priceUsage, sumAmounts } from './pricing.js';
@@ -77,7 +77,7 @@ export function aggregateTask(store:Store,taskId:string,cutoff:string){
 export type TaskReport=ReturnType<typeof aggregateTask>;
 
 /** Cost coverage is separate from the permanently partial legacy token report. */
-export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence): TaskCost {
+export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: PriceTable, inputEvidence: CostCoverageEvidence, runtimeEvidence: readonly RuntimeEvidence[] = []): TaskCost {
   const evidence = parseComparison(CostCoverageEvidenceSchema, inputEvidence, 'invalid_cost_coverage');
   const table = parseComparison(PriceTableSchema, inputTable, 'invalid_price_table');
   const unique = new Map<string, UsageEvent>();
@@ -92,7 +92,7 @@ export function aggregateTaskCost(events: readonly UsageEvent[], inputTable: Pri
   }
   const rows = [...unique.values()];
   const decision = evaluateCostCoverage({ ...evidence, has_observed_value: evidence.has_observed_value && rows.length > 0 });
-  const priced = rows.map(e => priceUsage(e, table));
+  const priced = rows.map(e => priceUsage(e, table, 'output-only-v1', runtimeEvidence));
   const partial = priced.flatMap(e => e.partial_amount === null ? [] : [e.partial_amount]);
   const synthetic = evidence.profile_id === syntheticCostProfileId && rows.every(e => e.payload.product === 'synthetic');
   const usageComplete = synthetic && rows.length > 0 && evidence.has_observed_value && CostFactsSchema.keyof().options

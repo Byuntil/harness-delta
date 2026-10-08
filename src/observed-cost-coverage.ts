@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { codexWorkflowCostFacts, type CodexWorkflowRun } from './codex-workflow-journal.js';
 import { evaluateCostCoverage } from './cost-coverage.js';
-import { CostCoverageEvidenceSchema, type PriceTable, type UsageEvent } from './flexible-contracts.js';
+import { CostCoverageEvidenceSchema, type PriceTable, type UsageEvent, type RuntimeEvidence } from './flexible-contracts.js';
 import { canonicalJson } from './reports/comparison-snapshot.js';
 import { priceUsage, type LegacyInputBasis } from './pricing.js';
 import type { Store } from './store.js';
 
 /** Produces evidence about this recorded snapshot, never provider completeness.
  * Journals completed after the cutoff cannot justify an earlier coverage fact. */
-export function observedCostCoverage(store:Store,taskId:string,start:string|null,end:string,events:readonly UsageEvent[],table:PriceTable,basis:LegacyInputBasis){
+export function observedCostCoverage(store:Store,taskId:string,start:string|null,end:string,events:readonly UsageEvent[],table:PriceTable,basis:LegacyInputBasis,runtimeEvidence:readonly RuntimeEvidence[]=[]){
   const runs=store.all<CodexWorkflowRun>('SELECT * FROM codex_workflow_runs WHERE task_id=? ORDER BY id',[taskId])
     .filter(r=>start!==null&&Date.parse(r.started_at)<Date.parse(end)&&r.ended_at!==null&&Date.parse(r.ended_at)<=Date.parse(end)&&Date.parse(r.ended_at)>=Date.parse(start))
     .map(r=>({id:r.id,session_id:r.session_id,generation:r.generation,state:r.state,purpose:r.purpose,
@@ -20,7 +20,7 @@ export function observedCostCoverage(store:Store,taskId:string,start:string|null
     ...codexWorkflowCostFacts(store,taskId,{start,end}),has_observed_value:events.length>0,
   }):null;
   const decision=evidence?evaluateCostCoverage(evidence):{eligible:false,reasons:['incomplete','missing_value']};
-  const observedComponentsPriced=events.length>0&&events.every(e=>priceUsage(e,table,basis).amount!==null);
+  const observedComponentsPriced=events.length>0&&events.every(e=>priceUsage(e,table,basis,runtimeEvidence).amount!==null);
   return {evidence,decision,workflow_run_count:runs.length,
     observed_components_priced:observedComponentsPriced,
     snapshot_hash:createHash('sha256').update(canonicalJson({evidence,runs,events,table,basis,observed_components_priced:observedComponentsPriced})).digest('hex'),

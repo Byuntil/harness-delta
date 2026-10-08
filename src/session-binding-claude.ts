@@ -567,19 +567,25 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
       const ordinary = token(usage.input_tokens); const write = token(usage.cache_creation_input_tokens);
       const read = token(usage.cache_read_input_tokens); const output = token(usage.output_tokens);
       if (!model.success || occurredAt === null || ordinary === null || write === null || read === null || output === null) { gaps.add('usage_incomplete'); continue; }
-      const creation = object(usage.cache_creation); if (creation && (token(creation.ephemeral_1h_input_tokens) ?? 0) > 0) gaps.add('cache_write_1h_observed');
+      const creation = object(usage.cache_creation);
+      const oneHourWrite = creation !== null && (token(creation.ephemeral_1h_input_tokens) ?? 0) > 0;
+      if (oneHourWrite) gaps.add('cache_write_1h_observed');
       const server = object(usage.server_tool_use); if (server && Object.values(server).some(v => (token(v) ?? 0) > 0)) gaps.add('server_tool_use_unpriced');
-      const fingerprint = sha([model.data, ordinary, write, read, output, version]);
+      // Preserve old fingerprints for ordinary five-minute references. A known
+      // one-hour write cannot replay as the same priceable five-minute request.
+      const fingerprint = sha([model.data, ordinary, write, read, output, version, ...(oneHourWrite ? ['cache_write_1h_observed'] : [])]);
       const old = byRequest.get(requestId.data);
       if (old) { if (old.fingerprint !== fingerprint) old.conflict = true; continue; }
       // The first row's timestamp is the request's deterministic occurrence time.
       byRequest.set(requestId.data, { requestId: requestId.data, first: line, fingerprint, conflict: false, record: {
         requestId: requestId.data, sessionId: agent === null ? native : `${native}:${agent}`, occurredAt, turnId: null, effort: null,
         payload: { kind: 'usage', schema_version: 2, product: 'claude_code', product_version: version, model: model.data, epoch: 'sequential',
+          ...(oneHourWrite ? { cache_write_1h_observed: true as const } : {}),
           attribution: 'verified', input_total: observed(addTokens([ordinary, write, read])), cached_input: observed(read),
           output_total: observed(output), reasoning_output: { status: 'unmeasurable', value: null, reason: 'unsupported' },
           billing_components: [{ kind: 'ordinary_input', reading: observed(ordinary) }, { kind: 'cache_read', reading: observed(read) },
-            { kind: 'cache_write', reading: observed(write) }, { kind: 'output', reading: observed(output) }] } } });
+            { kind: 'cache_write', reading: observed(write) },
+            { kind: 'output', reading: observed(output) }] } } });
     }
     return [...byRequest.values()];
   }
