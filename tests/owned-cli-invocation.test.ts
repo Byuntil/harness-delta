@@ -190,10 +190,12 @@ test('separate PTY owner survives observer exit and verifies root/member disappe
 test('a previously proved descendant that later changes PGID remains owned through verified teardown',async()=>{
  const dir=realpathSync(mkdtempSync(join(tmpdir(),'owned-regroup-fixture-')));let escaped:number|undefined;
  try{
-  const marker=join(dir,'escaped.pid');const script=join(dir,'worker.mjs');
-  const py="import os,time,signal;time.sleep(.2);os.setsid();signal.signal(signal.SIGTERM,lambda *args:None);time.sleep(30)";
-  writeFileSync(script,`import{spawn}from'node:child_process';import{writeFileSync}from'node:fs';const c=spawn(${JSON.stringify(OwnedCliInvocation.pythonExecutable())},['-c',${JSON.stringify(py)}],{stdio:'ignore'});c.unref();writeFileSync(${JSON.stringify(marker)},String(c.pid));setTimeout(()=>process.exit(0),500);`);
-  const result=await new OwnedCliInvocation({command:realpathSync(process.execPath),args:[script],cwd:dir,durationMs:2000,termGraceMs:100,stdio:'ignore'}).run();
+  const marker=join(dir,'escaped.pid');const regrouped=join(dir,'regrouped');const script=join(dir,'worker.mjs');
+  // Slow hosts take hundreds of ms per discovery pass: keep the root-group window
+  // wide enough to be sampled, and exit the root only after setsid has happened.
+  const py="import os,sys,time,signal;signal.signal(signal.SIGTERM,lambda *args:None);time.sleep(1);os.setsid();open(sys.argv[1],'w').close();time.sleep(30)";
+  writeFileSync(script,`import{spawn}from'node:child_process';import{existsSync,writeFileSync}from'node:fs';const c=spawn(${JSON.stringify(OwnedCliInvocation.pythonExecutable())},['-c',${JSON.stringify(py)},${JSON.stringify(regrouped)}],{stdio:'ignore'});c.unref();writeFileSync(${JSON.stringify(marker)},String(c.pid));const t=setInterval(()=>{if(existsSync(${JSON.stringify(regrouped)})){clearInterval(t);process.exit(0);}},20);`);
+  const result=await new OwnedCliInvocation({command:realpathSync(process.execPath),args:[script],cwd:dir,durationMs:4000,termGraceMs:100,stdio:'ignore'}).run();
   escaped=Number(readFileSync(marker,'utf8'));
   expect(result).toMatchObject({status:'completed',escapedMemberObserved:true,ownershipVerified:true,terminationVerified:true});
   expect(result.groupChanges).toContainEqual(expect.objectContaining({pid:escaped,fromPgid:result.pid,toPgid:escaped}));
@@ -201,7 +203,7 @@ test('a previously proved descendant that later changes PGID remains owned throu
   for(const change of result.groupChanges){expect(change.parentPid).toBe(result.pid);expect(change.parentUid).toBeTypeOf('number');expect(change.parentStartedAt).toBeTypeOf('string');expect(change.sampleOffsetMs).toBeGreaterThanOrEqual(0);expect(change.startedAt).toMatch(/\d{2}:\d{2}:\d{2} \d{4}$/);}
   expect(()=>process.kill(escaped!,0)).toThrow();expect(()=>process.kill(-escaped!,0)).toThrow();
  }finally{if(escaped)try{process.kill(escaped,'SIGKILL');}catch{/* already gone */}rmSync(dir,{recursive:true,force:true});}
-},5000);
+},10000);
 
 test('group signals require every sampled member identity to be proved; foreign, conflicting and failed queries reject',()=>{
  // Only the group-check function, with synthetic PID metadata; no real ps/signals.
