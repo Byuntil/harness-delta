@@ -3,6 +3,7 @@ import { addTokens, EventSchema, IdSchema, MonetaryAmountSchema } from './contra
 import { parseComparison } from './comparison-contracts.js';
 import { PriceTableSchema, type BillingComponent, type UsageEvent, type PriceTable, type PricedUsage, type RuntimeEvidence } from './flexible-contracts.js';
 import { verifiedRequestPromptTokens } from './request-price-evidence.js';
+import { pricingComponents, type PriceableComponent } from './cache-write-ttl.js';
 import type { Store } from './store.js';
 // Prices: <=60 digits, counters/units: <=16 digits, <=4096 entries.
 // Precision160 exceeds finite-product/sum requirements and preserves >80 guard
@@ -62,10 +63,12 @@ export function priceUsage(input: UsageEvent, inputTable: PriceTable, legacyInpu
       u.cached_input.status !== 'observed' || (cached?.reading.status === 'observed' ? cached.reading.value : 0) !== u.cached_input.value) reasons.push('unknown_components');
   let numerator = new Money(0); let priced = false;
   if (u.model !== null && (!('schema_version' in u) || u.attribution === 'verified')) {
-    for (const component of components) {
+    const priceable: PriceableComponent[] = 'schema_version' in u ? pricingComponents(u, table) : components;
+    for (const component of priceable) {
       if (component.reading.status !== 'observed') { reasons.push('unknown_components'); continue; }
-      if (component.kind === 'cache_write' && 'cache_write_1h_observed' in u && u.cache_write_1h_observed) { reasons.push('unpriced_component'); continue; }
-      const entry = table.entries.find(e => e.product === u.product && e.model === u.model && e.component === component.kind &&
+      if (component.kind === 'cache_write' && (table.cache_write_policy === 'observed_ttl-v1' && u.product === 'claude_code'
+        ? component.cache_ttl === undefined : 'cache_write_1h_observed' in u && u.cache_write_1h_observed)) { reasons.push('unpriced_component'); continue; }
+      const entry = table.entries.find(e => e.product === u.product && e.model === u.model && e.component === component.kind && e.cache_ttl === component.cache_ttl &&
         (e.prompt_tier === undefined || e.prompt_tier === (promptTokens! <= 100000 ? 'up_to_100000' : 'over_100000')));
       if (!entry) { reasons.push('unpriced_component'); continue; }
       numerator = numerator.plus(new Money(entry.price_per_unit).times(component.reading.value)); priced = true;

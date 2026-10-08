@@ -217,6 +217,10 @@ experiments; preserve the fixed registries, failures and historical evidence.
 
 ## Observed-cost verification
 
+Starting with catalog v3, every price release follows the
+[price release checklist](docs/development/price-catalog-releases.md). A rate file alone
+does not establish support for its model, component or billing condition.
+
 User instructions are in the [cost guide](docs/runbooks/observed-cost.md)
 ([한국어](docs/runbooks/observed-cost.ko.md)). From a Node 24 checkout:
 

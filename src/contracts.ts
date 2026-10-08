@@ -43,14 +43,30 @@ export const ToolSchema = z.strictObject({
 export const BillingComponentSchema = z.strictObject({
   kind: z.enum(['ordinary_input', 'cache_read', 'cache_write', 'output']), reading: ReadingSchema,
 });
+export const CacheWriteTtlSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('observed'), source: z.literal('product_usage_cache_creation'),
+    five_minute_tokens: TokenSchema, one_hour_tokens: TokenSchema }),
+  z.strictObject({ status: z.literal('missing'), source: z.literal('product_usage_cache_creation'), reason: z.literal('not_available') }),
+  z.strictObject({ status: z.literal('error'), source: z.literal('product_usage_cache_creation'), reason: z.literal('source_error') }),
+]);
 export const UsageV2Schema = UsageSchema.extend({
   schema_version: z.literal(2), model: ModelSchema.nullable(), runtime_evidence_id: IdSchema.nullable(),
   attribution: z.enum(['verified', 'ambiguous', 'unknown']),
   cache_write_1h_observed: z.literal(true).optional(),
+  cache_write_ttl: CacheWriteTtlSchema.optional(),
   billing_components: z.array(BillingComponentSchema).max(4)
     .refine(values => new Set(values.map(value => value.kind)).size === values.length),
 }).refine(value => value.attribution !== 'verified' || (value.model !== null && value.runtime_evidence_id !== null))
-  .refine(value => value.attribution !== 'ambiguous' || value.model === null);
+  .refine(value => value.attribution !== 'ambiguous' || value.model === null)
+  .refine(value => value.cache_write_ttl === undefined || value.product === 'claude_code' || value.product === 'synthetic')
+  .refine(value => {
+    const ttl = value.cache_write_ttl;
+    if (ttl?.status !== 'observed') return true;
+    const write = value.billing_components.find(component => component.kind === 'cache_write')?.reading;
+    const total = ttl.five_minute_tokens + ttl.one_hour_tokens;
+    return Number.isSafeInteger(total) && write?.status === 'observed' && write.value === total &&
+      Boolean(value.cache_write_1h_observed) === (ttl.one_hour_tokens > 0);
+  });
 export const eventFields = {
   id: IdSchema, project_id: IdSchema, task_id: IdSchema, session_id: IdSchema,
   source_key: IdSchema, occurred_at: TimestampSchema,

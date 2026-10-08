@@ -145,6 +145,75 @@ reviewed commit, manifest and digest-named catalog assets.
 The existing v1 release, bootstrap, stored tables and measured results remain
 unchanged; only an explicit accepted refresh can select v2 for future preparation.
 
+## Observed cache TTL candidate (v3)
+
+The local [v3 candidate](../../config/prices/catalogs/reference-catalog-2026-10-08-v3.json)
+uses schema/catalog version 3, ID `reference-catalog-2026-10-08-cache-ttl`, policy
+`reference-standard-observed-cache-ttl-v3` and matching version
+`exact-catalog-observed-cache-ttl-v3`. It is not published by this change. Bootstrap
+remains v1; no default, frozen pin, stored input or result is changed automatically.
+Every release from v3 follows the [release checklist](../development/price-catalog-releases.md).
+
+[Official pricing](https://platform.claude.com/docs/en/about-claude/pricing) and
+[cache usage semantics](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+were checked on **2026-10-08 UTC**. The first-party global Standard 1-hour write
+rates per million tokens are Fable 5.1 `20`, Opus 5.5 `8`, Sonnet 5.5 `4`, Haiku 4.5
+`2`, and Haiku 5.5 `0.2`/`1` for its existing whole-request tiers. The candidate
+retains v2 rates otherwise and the same OpenAI short-context reference conditions.
+Anthropic row verification dates advance to this check date; OpenAI dates do not.
+Unknown exact effective times remain null. These are reference prices, not billing
+or subscription reconciliation.
+
+New authorized Claude binding observations preserve the aggregate `cache_write`
+component plus optional `cache_write_ttl` metadata. Its source is
+`product_usage_cache_creation`; observed `five_minute_tokens` and `one_hour_tokens`
+must be nonnegative safe integers whose sum equals the aggregate. They are read
+only from `usage.cache_creation.ephemeral_5m_input_tokens` and
+`ephemeral_1h_input_tokens`. Missing fields remain `missing/not_available`; malformed,
+negative, fractional, overflowing or inconsistent values become `error/source_error`.
+Invalid TTL metadata does not discard the aggregate or other usage components.
+No remainder, request setting or absence of a one-hour flag proves a numeric split.
+The original positive one-hour flag is retained for old-policy compatibility.
+
+V3 tables declare `cache_write_policy: observed_ttl-v1` and qualify Anthropic write
+entries by `cache_ttl: 5m` or `1h`. Matching and arithmetic use a transient split
+view and never add it to the aggregate. Cache reads remain disjoint and reasoning
+remains included in output. The full aggregate still enters Haiku's prompt threshold;
+its existing linked-request evidence requirement applies to both TTL rates. Missing
+TTL leaves only the write component `unverified_condition`/`unpriced_component`;
+an omitted TTL rate is `missing_rate`. Other eligible components stay partial.
+The report version is `catalog-observed-cost-cache-ttl-v3`; `matches` includes the
+TTL condition. Source trust partitions, provider reference policy and null complete
+cost remain independent of rate coverage.
+
+| Condition | V3 behavior |
+| --- | --- |
+| Explicit consistent 5m/1h counts, including mixed and zero | Match each available TTL rate once |
+| Old boolean-only or absent/partial TTL metadata | Preserve aggregate tokens; exclude write cost |
+| Invalid/inconsistent TTL counts | Preserve aggregate tokens; exclude write cost with error metadata |
+| Missing model/rate/provider or required request evidence | Keep affected price unavailable |
+| Fast/Batch/regional/subscription/tool charges, unknown models | Excluded from this reference policy |
+| File/OTel observations without numeric TTL metadata | Writes unavailable under v3; no source expansion |
+
+V1/v2 policies and basis hashes keep their previous five-minute reference behavior,
+including exclusion of the whole write component when the one-hour flag is present.
+Retained snapshots preserve whichever TTL metadata was originally recorded. A
+separate explicitly requested v3 revaluation cannot reconstruct a split from old
+boolean-only data or fetch it from current logs/database rows. Original results
+remain immutable. Numeric splits enter new request fingerprints; legacy rows with
+no TTL object keep their old fingerprints. Replaying different evidence conflicts
+instead of upgrading a previous observation silently.
+
+Minimum client capability is `catalog-cache-ttl-v3` (the client containing this
+schema/policy, table and usage extension). The future release notes must name its
+exact reviewed commit; package `0.0.0` is not a meaningful minimum semantic version.
+V1/v2 clients reject the v3 manifest policy/catalog schema and retain accepted
+prices. They may reject new optional usage metadata too; do not downgrade a
+database after writing it. The manifest envelope remains schema 1 with the new
+policy bound to validated artifact bytes. No native rerun or exact counter/TTL
+qualification was performed: Claude binding versions remain candidates, inherited
+source observations remain unverified, complete cost and inference remain closed.
+
 ## Distribution, update and pin
 
 The bootstrap ships in `dist/catalogs`; a local database retains the last accepted

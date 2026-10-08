@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { IdSchema,TimestampSchema } from './contracts.js';
-import { catalogByteLimit,digest,parsePriceCatalog,referencePolicyId,requestTierPolicyId } from './price-catalog.js';
+import { catalogByteLimit,digest,parsePriceCatalog,referencePolicyId,requestTierPolicyId,observedCacheTtlPolicyId } from './price-catalog.js';
 
 export const CatalogReleaseManifestSchema=z.strictObject({
   schema_version:z.literal(1),publisher_id:z.literal('harness-delta'),catalog_id:IdSchema,catalog_version:z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  policy_id:z.enum([referencePolicyId,requestTierPolicyId]),published_at:TimestampSchema,verified_at:TimestampSchema,
+  policy_id:z.enum([referencePolicyId,requestTierPolicyId,observedCacheTtlPolicyId]),published_at:TimestampSchema,verified_at:TimestampSchema,
   artifact_sha256:z.string().regex(/^[a-f0-9]{64}$/),artifact_bytes:z.number().int().positive().max(catalogByteLimit),
   artifact_file:z.string(),
 }).refine(m=>m.artifact_file===`catalog-${m.artifact_sha256}.json`&&Date.parse(m.verified_at)<=Date.parse(m.published_at));

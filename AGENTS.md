@@ -27,6 +27,12 @@
 - Avoid dependencies on personal plugins, global settings, or machine-specific paths.
 - Use this file as the shared entry point for Codex and Claude Code. Do not add a
   duplicate tool-specific instruction file.
+- Starting with price catalog v3, apply the [price release checklist](docs/development/price-catalog-releases.md)
+  to every price release. Ship reviewed data together with the matching/component/condition
+  implementation, compatibility and frozen-pin regressions, validated manifest/hashes/schema/client
+  behavior, and synchronized support documentation. State unsupported models/conditions explicitly;
+  never claim support without implementation and validation. Publication and default/pin changes
+  require their own authorization.
 
 ## Product invariants
 

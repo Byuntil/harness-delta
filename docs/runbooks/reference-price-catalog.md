@@ -37,6 +37,25 @@ prices when they reject the unsupported schema/policy.
 An explicit trusted artifact or online refresh can accept v2
 for future defaults. Existing comparisons and results retain their original pins.
 
+The repository also contains an **unpublished v3 candidate** with separate 5-minute
+and 1-hour write rates. It requires a client with `catalog-cache-ttl-v3` support;
+future release notes must identify the exact reviewed client commit. V1/v2 clients
+reject it and retain accepted prices. Do not downgrade a database after new TTL
+metadata has been written. The bootstrap and existing pins stay unchanged.
+New Claude observations with explicit, consistent TTL counts can price both
+durations, including mixed writes. Missing/invalid TTL or historical boolean-only
+data leaves write cost unavailable; v3 cannot recover the old split. File/OTel
+observations without those counts have the same exclusion. Other matched components
+can remain partial. `matches[].cache_ttl` explains each matched duration;
+`unverified_condition` means missing/invalid TTL or required request evidence,
+while `missing_rate` means no rate for an observed condition. See the
+[v3 support limits](../decisions/reference-price-catalog.md#observed-cache-ttl-candidate-v3).
+
+The UI shows partial amounts and separate source/compatibility unverified references.
+An unpriced-usage notice can include excluded cache writes even when their tokens
+are observed. The CLI match rows provide condition details. Price support does not
+qualify a native source/counter or enable complete cost or inference.
+
 ## 2. Estimate without choosing a price file
 
 ```sh
