@@ -10,7 +10,7 @@ import { recordAbandonedRunGap } from './runtime-history.js';
 import { ExternalPreparationSpecSchema, applyManagedHarness, managedHarnessDigest, sha256, verifyCommonArtifacts, type ExternalPreparationSpec } from './harness-managed-file.js';
 import type { Store } from './store.js';
 import { externalContract } from './external-session-contract.js';
-import { codexHumanPilotProfileId } from './session-binding-human-pilot.js';
+import { codexHumanPilotProfileId, isHumanPilotProtocol } from './session-binding-human-pilot.js';
 
 interface PreparationRow {
   task_id: string; project_id: string; revision: string; configuration_digest: string;
@@ -34,6 +34,7 @@ function configurationDigest(input: ReturnType<typeof AssignedWorkflowInputSchem
 function assertExternalProfile(store: Store, input: ReturnType<typeof AssignedWorkflowInputSchema.parse>, preparationOnly = false): void {
   const protocol = comparisonProtocol(store, protocolRow(store, input.assignment.protocol_id));
   if (protocol.purpose === 'synthetic_validation') return;
+  if (preparationOnly && protocol.schema_version === 2 && isHumanPilotProtocol(protocol) && input.assignment.metadata.product === protocol.source_profiles[0]!.product && input.product_version === protocol.source_profiles[0]!.product_version) return;
   if (protocol.schema_version !== 2 || input.assignment.metadata.product !== 'codex' || input.product_version !== '0.160.0' ||
       protocol.source_profiles.some(p => p.product !== 'codex' || p.product_version !== '0.160.0' ||
         (p.profile_id !== codexWorkflowProfileId && !(preparationOnly && protocol.purpose === 'functional_pilot' && p.profile_id === codexHumanPilotProfileId)))) throw new Error('external_source_unsupported');

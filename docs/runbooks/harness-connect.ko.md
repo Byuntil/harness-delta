@@ -92,7 +92,8 @@ node .claude/skills/harness-connect/scripts/connect.mjs connect --origin http://
 ```
 
 UI는 가족 수와 부분 사용량을 갱신합니다. pause/서버 재시작은 수집을 멈추며 부모에서
-다시 한 번 호출하면 새 baseline을 잡습니다. 새 부모도 기존 open task의 arm/가격을
+같은 살아 있는 부모의 허용된 UI 재개 또는 부모에서 다시 한 번 호출하면 새 baseline을
+잡습니다. 새 부모도 기존 open task의 arm/가격을
 유지할 수 있습니다. 이전/미관측 구간은 소급 수집하지 않습니다. 미지원 descendants와
 누락 사용량은 zero가 아닌 gap입니다. 전체 비용과 통계 판정은 사용할 수 없으며
 완료는 사람이 결과를 확인해야 합니다.
@@ -154,7 +155,8 @@ PreToolUse는 해당 Bash 호출의 native metadata만 기록합니다. Helper�
 자동 관측합니다. 공식 fields로 중첩 멤버의 직접 부모를 증명할 수 없어 모든
 멤버를 root 아래에 평탄화하며 실제 nested parent라고 표시하지 않습니다.
 자식 재호출은 활성 family의 독립적으로 확인된 기존 연결을 확인합니다.
-중지된 family는 부모에서 다시 연결해야 합니다. 이전 멤버의 누락 구간은
+중지된 family는 아래 사용자 UI pilot 권한으로 같은 살아 있는 부모를 재개할 수 있으면
+UI 재개를 사용하고, 그 외에는 부모에서 다시 연결해야 합니다. 이전 멤버의 누락 구간은
 `late_linked_member`로 표시하고 과거 사용량을 backfill하지 않습니다.
 
 Pause/완료 후에도 세션 metadata hooks는 계속될 수 있지만 collector는 로그를
@@ -171,3 +173,40 @@ Claude 기준선의 제외 own request ID는 실시간 replay 목록과 별도�
 격리된 일반 Codex CLI qualification 실행기와 실제 호출 승인 범위는 [qualification 절차](../validation/codex-ordinary-binding-qualification.md)를 참고하세요. 준비와 Node fixture 검증만으로 production 지원이 열리지는 않습니다.
 
 격리 qualification UI는 부모·자식별 자체 요청, 입력·출력, 부분 비용과 관측 합계를 표시합니다. 같은 살아 있는 부모의 측정 재개와 소유 AI 긴급 중단을 분리하며, 기존 기한·안전 카운터는 초기화하지 않습니다. pause 중 원본 카운터는 미확인입니다. [제한된 실행 절차](../validation/codex-ordinary-binding-qualification.md)를 참조하세요.
+
+## Claude 사용자 조작 UI pilot
+
+로컬 운영자는 ordinary provider에 나열된 정확한 후보 버전(현재 2.1.291 또는
+2.1.293)과 `claude-ordinary-human-pilot` source profile을 사용한 준비된
+`functional_pilot` 작업 하나를 선택할 수 있습니다. 기존 file·실행 workflow의
+버전 호환성은 일반 가족 원본의 지원 검증이 아닙니다. 설치·실제 관측 전에
+profile, binary 버전, 프로젝트 원본 디렉터리와 receipt 디렉터리를 검토하세요.
+브라우저나 manifest는 수집 권한을 부여할 수 없습니다. 기존 로컬
+`ui --pilot-task` 명령은 두 제품을 준비합니다. `--pilot-observe --pilot-until-stop`은
+선택된 작업의 명시적 중단 관측만 추가로 허용합니다. 에이전트를 실행하지 않습니다.
+
+관측기가 준비되면 사용자가 새 Claude terminal을 열고 부모에서
+`/harness-connect`를 한 번 호출한 뒤 새 가족 구성원을 최대 두 개 만듭니다.
+자식의 별도 호출이나 고정 model·effort·자식 종류는 필요하지 않습니다.
+구성원별 자체 요청과 부분 추정치를 나누어 표시하고 관측 합계를 보여 줍니다.
+Claude 구성원은 root 아래로 평탄화합니다. 중첩 구성원의 직접 부모는 증명하지
+못합니다. 미지원 구성원과 구간은 명시적 gap으로 남깁니다.
+
+pause·완료·권한 철회는 Claude를 종료하지 않고 수집만 멈춥니다.
+수집에는 경과 시간 제한이 없고 고정된 비교 follow-up은 별도로 유지합니다.
+UI 재개는 원래 receipt가 오래되었어도 저장된 정확한 live root binding,
+프로젝트, preparation, source identity, 프로세스, 삭제·철회 상태를 재검증합니다.
+재시작 상태는 paused입니다. 재개 시 새 기준점을 만들고 pause·offline 요청은
+backfill 없이 제외합니다.
+
+새 연결에는 여전히 신선한 receipt가 필요합니다. 오래된 receipt만으로 새 root,
+프로젝트나 작업을 선택할 수 없으며 history 탐색 권한도 생기지 않습니다.
+보존된 프로세스 증거가 없는 legacy binding은 차단합니다. 기존 저장 identity를
+교체하지 않고 별도로 준비한 작업과 새 Claude root가 필요합니다.
+native 프로세스 종료·재실행은 측정 재개와 별도 경계입니다. 수집 pause 중에도
+skill metadata hook은 계속될 수 있습니다. receipt 수명은 hook timeout이나
+helper의 신선한 receipt 탐색 구간과 별개입니다.
+
+이 준비는 합성 증거만 갖습니다. 실제 2.1.293 skill 로딩, 가족 counter,
+pause/resume과 사용자 완료는 별도로 승인된 native 시험이 필요합니다.
+일반 제품 수집 지원, 전체 작업 비용과 추론 결정은 아직 사용할 수 없습니다.
