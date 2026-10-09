@@ -1,3 +1,4 @@
+import { familyProviderError } from './binding-family-diagnostics.js';
 import { comparisonProtocol, protocolRow } from './comparison.js';
 import { Lifecycle } from './lifecycle.js';
 import { parseTaskMetadata, type FlexibleProtocol } from './flexible-contracts.js';
@@ -40,6 +41,7 @@ export function assertClaudeHumanPilotScope(scope: ClaudeHumanPilotScope, store:
 function members(store: Store, taskId: string) {
   return store.all<{ identity: string }>('SELECT identity FROM session_bindings WHERE task_id=?', [taskId]).map(row => VerifiedSessionIdentitySchema.parse(JSON.parse(row.identity) as unknown));
 }
+function rejectSource(reason: string): never { throw familyProviderError(new Error('binding_pilot_family_scope'),reason); }
 /** Callback is reached from exact receipt/path/stat metadata before any native row scan. */
 export function assertClaudeHumanPilotSource(scope: ClaudeHumanPilotScope, store: Store, taskId: string, source: { nativeSessionId: string; agentId: string | null; sourceRef: string; sourceIdentity: string; birthtimeMs: number }): void {
   assertClaudeHumanPilotScope(scope, store, taskId);
@@ -48,16 +50,23 @@ export function assertClaudeHumanPilotSource(scope: ClaudeHumanPilotScope, store
   const id = source.agentId === null ? source.nativeSessionId : `${source.nativeSessionId}:${source.agentId}`;
   const bound = family.find(member => member.sessionId === id);
   if (bound) {
-    if (bound.sourceRef !== source.sourceRef || bound.sourceIdentity !== source.sourceIdentity) throw new Error('binding_pilot_family_scope');
+    if (bound.sourceRef !== source.sourceRef || bound.sourceIdentity !== source.sourceIdentity) rejectSource('pilot_source_identity_changed');
   } else if (source.agentId === null) {
-    if (root || !Number.isFinite(source.birthtimeMs) || source.birthtimeMs < state.openedAt) throw new Error('binding_pilot_family_scope');
-  } else if (!root || root.sessionId !== source.nativeSessionId || family.length >= 3 || source.birthtimeMs < Date.parse(root.createdAt)) throw new Error('binding_pilot_family_scope');
-  if (root && source.nativeSessionId !== root.sessionId) throw new Error('binding_pilot_family_scope');
+    if (root) rejectSource('pilot_duplicate_root');
+    if (!Number.isFinite(source.birthtimeMs)) rejectSource('pilot_source_time_invalid');
+    if (source.birthtimeMs < state.openedAt) rejectSource('pilot_root_predates_observer');
+  } else {
+    if (!root) rejectSource('pilot_root_unlinked');
+    if (root.sessionId !== source.nativeSessionId) rejectSource('pilot_native_session_mismatch');
+    if (family.length >= 3) rejectSource('pilot_family_limit');
+    if (source.birthtimeMs < Date.parse(root.createdAt)) rejectSource('pilot_member_predates_root');
+  }
+  if (root && source.nativeSessionId !== root.sessionId) rejectSource('pilot_native_session_mismatch');
 }
 export function checkClaudeHumanPilotIdentity(scope: ClaudeHumanPilotScope, store: Store, taskId: string, identity: VerifiedSessionIdentity): void {
   assertClaudeHumanPilotScope(scope, store, taskId);
   const state = scopes.get(scope)!; const family = members(store, taskId);
   const root = family.find(member => member.parentSessionId === null);
   const existing = family.find(member => member.sessionId === identity.sessionId);
-  if (identity.product !== 'claude_code' || identity.productVersion !== state.version || identity.cwd !== state.projectRoot || existing && bindingIdentityKey(existing) !== bindingIdentityKey(identity) || identity.parentSessionId === null && (root ? root.sessionId !== identity.sessionId : Date.parse(identity.createdAt) < state.openedAt) || identity.parentSessionId !== null && (!root || identity.parentSessionId !== root.sessionId || Date.parse(identity.createdAt) < Date.parse(root.createdAt)) || !existing && family.length >= 3) throw new Error('binding_pilot_family_scope');
+  if (identity.product !== 'claude_code' || identity.productVersion !== state.version || identity.cwd !== state.projectRoot || existing && bindingIdentityKey(existing) !== bindingIdentityKey(identity) || identity.parentSessionId === null && (root ? root.sessionId !== identity.sessionId : Date.parse(identity.createdAt) < state.openedAt) || identity.parentSessionId !== null && (!root || identity.parentSessionId !== root.sessionId || Date.parse(identity.createdAt) < Date.parse(root.createdAt)) || !existing && family.length >= 3) throw familyProviderError(new Error('binding_pilot_family_scope'),'pilot_identity_mismatch');
 }
