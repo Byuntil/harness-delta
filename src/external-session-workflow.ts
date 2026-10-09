@@ -1,3 +1,7 @@
+import { applicationRequired, requireApplication, assertAppliedHarness, applicationEvidence } from './harness-application.js';
+import { relative } from 'node:path';
+import { readRepositoryFile, hashBytes, readHarness } from './harness-config.js';
+import { assertSharedTask, configurationIntegrityFailed } from './local-web-shared-guard.js';
 import { randomUUID } from 'node:crypto';
 import { AssignedWorkflowInputSchema, prepareAssignedWorkflow, runAssignedWorkflow, workflowTaskStatus, type WorkflowAdapter } from './task-workflow.js';
 import { CodexWorkflowExecutionSchema, createCodexWorkflowAdapter } from './codex-workflow-adapter.js';
@@ -52,7 +56,11 @@ export function prepareExternalWorkflow(store: Store, input: unknown, runtime: u
   const previous = store.get<PreparationRow>('SELECT * FROM external_preparations WHERE task_id=?', [oldTask]);
   if (apply && previous?.first_connected_at && previous.state !== 'released') throw new Error('external_stop_acknowledgement_required');
   const prepared = prepareAssignedWorkflow(store, config, runtime, clock);
-  const taskId = prepared.receipt.task_id; const activeDigest = sha256(prepared.instructions.map(a => a.content).join('\n\n'));
+  const taskId = prepared.receipt.task_id;
+  // Assignment must exist for selected-arm verification, which precedes every
+  // managed-file write, including recovered reservations and direct CLI calls.
+  assertSharedTask(store,taskId,clock,true);
+  const activeDigest = sha256(prepared.instructions.map(a => a.content).join('\n\n'));
   const configDigest = configurationDigest(config, spec); const now = clock();
   store.immediateTransaction(() => {
     const currentOwner = store.get<{task_id: string}>('SELECT task_id FROM external_surface_leases WHERE surface_key=?', [key]);
@@ -66,6 +74,15 @@ export function prepareExternalWorkflow(store: Store, input: unknown, runtime: u
     store.execute('INSERT OR IGNORE INTO external_surface_leases(surface_key,task_id) VALUES (?,?)', [key, taskId]);
   });
   try {
+    if(config.application){
+      if(apply)throw new Error('application_required');
+      const selected=config.application.bundles.find(b=>b.variant_id===prepared.receipt.assigned_variant_id);
+      if(!selected||config.application.origin!==root||readHarness(root,selected.path).instruction_manifest_hash!==prepared.receipt.instruction_manifest_hash)throw new Error('application_input_changed');
+      if(!applicationRequired(store,taskId))verifyCommonArtifacts(spec);
+      if(!applicationRequired(store,taskId))requireApplication(store,taskId,{origin:root,bundlePath:selected.path,bundleHash:selected.bundle_hash,...(!applicationRequired(store,taskId)?{common:spec.common_artifacts.map(file=>{const path=relative(root,file.path);return {path,hash:hashBytes(readRepositoryFile(root,path))};})}:{})});
+      store.execute("UPDATE external_preparations SET state='preparation_needed',reason_code=NULL WHERE task_id=?",[taskId]);
+      return externalWorkflowState(store,taskId);
+    }
     verifyCommonArtifacts(spec);
     if (apply) {
       store.execute("UPDATE external_preparations SET state='applying' WHERE task_id=?", [taskId]);
@@ -100,6 +117,8 @@ function configurationChanged(store: Store, taskId: string, clock: Clock): never
 }
 
 export function assertExternalPrepared(store: Store, taskId: string, config: ReturnType<typeof AssignedWorkflowInputSchema.parse>, spec: ExternalPreparationSpec, clock: Clock): void {
+  assertSharedTask(store, taskId, clock);
+  if(config.application || applicationRequired(store,taskId)){try{assertAppliedHarness(store,taskId);}catch(error){configurationIntegrityFailed(store,taskId,clock,error);}return;}
   const row = rowFor(store, taskId); const root = rootFor(store, row.project_id);
   if (store.get<{task_id: string}>('SELECT task_id FROM external_surface_leases WHERE surface_key=?', [surfaceKey(root)])?.task_id !== taskId ||
       ['released', 'assigned', 'preparation_needed', 'applying', 'recovery_needed'].includes(row.state)) throw new Error('external_preparation_required');
@@ -135,6 +154,9 @@ export async function runExternalWorkflow(store: Store, input: unknown, executio
           if (verified?.source_identity) store.execute("UPDATE external_preparations SET state='measuring' WHERE task_id=?", [taskId]);
         }
       }});
+      // Adapter read transactions may roll back the in-read pause; persist the
+      // shared fence again outside them before accepting a terminal receipt.
+      assertSharedTask(store,taskId,clock);
       return result;
     },
   };
@@ -149,6 +171,7 @@ export async function runExternalWorkflow(store: Store, input: unknown, executio
     if (result.adapter_result?.state === 'failed' && new Lifecycle(store, clock).state(taskId) === 'active') new Lifecycle(store, clock).pause(taskId);
     return { ...result, preparation: externalWorkflowState(store, taskId) };
   } catch (error) {
+    assertSharedTask(store,taskId,clock);
     if (rowFor(store, taskId).state === 'configuration_changed') {
       // Producer details may contain source text or paths; retain only a fixed code.
       // eslint-disable-next-line preserve-caught-error
@@ -162,6 +185,7 @@ export async function runExternalWorkflow(store: Store, input: unknown, executio
 export function externalWorkflowState(store: Store, taskId: string) {
   const row = rowFor(store, taskId); const task = workflowTaskStatus(store, taskId);
   return { schema_version: 1, task_id: taskId, assigned_variant_id: task.assigned_variant_id, revision: row.revision,
+    ...(applicationRequired(store,taskId)?{application_evidence:applicationEvidence(store,taskId)}:{}),
     state: row.state, task_state: task.state, first_connected_at: row.first_connected_at,
     files_evidence: ['configuration_verified', 'waiting_connection', 'connected', 'measuring', 'stopped'].includes(row.state) ? 'verified_at_preparation' : 'unverified',
     loading_evidence: 'unverified' as const, freshness_evidence: 'unverified' as const, tool_use_evidence: 'unavailable' as const,

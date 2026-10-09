@@ -102,3 +102,9 @@ responses or code. Stop on identity conflicts, unsupported contracts, changed
 state or uncertain mutation results; re-read state before an explicitly requested
 retry. Respond in the user's language; Korean installation and invocation examples
 are in the repository's paired runbook.
+
+For agent-applied tasks, use a separate fresh working session after verified files.
+The server rejects registered application roots and evidenced parent relations
+before source access. File application does not establish native loading/source
+qualification. Missing application identity, drift, abandonment and stale epochs
+remain blockers. Never connect the applying session or bypass those blockers.

@@ -289,6 +289,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     const record=this.readReceipt(CurrentIdentityRequestSchema.parse(input).receipt);
     if(record.cwd!==this.projectRoot||record.event!=='SessionStart'||record.parentSessionId!==null||sessionId!==null&&record.sessionId!==sessionId)throw new Error('binding_qualification_live_root_required');
   }
+  resolveApplicationIdentity(input: {receipt:string}): Promise<VerifiedSessionIdentity> {this.assertRootReceipt(input,null);return this.resolveCurrent(input);}
   async resolveCurrent(input: { receipt: string }): Promise<VerifiedSessionIdentity> {
     let record = this.readReceipt(CurrentIdentityRequestSchema.parse(input).receipt);
     if (record.cwd !== this.projectRoot) throw new Error('binding_identity_unavailable');

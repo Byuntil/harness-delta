@@ -180,3 +180,21 @@ pickers use constant local dialogs; cancellation makes no task transition. Priva
 names, setup paths and start commands live in a separate UI database, outside
 measurement exports. Keep that database with the measurement Store when moving
 this local installation; do not share it as a measurement report.
+
+Portable harness pairs use the separate [harness configuration workflow](harness-config.md). Select the shared comparison file, then explicitly bind an existing reviewed local template. Import creates no measurement registration.
+
+## Agent application comparisons
+
+Explicit format-2 `agent_applied` comparisons preserve assignment and select an
+existing checkout/worktree and native product. Prepare context, request a fresh
+interactive native session or copy the fallback, and let its own agent apply the
+procedure directly with native permissions. The UI reviews actual files afterward;
+there is no server publish approval or agent execution control.
+
+macOS Terminal opening with an installed CLI has synthetic wiring coverage and
+unverified native acceptance. Other platforms and desktop prompt deep links are
+unsupported. Checks remain agent reported and file verification covers the reported
+set. Abandonment invalidates the attempt; stop the agent in the native window.
+Existing edits remain. Copy populated harness-connect guidance to a separate fresh
+working session. Identity/loading/source gates remain explicit and qualification
+pending. See [the flow and limits](harness-config.md#6-agent-application-format-2).

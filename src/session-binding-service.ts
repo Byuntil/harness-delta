@@ -1,6 +1,7 @@
 import { childReadinessDeadline, childReadinessStarts, type ChildReadinessObservation, type PendingChildStart } from './binding-child-readiness.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { familyRejection, takeFamilyDiagnostic, type FamilyDiagnostic, type FamilyPhase } from './binding-family-diagnostics.js';
+import { applicationRequired, assertApplicationWorkingIdentity, bindApplicationEpoch, effectiveTaskWorkspace } from './harness-application.js';
 import { CodexSessionBindingProvider } from './session-binding-codex.js';
 import { addTokens } from './contracts.js';
 import { captureObservedCostInput, projectObservedCost } from './observed-cost-report.js';
@@ -110,6 +111,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     if (store.get("SELECT 1 FROM tombstones WHERE (kind='task' AND id=?) OR (kind='project' AND id=?)", [taskId, task.project_id])) throw new Error('deleted_identifier');
     if (task.state === 'finalized' || active && task.state !== 'active' || generation !== undefined && task.generation !== generation) throw new Error('binding_scope_revoked');
     const setup = options.setupFor(taskId);
+    if(applicationRequired(store,taskId)&&setup.workflow.assignment.metadata.product!=='synthetic')throw new Error('application_source_unqualified');
     assertExternalPrepared(store, taskId, setup.workflow, setup.preparation, clock);
     const contract = externalContract(store, taskId);
     if (!contract) throw new Error('external_contract_required');
@@ -130,7 +132,8 @@ export function createSessionBindingService(options: SessionBindingServiceOption
   };
   const checkIdentity = (taskId: string, input: VerifiedSessionIdentity) => {
     const value = VerifiedSessionIdentitySchema.parse(input); const task = life.task(taskId);
-    const root = store.get<{ local_root: string }>('SELECT local_root FROM projects WHERE id=?', [task.project_id]);
+    const root = {local_root:effectiveTaskWorkspace(store,taskId)};
+    assertApplicationWorkingIdentity(store,taskId,value);
     const metadata = parseTaskMetadata(JSON.parse(task.metadata) as unknown);
     if (value.cwd !== root?.local_root || metadata.product !== 'synthetic' && value.productVersion !== options.setupFor(taskId).workflow.product_version) throw new Error('binding_identity_mismatch');
     if (store.get("SELECT 1 FROM tombstones WHERE kind='session' AND id=?", [value.sessionId])) throw new Error('deleted_identifier');
@@ -153,6 +156,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,source_path,product,product_version) VALUES (?,?,?,?,?,?,?)',
       [value.sessionId, task.project_id, taskId, value.parentSessionId, null, parseTaskMetadata(JSON.parse(task.metadata) as unknown).product === 'synthetic' ? 'synthetic' : value.product, value.productVersion]);
     bindConfigurationToSession(store, confirmation.id, value.sessionId);
+    bindApplicationEpoch(store,taskId,value.sessionId);
     store.execute("INSERT INTO session_bindings(session_id,task_id,root_id,identity,relation_evidence_id,observed_since,generation,state) VALUES (?,?,?,?,?,?,?,'observing')",
       [value.sessionId, taskId, rootId, JSON.stringify(value), relation, clock(), generation]);
   };
@@ -237,7 +241,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     throw noteFamilyError(taskId,row,new Error('binding_pilot_family_scope'),at,discovery,extra);
   };
   const read = async (taskId: string, row: BindingRow, baseline: boolean) => {
-    authorizeObservation(taskId,row); const value = identityFor(row); const provider = providerFor(value.product, taskId);
+    authorizeObservation(taskId,row); const value = identityFor(row); assertApplicationWorkingIdentity(store,taskId,value); const provider = providerFor(value.product, taskId);
     if(options.humanPilot)checkHumanPilotIdentity(options.humanPilot,store,taskId,value);
     if((options.humanPilot || value.product === 'claude_code') && baseline) {
       // Baselines also need a metadata-only family preflight. Initial connect

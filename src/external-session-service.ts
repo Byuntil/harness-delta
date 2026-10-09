@@ -1,3 +1,4 @@
+import { applicationRequired, assertAppliedHarness } from './harness-application.js';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { z } from 'zod';
@@ -117,6 +118,7 @@ export function verifyExternalNativeBinary(input: NonNullable<ExternalTaskSetup[
 /** Private handoff string; it is never executed by the tool or recorded as usage. */
 export function issueExternalStartTicket(store: Store, input: ExternalTaskSetup, clock: Clock = utcNow) {
   const {setup,taskId}=preparedSetup(store,input,clock); assertWindowOpen(store,taskId,clock);
+  if(applicationRequired(store,taskId)){assertAppliedHarness(store,taskId);throw new Error('application_native_loading_unqualified');}
   if(setup.workflow.assignment.metadata.product!=='synthetic'){
     if(!setup.native_binary)throw new Error('external_native_binary_required');
     verifyExternalNativeBinary(setup.native_binary);
