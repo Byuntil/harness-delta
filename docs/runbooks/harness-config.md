@@ -45,6 +45,8 @@ multiple reviewed local settings without replacing historical task pins.
 
 Create a selected input file outside the generated version directory:
 
+Keep artifact `source_path` files outside the entire `harness-config/` directory.
+
 ```json
 {
   "schema_version": 1,
@@ -73,8 +75,9 @@ Do not edit a published version; select a new version.
 
 Paths use portable ASCII components within the project. Absolute paths,
 traversal, symlinks, case-folding collisions and Windows device names are rejected.
-The primary instruction targets `harness.md`. Each file is limited to 1 MiB,
-with 256 files and 16 MiB total. Missing selected files and unresolved inline
+The primary instruction targets `harness.md`. Select at most 255 artifacts;
+the README copied from `readme_path` adds one entry, for at most 256 manifest artifacts.
+Each file is limited to 1 MiB, with 16 MiB total. Missing selected files and unresolved inline
 local Markdown links block publication. Command strings, reference-style links,
 remote links and dependency closure are not fully validated. Supply missing
 files explicitly or describe unselected prerequisites and limits in the README.

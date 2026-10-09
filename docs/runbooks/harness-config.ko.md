@@ -45,6 +45,8 @@ harness-config/
 
 생성될 버전 디렉토리 밖에 선택 입력 파일을 작성하세요.
 
+artifact의 `source_path` 파일은 `harness-config/` 디렉토리 전체의 바깥에 두세요.
+
 ```json
 {
   "schema_version": 1,
@@ -73,7 +75,8 @@ node dist/harness-config-main.js register --root /path/to/project --input /path/
 
 경로는 프로젝트 내부의 이식 가능한 ASCII 구성 요소를 사용합니다. 절대 경로,
 상위 경로 이동, 심볼릭 링크, 대소문자 경로 충돌과 Windows 장치 이름을 거부합니다.
-주 지침의 대상은 `harness.md`입니다. 파일당 1 MiB, 최대 256개, 합계 16 MiB입니다.
+주 지침의 대상은 `harness.md`입니다. 선택 artifact는 최대 255개이며, `readme_path`에서
+복사한 README 항목을 더해 manifest artifact는 최대 256개입니다. 파일당 1 MiB, 합계 16 MiB입니다.
 선택 파일 누락과 해결되지 않는 인라인 로컬 Markdown 링크는 생성을 막습니다.
 명령 문자열, 참조형 링크, 원격 링크와 의존성 전체는 완전히 검증하지 않습니다.
 누락 파일을 명시적으로 제공하거나, 선택하지 않은 선행 조건과 한계를 README에

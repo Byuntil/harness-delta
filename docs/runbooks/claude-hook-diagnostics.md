@@ -163,7 +163,8 @@ acknowledgments. No cleanup or retry can silently replace prior evidence.
 
 For child lifecycle events, the prepared adapter
 `scripts/claude-readiness-capture.mjs` validates the selected project/task and
-observing root process ancestry before reading stdin and rechecks scope immediately
+observing root process ancestry and matching task/root generation before reading
+stdin and rechecks scope immediately
 before recording. The connect event uses its registered/active project gate. It invokes
 the ordinary recorder first. Only a newly recorded, matching Start may use the
 optional acknowledgment channel; duplicates, Stop and connect do not wait. Every

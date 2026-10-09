@@ -45,8 +45,10 @@ These hashes describe provenance, not a trusted admission credential.
 Read [ADR 009](../decisions/009-comparison-analysis-validation.md) for assumptions
 and [the version 1 dossier](../validation/comparison-analysis-validation-v1.md) for
 actual results. `status: pass` applies only to these fixtures. `r10_status` remains
-`unvalidated`, adoption remains `inconclusive`, and real assignment still rejects
-with `real_experiment_disabled`. Partial report usage remains partial.
+`unvalidated` and adoption remains `inconclusive`. These studies do not authorize
+real allocation or inference. V1 real allocation remains disabled; V2 allocation
+depends on its separate source-readiness gate. Production inference remains
+unavailable. Partial report usage remains partial.
 
 ## Separate bounded mean-effect and deadline-quality study
 

@@ -3,8 +3,10 @@
 [한국어](local-browser-ui.ko.md)
 
 Use the private `hm` checkout with Node.js 24. This UI shares the CLI's Store and
-external-task coordinator. It does not launch an agent, change authentication,
-create commits, or publish a service.
+external-task coordinator. The ordinary measurement flow does not launch an agent.
+Format-2 application can explicitly request a fresh macOS Terminal session;
+`open_requested` does not prove the agent started, and native acceptance remains
+unverified. The UI does not change authentication, create commits, or publish a service.
 
 ## Start the local service
 

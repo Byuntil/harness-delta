@@ -61,7 +61,9 @@ The package is private; there is no published-package installation procedure.
    node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow --help
    ```
 
-Expected: the help lists `codex`, `claude`, `status`, `task`, `begin`, `finish` and `report`.
+Expected: the help lists `external`, `codex`, `claude`, `status`, `task`, `begin`, `finish` and `report`.
+`external` is a separate [user-opened session procedure](external-session-workflow.md),
+not the tool-owned launch path below.
 The top-level `comparison` help still describes the legacy synthetic path. Use `workflow status` in step 4 to check the v2 native gate.
 If installation fails, check Node 24 and the SQLite native-build prerequisites in [CONTRIBUTING](../../CONTRIBUTING.md#development-environment).
 Installation also installs local Git hooks. It does not start collection or change product authentication.
