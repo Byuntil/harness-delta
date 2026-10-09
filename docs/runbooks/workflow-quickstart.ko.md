@@ -61,7 +61,9 @@ resume/link/collect·자식 launch에는 적용되지 않습니다.
    node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow --help
    ```
 
-예상 결과: `codex`, `claude`, `status`, `task`, `begin`, `finish`, `report`가 표시됩니다.
+예상 결과: `external`, `codex`, `claude`, `status`, `task`, `begin`, `finish`, `report`가 표시됩니다.
+`external`은 별도의 [사용자가 여는 세션 절차](external-session-workflow.ko.md)이며,
+아래의 도구 소유 launch 경로와 다릅니다.
 최상위 `comparison` 도움말에는 이전 synthetic 경로 설명이 남아 있습니다. 4단계의 `workflow status`로 v2 native 지원 조건을 확인하세요.
 설치가 실패하면 Node 24와 [CONTRIBUTING의 SQLite 빌드 준비물](../../CONTRIBUTING.md#development-environment)을 확인하세요.
 설치는 로컬 Git hooks도 설치합니다. 수집을 시작하거나 제품 인증을 바꾸지는 않습니다.

@@ -145,15 +145,17 @@ profiles, mixed unqualified products and invalidated protocols remain closed.
 The analysis registry is empty. Whole-task cost facts remain unknown without a
 validated complete producer. Synthetic test inputs do not become real experiment
 inputs; create a dedicated store with the user's explicit choices and use
-[workflow codex](task-native-workflow.md), not the generic file collector.
+[the Codex or Claude native workflow commands](task-native-workflow.md), not the generic file collector.
 Complete cost also requires all metric/window facts, while inference additionally
 requires an approved method. Neither completeTotals nor causal adoption is enabled.
 See the [analysis boundary](../validation/flexible-cost-analysis-boundary.md).
 
 Further validation requires separate approval: additional exact source versions,
 model/effort combinations beyond the tested start/resume pair, request retries,
-children, compaction, terminal accounting and durable
-flush; then a continuous-cost/repeated-person method and selected experiment
+child topologies or operations beyond the admitted fresh-root/single-direct-child
+profile, including family resume, compaction, terminal accounting and durable
+flush. Claude child execution remains unsupported. Later validation also needs a
+continuous-cost/repeated-person method and selected experiment
 inputs. Registration and reporting commands do not launch products, change
 authentication or invent an actual experiment. Native launch/resume require the
 separate explicit workflow execution commands and their guarded configuration.

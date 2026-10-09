@@ -12,7 +12,10 @@ a new task. See [local measurement](local-measurement.md) for registration and
 
 ## Restart the collector or add a new root
 
-These commands use the existing admitted sequential partial file path. Replace
+These commands use the sequential partial file path, with exact admissions or
+permitted compatibility-unverified parser reuse. See the
+[file-version controls](local-measurement.md#versions-conformance-and-update-controls).
+Replace
 the identifiers, exact source paths, version and cutoff with your own values.
 They do not discover sessions or launch a product/model request.
 
@@ -40,7 +43,10 @@ node dist/cli.js --db local.db collect --task task1
 
 The second command is for a stopped collector; keep only one foreground collector
 for the task. It opens only linked sources while the task is active. Sources must
-match the registered project and exact product/version. An independently linked
+match the registered project and the product/version recorded at linkage.
+Version eligibility is checked separately against exact profiles and the finite
+file-source compatibility windows; conditional estimates remain unverified.
+An independently linked
 root has its own source keys and baseline; equal turn IDs or token values in two
 roots do not mean their usage is a replay of one another. Repeated polling of the
 same eligible records does not add usage again.

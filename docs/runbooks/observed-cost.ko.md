@@ -124,7 +124,7 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
 | `partial_amount: "0"` | 적격 verified 가격 관측의 합계가 0 |
 | `partial_amount: null` | 적격 verified 가격 금액 없음; 미검증 추정액은 있을 수 있음 |
 | `complete_amount: null` | 작업 전체 비용 제공 불가 |
-| `unpriced_events` | 기록 이벤트에 가격 없는 성분이 하나 이상 있음 |
+| `unpriced_events` | 단가 누락 또는 필요한 가격 조건 증거의 부재·미지원으로 가격 계산에서 제외한 성분이 있는 이벤트 |
 | `unavailable_events` | 부분 가격 금액을 계산할 수 없는 이벤트 |
 | `excluded_event_count` | 관측 구간 정책으로 제외한 저장 후보 수 |
 | Missing / error / excluded / unmeasurable | 서로 다른 관측 상태이며 관측된 0이 아님 |

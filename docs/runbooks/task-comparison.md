@@ -216,10 +216,13 @@ valid only for self-attestation. Product/model/global settings remain declaratio
 
 The synthetic CLI deliberately cannot `session link` a synthetic product or read a
 real session in this validation store. Test fixtures inject synthetic usage only in
-tests. Ordinary Codex/Claude collection remains separate. The admitted v2 native
-workflow uses `workflow codex` and its own confirmation/source boundary.
-The generic file path still requires exact versions, an explicit task/session/source
-map, a running collector and confirmation linkage (`session link --confirmation`).
+tests. Ordinary Codex/Claude collection remains separate. The v2 native paths use
+`workflow codex` or `workflow claude launch`, with their own
+[admission and conditional-version boundaries](task-native-workflow.md).
+The generic file path permits exact profiles or eligible conditional parser reuse;
+conditional estimates remain `compatibility_unverified`. It requires an explicit
+task/session/source map, a running collector and confirmation linkage
+(`session link --confirmation`).
 Neither assignment nor confirmation reads session contents or backfills earlier usage.
 
 ## Create a synthetic assignment report
@@ -239,7 +242,7 @@ node dist/cli.js --db .harness-delta/comparison-demo/local.sqlite comparison rep
 ```
 
 `json` remains the default. Existing `json` and `markdown` output and stored
-snapshot bytes are unchanged. Opt into `markdown-readable` for tables drawn from
+snapshot bytes are unchanged. For V1, opt into `markdown-readable` for tables drawn from
 the same frozen report: original-assignment cohorts, partial component task n and
 distributions, follow-up, human quality, rework, composition, declared configuration
 and deviations. The reading-state table counts events, not tasks. Project
@@ -283,17 +286,19 @@ Partial distributions identify their observed-task denominator; complete totals,
 cost, savings, confidence intervals, p-values and adoption remain unavailable. A
 passing synthetic report does not enable `real_experiment` allocation or establish
 R10 analysis validity. Assignment, confirmation and reporting authorize no session
-read: exact supported source versions, registered project, active task, explicit
-session/source linkage and a running collector still govern ordinary measurement.
+read: exact source profiles or permitted conditional parser reuse, registered
+project, active task, explicit session/source linkage and a running collector still
+govern ordinary measurement. Conditional estimates remain separate from verified usage.
 
 Deleting a contributing task, applying configured retention, deleting its project,
 or discovering an identity conflict purges all affected managed snapshots and their
 hashes/dependencies. Old IDs return an invalidated envelope; no original arm counts
 are retained or reconstructed. Deleting an unassigned registration contributor can
 also invalidate a report. The CLI discloses affected report IDs before purge; only
-opaque tombstones survive. Saved output/backups remain outside that deletion. No
-report ID reuse, old-snapshot import, team exchange or allocator-authority bypass is
-provided. See ADR 008 for the full time, revision and deletion contracts.
+opaque tombstones survive. Saved output/backups remain outside that deletion.
+Report IDs cannot be reused. Snapshot imports and synthetic team exchange cannot
+restore deleted scopes; tombstones reject replay. Allocator-authority bypass is
+unavailable. See ADR 008 for the full time, revision and deletion contracts.
 
 ## Inspect and delete
 
