@@ -5,6 +5,9 @@ import Fastify from 'fastify';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 
+/** Accepted imports retain imported:true; counts describe actual transactional saves. */
+export type LocalWebSetupImportResult = { cancelled: true } | { imported: true; added_count: number; existing_count: number };
+
 /** Transport boundary only; implementations call the shared domain/Store. */
 export interface LocalWebDomain {
   bootstrap(): unknown;
@@ -14,7 +17,7 @@ export interface LocalWebDomain {
   taskAction(id: string, action: string, input: Record<string, unknown>): Promise<unknown>;
   refreshPrices(): Promise<unknown>;
   chooseDirectory(): Promise<unknown>;
-  importSetup?(): Promise<unknown>;
+  importSetup?(): Promise<LocalWebSetupImportResult>;
   chooseSession(taskId: string): Promise<unknown>;
   close?(): Promise<void>;
 }

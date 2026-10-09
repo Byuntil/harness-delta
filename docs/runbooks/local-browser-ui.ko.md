@@ -26,13 +26,13 @@ hm --db local.sqlite ui --setup reviewed-ui-setup.json
 호스트 옵션은 없습니다. Ctrl+C로 로컬 서비스를 중단하세요. 관측기 종료를
 확인하고 활성 측정을 일시중단하며, 외부 AI는 사용자가 제어합니다.
 
-## 검토된 설정 재사용
+## 작업에 적용할 측정 기준
 
 **설정**에서 프로젝트 디렉토리를 선택하세요. 등록은 Git HEAD를 읽으며
 저장소나 커밋을 만들지 않습니다. 새 작업 준비 시 코드 기준을 다시 읽습니다.
 미커밋 변경은 보존합니다. HEAD는 커밋된 기준이며 미커밋 파일의 스냅샷은 아닙니다.
 
-기존의 검토된 UI 설정 파일을 선택하거나 `--setup`으로 연결하세요. 비공개
+**설정 파일 불러오기**를 선택하거나 검토된 파일을 `--setup`으로 연결하세요. 비공개
 manifest는 `schema_version: 1`과 `profiles`를 가지며 각 항목은 `id`, `name`,
 `setup`, `execution`을 포함합니다. `setup`은 공용 `ExternalTaskSetupSchema`를
 사용합니다. `execution`은 검토한 바이너리, Codex home, recorder, sandbox,
@@ -47,6 +47,49 @@ UI는 비교 규칙, 가격, 완료 기준이나 원본 지원 판정을 임의�
 small/medium/large를 제공합니다. 모델과 effort는 네이티브 에이전트에서 자유롭게
 선택합니다.
 
+**작업에 적용할 측정 기준**은 이 입력들을 묶어 새 작업에서 재사용합니다.
+카드에는 프로젝트·하네스 A/B·허용 작업 유형과 크기를 표시합니다.
+**새 작업**에서 작업에 맞는 기준을 선택하세요. 파일을 불러와도 수집 권한이
+생기지는 않습니다. 신규 또는 신규·기존 혼합 파일은 **검토된 설정을 연결했습니다.**,
+동일 반복은 **이미 연결된 설정입니다.**로 안내합니다. 설정과 작업을 복제하지
+않습니다. 같은 ID의 내용이 다르면 파일 전체를 거절하고 기존 설정을 보존합니다.
+선택기를 취소하면 설정은 그대로 유지됩니다.
+
+### 설정 파일 작성
+
+UI는 기존 파일을 불러오며 파일 생성·편집 폼은 제공하지 않습니다.
+
+1. [작업 흐름 빠른 시작](workflow-quickstart.ko.md)의 3–4단계에 따라 검토한
+   프로젝트·가격표·A/B variant·schema-2 protocol을 등록하고 같은 측정 DB에서
+   protocol을 동결하세요. 등록 전에 합성 예제 값을 교체하세요. 설정 파일을
+   작성하는 것만으로 이 등록들이 생성되지는 않습니다.
+2. 텍스트 편집기에서 `schema_version: 1`과 `profiles`를 가진 비공개 JSON
+   manifest를 작성하세요. 각 profile에 고유한 `id`와 알아볼 수 있는 `name`을
+   지정하세요. 검토한 workflow 입력은 `setup.workflow`, runtime 입력은
+   `setup.runtime`, 준비 spec은 `setup.preparation`에 넣으세요. 수동 CLI
+   시작 안내에는 [외부 작업 흐름](external-session-workflow.ko.md)의 검토된
+   `setup.native_binary`를 포함하세요. 승인된 입력을 사용하고 완료 기준·
+   protocol·가격의 기본값을 추정하지 마세요.
+3. 검토한 실행 입력의 `binary`, `codex_home`, `hook_recorder`, `sandbox`,
+   `timeout_ms`, `poll_ms`만 `execution`에 넣으세요. launch/session 입력
+   전체를 복사하지 마세요. 선택적인 세션 연결 설정은
+   [UI manifest schema](../../src/local-web-domain.ts)를 따라야 합니다.
+   파일을 비공개로 보관하세요.
+4. 빌드 후 아래 loader로 구조를 확인하고 **설정 파일 불러오기**를 선택하세요.
+   이 검사는 선택한 파일만 읽습니다. 기반 등록·에이전트 실행·수집 지원 판정은
+   하지 않습니다.
+
+```sh
+node --input-type=module <<'JS'
+import { readLocalWebManifest } from './dist/local-web-domain.js';
+readLocalWebManifest('reviewed-ui-setup.json');
+console.log('Setup file structure is valid.');
+JS
+```
+
+예상 결과: **Setup file structure is valid.** 등록 참조와 원본 gate는 작업을
+선택하고 준비할 때 별도로 확인합니다.
+
 ## 연결 경로 선택
 
 아래 단계는 정확한 Codex 0.160.0 티켓 경로입니다. 일반 터미널 세션과 가족 수집은
@@ -57,8 +100,9 @@ skill 설치만으로 수집이 허용되지는 않습니다. 파일·launch wor
 
 ## 준비·연결·관측
 
-1. **작업**에서 **새 작업**을 선택하세요. 알아볼 수 있는 작업명, 프로젝트,
-   설정을 입력하세요. 선택 항목에는 유형, 크기, 자동 조회한 코드 기준이 있습니다.
+1. **작업**에서 **새 작업**을 선택하세요. 알아볼 수 있는 작업명과 프로젝트를
+   입력하고 **작업에 적용할 측정 기준**을 선택하세요.
+   선택 항목에는 유형, 크기, 자동 조회한 코드 기준이 있습니다.
 2. **측정 준비**를 선택하세요. 작업을 등록하고 A/B를 자동 배정합니다.
    내부 ID는 자동 생성하며 관측 구간은 시작하지 않습니다.
 3. 준비한 구성을 적용하세요. 검토된 관리 지침 파일만 변경할 수 있습니다.
