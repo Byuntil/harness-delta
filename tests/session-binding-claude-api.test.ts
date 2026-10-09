@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { Deletion } from '../src/deletion.js';
 import { externalContract } from '../src/external-session-contract.js';
 import { createLocalWebDomain } from '../src/local-web-domain.js';
@@ -28,6 +29,7 @@ async function fixture(useFactory = false) {
   mkdirSync(projectDir, { recursive: true });
   const factoryCalls: { taskId: string; projectRoot: string }[] = [];
   const resolutionErrors: string[] = [];
+  const concreteProviders: ClaudeSessionBindingProvider[] = [];
   const provider = (projectRoot = f.project) => {
     const value = new ClaudeSessionBindingProvider({ receiptDir: receipts,
       claudeProjectsDir: projects, projectRoot, allowCandidateProfiles: true, quiescenceMs: 0 });
@@ -36,7 +38,7 @@ async function fixture(useFactory = false) {
       try { return await resolveCurrent(input); }
       catch (error) { if (error instanceof Error) resolutionErrors.push(error.message); throw error; }
     };
-    return value;
+    concreteProviders.push(value); return value;
   };
   const makeDomain = () => createLocalWebDomain({ store: f.store, metadataFile: f.metadataFile,
     profiles: [f.profile], ...(useFactory ? {
@@ -94,7 +96,7 @@ async function fixture(useFactory = false) {
   const connect = (receipt: string, taskId = id) => post('session-connect', { product: 'claude_code', receipt }, taskId);
   const counted = () => f.store.all<{ request_id: string }>("SELECT json_extract(payload,'$.request_id') AS request_id FROM runtime_evidence ORDER BY rowid").map(row => row.request_id);
   return { ...f, id, receipts, projects, projectDir, provider, createTask, post, rootPath, childPath, usage,
-    writeRoot, writeChild, relation, record, connectReceipt, connect, counted, factoryCalls, resolutionErrors,
+    writeRoot, writeChild, relation, record, connectReceipt, connect, counted, factoryCalls, resolutionErrors, concreteProviders,
     task: () => domain.task(id),
     bootstrap: () => app.inject({ url: '/api/bootstrap', headers }),
     restart: async () => { await app.close(); domain = makeDomain(); app = createLocalWebServer({ origin, domain, metadataFile: f.metadataFile }); },
@@ -107,24 +109,24 @@ test('Claude receipt baseline, sibling and flattened descendant ownership, repla
     const sid = f.writeRoot();
     appendFileSync(f.rootPath(sid), lines([f.usage(sid, 'old-root', oldAt())]));
     const receipt = f.connectReceipt(sid);
-    // Capture trusted metadata before connecting, but leave the member without
-    // rows. Its identity cannot be discovered until its first own row exists.
+    // A valid Start initially has an empty file. Connection now holds the family
+    // until its own metadata row arrives, then baselines both members prospectively.
     mkdirSync(join(f.projectDir, sid, 'subagents'), { recursive: true });
     writeFileSync(f.childPath(sid, 'first'), '', { mode: 0o600 });
     f.relation(sid, 'first');
     const firstReceipt = f.connectReceipt(sid, 'first');
-    const connected = await f.connect(receipt);
+    const creation = delay(150).then(() => f.writeChild(sid, 'first'));
+    const connected = await f.connect(receipt); await creation;
     expect(connected.statusCode, connected.body).toBe(200);
     expect(connected.json()).toMatchObject({ connection: { status: 'connected', collection_active: true,
-      cost_coverage: 'partial' }, binding: { roots: 1, children: 0, requests: 0, complete_cost: null, inference: false } });
+      cost_coverage: 'partial' }, binding: { roots: 1, children: 1, requests: 0, complete_cost: null, inference: false } });
     expect(f.counted()).toEqual([]);
 
     // Native Claude hook ancestry is flattened: independently evidenced nested
     // member files remain root children even when their own rows carry parentAgentId.
-    f.writeChild(sid, 'first', [f.usage(sid, 'first-child', at(), 'first')]);
-    expect(f.task()).toMatchObject({ binding: { children: 0 } });
-    // There is no subprocess wait between the first row and this recall: the
-    // connection must independently discover the previously unlinked member.
+    appendFileSync(f.childPath(sid, 'first'), lines([f.usage(sid, 'first-child', at(), 'first')]));
+    expect(f.task()).toMatchObject({ binding: { children: 1 } });
+    // The child recall revalidates independently and must not duplicate its usage.
     const recalled = await f.connect(firstReceipt);
     expect(recalled.statusCode, recalled.body).toBe(200);
     expect(recalled.json()).toMatchObject({ connection: { status: 'already_connected', role: 'child', task_id: f.id },
@@ -265,3 +267,37 @@ test('deleting a paused Claude family cleans metadata durably after restart and 
     expect(f.store.all('SELECT * FROM events')).toEqual([]);
   } finally { await f.cleanup(); }
 }, 10000);
+
+test('ordinary synthetic Claude connection holds usage baseline until its fresh Start source is attributable', async () => {
+  const f = await fixture(); const sid = f.writeRoot(); const agent = 'initial-pending';
+  f.relation(sid, agent);
+  const discover = vi.spyOn(ClaudeSessionBindingProvider.prototype, 'discoverChildren');
+  const read = vi.spyOn(ClaudeSessionBindingProvider.prototype, 'readUsage');
+  const connecting = f.connect(f.connectReceipt(sid));
+  try {
+    await expect.poll(() => discover.mock.calls.length, { timeout: 1000 }).toBeGreaterThan(0);
+    expect(read.mock.calls.length).toBe(0);
+    f.writeChild(sid, agent, [f.usage(sid, 'held-initial-child', at(), agent)]);
+    expect((await connecting).statusCode).toBe(200);
+    expect(f.counted()).toEqual([]);
+    expect(f.store.get<{ count: number }>('SELECT count(DISTINCT session_id) AS count FROM observation_gaps WHERE task_id=?', [f.id])!.count).toBe(2);
+  } finally { f.writeChild(sid, agent); await connecting; await f.cleanup(); discover.mockRestore(); read.mockRestore(); }
+});
+
+test.each(['stop', 'mixed'] as const)('ordinary Claude tick rejects %s terminal evidence before root usage even without a latched wait', async fault => {
+  const f = await fixture(); const sid = f.writeRoot(); await f.connect(f.connectReceipt(sid));
+  const selected = f.concreteProviders[0]!; const original = selected.discoverChildren.bind(selected);
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); let gated = false;
+  const discover = vi.spyOn(selected, 'discoverChildren').mockImplementation(async identity => {
+    gated = true; await gate; return original(identity);
+  });
+  const read = vi.spyOn(selected, 'readUsage');
+  try {
+    await expect.poll(() => gated).toBe(true); // Observe only after the next family preflight is held.
+    if (fault === 'mixed') f.relation(sid, 'pending');
+    f.record(sid, 'SubagentStop', { agent_id: 'unknown-stop', agent_type: null, agent_transcript_path: f.childPath(sid, 'unknown-stop') });
+    appendFileSync(f.rootPath(sid), lines([f.usage(sid, 'must-not-collect')])); release();
+    await expect.poll(() => f.task().state, { timeout: 1500 }).toBe('paused');
+    expect(read.mock.calls.length).toBe(0); expect(f.counted()).toEqual([]);
+  } finally { release(); await f.cleanup(); discover.mockRestore(); read.mockRestore(); }
+});

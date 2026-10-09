@@ -39,8 +39,14 @@ Keep collection running while working. Ctrl-C/SIGTERM stops it; nothing runs in
 the background afterward. `--once` establishes a baseline and exits; repeatedly
 invoking it does not measure work between invocations.
 
-In another terminal, use `task pause task1` and `task resume task1`. Resuming starts
-a new baseline at the next poll. Stopping/restarting never backfills offline work.
+In another terminal:
+
+```sh
+node dist/cli.js --db local.db task pause task1
+node dist/cli.js --db local.db task resume task1
+```
+
+Resuming starts a new baseline at the next poll. Stopping/restarting never backfills offline work.
 Finalize only after the last source events have arrived and been collected.
 
 For explicit new sessions, collector restarts and missing original sources, see
@@ -73,11 +79,18 @@ original attribution; conflicting metadata remains an error. See the
 [diagnostic categories](../decisions/003-local-observation-contract.md#collector-failure-diagnostics)
 for the local collector interface and its limits.
 
-Retention is opt-in: `retention set project1 --days 30`, then `retention apply
-project1`. It deletes finalized tasks by finalization age and retains active tasks.
-`delete project project1` removes its tasks and related rows. Tombstones prohibit
-identifier reuse. Prior report files and original product transcripts are outside
-local DB deletion; import/sync deletion guarantees belong to later delivery gates.
+Retention is opt-in. This example deletes tasks finalized more than 30 days ago
+and retains active tasks. The last command deletes the project and related rows.
+
+```sh
+node dist/cli.js --db local.db retention set project1 --days 30
+node dist/cli.js --db local.db retention apply project1
+node dist/cli.js --db local.db delete project project1
+```
+
+Tombstones prohibit identifier reuse. Prior report files and original product transcripts are outside
+local DB deletion. The separate [synthetic file exchange](team-file-exchange.md)
+uses deletion notices and tombstones; live sharing and central sync remain unavailable.
 
 ## Preregister an observational period
 
@@ -104,7 +117,7 @@ the generated report if you need a historical snapshot after deletion or new dat
 Implemented 2026-10-08: [ADR 013](../decisions/013-forward-version-compatibility.md)
 enables automatic conditional parser reuse for stable releases inside finite windows.
 File collection uses Codex 0.158.0 for newer versions below 0.164.0, and Claude Code
-2.1.283 for newer versions below 2.2.0. Codex CLI 0.161.0 and Claude Code 2.1.293
+2.1.283 for newer versions below 2.2.0. Codex CLI 0.161.0 and Claude Code 2.1.293/2.1.294
 therefore enroll by default with `compatibility_unverified` trust. Exact registered
 versions remain verified; prereleases, suffixes, old unregistered versions and
 out-of-window releases fail before source access.
@@ -138,20 +151,9 @@ See [ADR 007](../decisions/007-adapter-version-profiles.md). File compatibility 
 not authorize native launch; use the separate workflow windows in the
 [native workflow guide](task-native-workflow.md).
 
-The repository runner at `scripts/conformance/` is manual. Installation, collection, hooks, and CI do not invoke it. CI runs offline synthetic unit tests of the report projector, the candidate parser, the confirmation and hook-trust helpers, and the exec-stream reducer. CI never runs the runner. Design approval is not live-run approval.
-
-To run the Codex 0.158.0 exec conformance check after approving its live protocol, compile the scripts into the ignored cache and start the runner from the repository root in an interactive terminal:
-
-```sh
-npx tsc -p tsconfig.conformance.json
-node node_modules/.cache/conformance/scripts/conformance/runner.js --out "$PWD/.harness-delta/work/<work-id>/live"
-```
-
-The runner prints its plan and starts no product process until you type `confirm`; there is no option that skips this. It refuses a non-interactive terminal, a set `CODEX_HOME`, and an output directory outside `.harness-delta/`. It checks `codex --version` before and after, runs one `codex exec` turn and one exact-session resume with synthetic prompts, locates the rollout by the exec-stream thread ID, and cross-checks a per-invocation SessionStart hook. It writes a restricted report of check outcomes, counts and catalog key names, without IDs, paths, text or token values. The rollout file it creates contains the synthetic prompts, replies and instructions and is left in place. The manual suite `npx vitest run --config scripts/conformance/vitest.config.ts` exercises the runner against a synthetic stand-in, not a product.
-
-The per-invocation hook override is observed to work for `codex exec` 0.158.0. Source review indicates that an interactive Codex start which connects to an already running app-server daemon does not pass per-invocation hook configuration to that daemon; a control run was consistent with this but did not prove it. Interactive linkage remains unsupported.
-
-Before an experiment, verify update controls against the pinned binaries. Freeze the product, application, executable provenance, and model/settings. Use process-only controls and do not edit config files. Codex's documented one-off override is `-c check_for_update_on_startup=false`. Claude's documented process environment is `DISABLE_AUTOUPDATER=1`. `DISABLE_UPDATES=1` also blocks manual updates. These are documentation findings dated 2026-09-29, not pinned-binary runtime verification. Check versions before and after the run. On drift, stop measurement, mark uncertainty, and follow the frozen deviation policy. Do not relink, backfill, or rerandomize. This checklist does not enable R09 and does not waive R10.
+For developer conformance, exact-version registration and native update controls,
+use the [admission procedure](codex-version-admission.md). These are manual,
+separately authorized validation steps, never part of installation or collection.
 
 ## Recovery and limits
 
@@ -176,5 +178,5 @@ For the additive v2 flexible model workflow, explicit prices and independent
 readiness gates, see [flexible comparison](flexible-comparison.md). The separate
 [assigned Codex 0.160.0 root workflow](task-native-workflow.md) admits partial
 own-response collection under a complete frozen v2 protocol. It does not change
-this generic collector's version allowlist. Complete cost and inference remain
+this generic collector's exact admissions or conditional parser rules. Complete cost and inference remain
 unavailable.

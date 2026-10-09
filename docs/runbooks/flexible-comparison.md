@@ -13,7 +13,9 @@ Registration and offline synthetic tests require
 no product executable or model request. The production registry admits two separate Codex 0.160.0 profiles:
 [the root workflow](../validation/codex-workflow-01600-source-readiness.md) and
 [the fresh root/single-direct-child workflow](../validation/codex-workflow-01600-direct-child-source-readiness.md).
-Both collect partial own-response usage and have no complete cost. The child
+[Conditional workflow versions](task-native-workflow.md#conditional-forward-versions)
+are additionally eligible for functional pilots with unverified trust.
+Both exact profiles collect partial own-response usage and have no complete cost. The child
 profile requires read-only permissions and does not support family resume.
 A v2 protocol accepts one profile per product/version, so choose one Codex profile
 for that protocol. Claude Code 2.1.291 is admitted for parent-only launch
@@ -38,14 +40,17 @@ and analysis/sensitivity labels remain required user selections. For the existin
 `synthetic_validation` and `real_experiment` purposes, `minimum_effect`,
 `quality_margin` and `confidence_level` are also required. Use v2
 `purpose: functional_pilot` for a functional check; these three effect inputs
-must be absent. Its source admission and task workflow are identical to the
-qualified native lane, but inference is always unavailable. Reports mark
+must be absent. It accepts exact admitted workflow sources and the separately labeled
+[conditional forward versions](task-native-workflow.md#conditional-forward-versions);
+inference is always unavailable. Reports mark
 `evaluation_status: functional_only` and `adoption.status: not_applicable`, with
 null primary arm complete means and relative change. Descriptive partial means,
 counts, task costs and human criteria remain available; no superiority or
 confidence interval is calculated. Existing protocols/reports retain their shape;
 functional protocols remain outside synthetic-only file exchange.
-No price, duration, savings target or sample count is supplied by the product.
+The reference catalog can supply a price basis at CLI registration when
+`price_table_id` is omitted. Duration, savings targets and sample counts remain
+explicit protocol choices. The stored protocol always pins an immutable table.
 Freeze before recruitment. Cost and coverage use [assigned_at, min(cutoff, followup_ends_at)); a delayed task start never removes earlier gaps. Active and elapsed time start at task start. Assignment and usage/evaluation endpoints are half-open.
 
 Task creation through comparison assignment uses schema_version 2 and task
@@ -64,12 +69,14 @@ permission to commit, publish or run a model. Public fixtures remain synthetic.
 
 ## Immutable prices and commands
 
-Provide a strict price-table JSON file with id, version, currency (three uppercase
+For the normal flow, use the [reference catalog](reference-price-catalog.md).
+For an explicit historical or user-selected basis, provide a strict price-table JSON file with id, version, currency (three uppercase
 letters), source_id, as_of (UTC), positive integer unit_tokens, display_decimals,
 rounding: half_even, and entries. Each entry contains product, model, component
 (ordinary_input/cache_read/cache_write/output) and a nonnegative decimal string
 price_per_unit. Duplicate keys and changing an existing table ID are rejected.
-Select and document your prices explicitly; no current market prices are fetched.
+Explicit-table registration never fetches prices. The catalog has a separate
+approved refresh command; refresh does not change existing protocol pins.
 
 ```sh
 node dist/cli.js --db .harness-delta/demo/local.sqlite price-table register --config prices.json

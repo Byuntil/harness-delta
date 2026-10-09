@@ -4,7 +4,8 @@
 
 부분 비용을 기술하는 작은 **기능 파일럿**에 이 절차를 사용하세요.
 대상은 Codex 0.160.0(`codex-workflow-own-response-v1`)과
-Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)입니다.
+Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)와
+아래의 조건부 후속 버전입니다.
 논리적 작업마다 하나의 A/B 배정을 유지합니다.
 모델과 effort는 실행마다 선택합니다. 새 세션을 열어도 배정은 바뀌지 않습니다.
 
@@ -14,27 +15,30 @@ Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)입니�
 | --- | --- |
 | Codex 0.160.0 루트 workflow | launch, 같은 세션 resume, 명시적 독립 루트 link, 전경 collect, stop, recover; 부분 사용량 |
 | Codex 0.160.0 직계 자식 workflow | 별도 프로필: 새 루트와 새 자식 1개, 고정 macOS arm64/Node24, read-only; family resume·외부 자식 link 미지원 |
-| 기존 파일 수집기 | Codex 0.156.1/0.158.0, Claude Code 2.1.283만 지원; [로컬 측정](local-measurement.ko.md) 참고 |
-| Claude Code 2.1.291 부모 전용 workflow | 실행마다 새 launch(read-only 또는 `workspace-edit`), 같은 작업의 추가 launch, stop, recover; 부분 사용량. 자식·native resume·다른 버전 미지원; 2.1.288은 2026-10-06에 retire됨 |
+| 기존 파일 수집기 | 정확한 프로필: Codex 0.156.1/0.158.0, Claude Code 2.1.283; 조건부 파일 버전도 허용; [로컬 측정](local-measurement.ko.md) 참고 |
+| Claude Code 2.1.291 부모 전용 workflow | 실행마다 새 launch(read-only 또는 `workspace-edit`), 같은 작업의 추가 launch, stop, recover; 부분 사용량. 자식·native resume 미지원; 2.1.288은 지원 종료 |
 | App/IDE/MCP, fork, compaction, 더 깊은 자식 | 이 절차에서 미지원 |
 | 작업 전체 비용, 실제 청구액, 절감·도입 추론 | 제공하지 않음 |
 | 팀 파일 교환 | 합성 검증 전용; 기능 파일럿 결과는 이 경로로 교환할 수 없음 |
+
+정규 Codex 버전 `>0.160.0`, `<0.164.0`과 Claude Code 버전 `>2.1.291`,
+`<2.2.0`(2.1.293/2.1.294 포함)은 `functional_pilot`에서 workflow 프로필을
+재사용할 수 있습니다. 신뢰 상태는 `compatibility_unverified`이며 기준 추정액을
+별도로 표시합니다. 이 범위가 티켓 연결이나 일반 세션 가족의 검증을 대신하지는
+않습니다. [버전 설정과 검사](task-native-workflow.md#conditional-forward-versions)를 참고하세요.
 
 **실행 주의:** native launch/resume는 기존 인증 상태를 사용하며 유료 또는 구독 사용량을 소비할 수 있습니다.
 실제 실행마다 먼저 승인하세요. timeout과 stop은 제공자의 지출 상한이 아닙니다.
 입력 준비·등록·상태 조회는 제품을 실행하지 않습니다.
 
-초기 admission 검증은 read-only였습니다. 이후 제한된 workspace-write 기능 실행에서 파일이 생성되었습니다.
-첫 실행은 native 시작 중 영구 trust 설정이 생성되어 설정 범위 검증에 실패했습니다.
-후속 실행은 명시적 `project_trust: "untrusted"`로 감시한 설정 범위 검증을 통과했습니다.
-이 관찰은 모든 native·managed 설정이 유지된다는 보장이 아닙니다.
-이 옵션은 해당 실행의 프로젝트 로컬 Codex 설정·hooks·rules를 비활성화합니다.
-그 효과가 의도된 경우에만 사용하세요. 새 루트 launch에만 적용되며 resume/link/collect·자식 launch에는 적용되지 않습니다.
-[실행 상세와 한계](task-native-workflow.md)를 참고하세요.
+Codex 새 루트 launch의 `project_trust: "untrusted"`는 해당 실행의 프로젝트
+로컬 설정·hooks·rules를 비활성화합니다. 그 효과가 의도된 경우에만 사용하세요.
+resume/link/collect·자식 launch에는 적용되지 않습니다.
+[실행 상세와 설정 범위 검증](task-native-workflow.md#codex-launch-resume-link-and-collection)을 참고하세요.
 
 ## 1. 저장소에서 설치하기
 
-준비물은 Node.js 24, npm, 기존의 고정 Codex 0.160.0 또는 Claude Code 2.1.291 바이너리입니다.
+준비물은 Node.js 24, npm, 선택한 workflow 버전에 허용되는 기존 고정 바이너리입니다.
 로컬 검증 환경은 macOS arm64입니다. 다른 플랫폼은 미검증입니다.
 패키지는 private 상태이며 공개 패키지 설치 절차는 없습니다.
 
@@ -67,7 +71,7 @@ Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)입니�
 ## 2. 파일럿 입력 합의하기
 
 등록 전에 팀 담당자가 아래 입력을 선택해야 합니다.
-제품은 실험 가격·기간·표본 수·누락 허용치를 채워 주지 않습니다.
+제품은 기준 가격 카탈로그를 제공합니다. 기간·표본 수·누락 허용치는 직접 선택해야 합니다.
 
 | 결정 | 기록 위치 |
 | --- | --- |
@@ -75,7 +79,7 @@ Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)입니�
 | 작업 산출물·허용 편집·사람의 완료 기준 | 비공개 prompt 파일; 기준 ID는 `workflow.json` |
 | 참가자·환경·담당자별 층·배정자 소유권 | `protocol.json`; 각 층에는 담당자 1명 |
 | 모집 날짜·판정 기간·표본 예산·중단/이탈 규칙 | `protocol.json`; 모집 전에 freeze |
-| 명시적 기준 가격과 기존 입력 비용 가정 | `prices.json`과 [비용 안내](observed-cost.ko.md) |
+| 기준 카탈로그 또는 명시적 가격, 기존 입력 비용 가정 | [카탈로그](reference-price-catalog.ko.md), 또는 `prices.json`과 [비용 안내](observed-cost.ko.md) |
 | 실행 모델/effort·sandbox·timeout·실행 횟수·종료 | `runtime.json`, execution 파일, 실제 실행 승인 |
 
 작업과 **사람의 검토**를 모두 포함할 만큼 판정 기간을 선택하세요.
@@ -109,23 +113,23 @@ finish는 이 기한 전에 실행해야 합니다. 늦은 결과는 별도 저�
 
 | 파일 | 반드시 교체할 값 |
 | --- | --- |
-| `prices.json` | 합성 가격·모델·출처·날짜를 선택한 기준으로 교체; 제공자 가격을 뜻하지 않음 |
+| `prices.json` (명시적 가격표 경로) | 합성 가격·모델·출처·날짜 교체; 등록 시 카탈로그를 고정하려면 이 파일과 protocol의 `price_table_id` 생략 |
 | `variant-a.md`, `variant-b.md` | 검토한 A/B 지시; 개인 원본을 공개 fixture에 넣지 않음 |
 | `protocol.json` | 2099년 날짜, 예제 ID, 참가자/환경/층, 판정 기간·표본·누락·중단 정책 |
 | `workflow.json` | 일치하는 ID, 논리적 작업, 기준, 환경, 실제 코드 commit, artifact 경로 |
 | `runtime.json` | 선택한 모델·effort 또는 미지정 `null`; 진단용 모델은 필수가 아님 |
 | `launch.json`, `resume.json` | 정규 절대 binary/home/recorder/prompt 경로, 승인된 sandbox·timeout |
 | `link.json`, `collect.json` | 같은 정규 설정; 필요한 정확한 연결 세션 UUID·source 경로 |
-| `claude-launch.json` (Claude 전용) | 고정 2.1.291 바이너리 경로/SHA, mode 0700 비공개 workspace, 빌드된 mediator, prompt, `permissions`, 한도 |
+| `claude-launch.json` (Claude 전용) | 선택한 바이너리 경로/버전/SHA, mode 0700 비공개 workspace, 빌드된 mediator, prompt, `permissions`, 한도 |
 
-Claude Code를 쓰면 `workflow.json`의 `product: "claude_code"`, `product_version: "2.1.291"`과
-`protocol.json`의 `claude_code / 2.1.291 / claude-workflow-own-trace-v1` source profile도 설정하세요.
-새 protocol에는 `claude_code` workflow source profile을 하나만 넣을 수 있고, 그 버전은 가장 최근에 승인된
-Claude Code 버전(현재 2.1.291)이어야 합니다. 아니면 등록이 `claude_workflow_version_not_latest`로 실패합니다.
-등록된 protocol은 그 버전이 retire될 때까지 버전을 유지합니다.
-retire된 뒤에는 그 작업을 launch할 수 없으므로 새 protocol이 필요합니다.
-`binary.path`는 `claude` 실행기 대신 정확한 2.1.291 파일을 가리켜야 합니다
-(native 설치는 `~/.local/share/claude/versions/` 아래).
+workflow 설정·protocol의 source profile·바이너리 버전을 일치시키세요.
+저장소 Codex 예제는 0.160.0입니다. 조건부 버전은 execution의 `product_version`과
+실제 `binary.sha256`도 설정하세요. Claude는 `product: "claude_code"`,
+프로필 `claude-workflow-own-trace-v1`을 쓰고 `workflow.json`, `protocol.json`,
+`binary.version`에 선택한 버전을 넣으세요. 기능 protocol은 2.1.291 또는 조건부
+범위 버전의 Claude workflow 프로필 하나를 허용합니다. 다른 비합성 protocol은
+최신 정확한 admission을 요구합니다. [등록 규칙](task-native-workflow.md#claude-parent-only-workflow)을 참고하세요.
+`binary.path`는 `claude` 실행기 대신 정확한 버전 파일을 가리켜야 합니다.
 그 파일이 없거나 바뀌면 배정 전 preflight가 `claude_probe_executable_mismatch`로 실패합니다.
 `permissions: "workspace-edit"`를 쓰면 workspace·harness-delta 빌드(mediator)·prompt·바이너리·데이터베이스를
 측정 대상 프로젝트 루트 밖에 두세요. 안에 있으면 preflight가 `claude_workflow_harness_inside_project`로 실패합니다.
@@ -134,7 +138,7 @@ retire된 뒤에는 그 작업을 launch할 수 없으므로 새 protocol이 필
 JSON 예제는 전체 스키마 입력이지만 선택값은 합성입니다.
 prompt·승인된 실행 요청·DB는 Git에서 제외되는 로컬 저장소에 보관하세요.
 일반 산출물은 측정 데이터와 분리하세요.
-native 바이너리 SHA는 예제의 고정값과 같아야 합니다.
+Codex 0.160.0은 코드에 고정된 바이너리 해시와 같아야 합니다. 조건부 버전은 검토한 실제 해시를 사용합니다.
 별도 결정 없이 예제 실행을 위해 제품 설치·로그인·업데이트를 하지 마세요.
 
 **산출물 주의:** 측정 CLI는 일반 native stdout을 버립니다.
@@ -169,7 +173,9 @@ artifact 경로는 config 위치가 아니라 명령의 실행 디렉터리 기�
 ## 4. 한 번 등록하고 freeze하기
 
 이 파일럿에는 새 전용 DB를 사용하세요. 합성 시험은 다른 DB에 보관하세요.
-아래 순서대로 각 명령을 따로 실행하세요.
+아래 명령은 명시적 `prices-1` 가격표를 사용합니다. 카탈로그를 쓰면 `protocol.json`의
+`price_table_id`를 생략하고 `price-table register`를 건너뛰세요. 등록 시 현재 카탈로그를
+한 번 고정합니다. 나머지 명령은 순서대로 실행하세요.
 프로젝트 루트는 정규 절대 경로로 교체하세요.
 
 ```sh
@@ -182,7 +188,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite comparison freeze pilot-
 node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow status pilot-1
 ```
 
-예상 결과: 합의된 전체 입력과 승인된 루트 프로필에는 `native_execution: true`가 표시됩니다.
+예상 결과: 합의된 전체 입력과 허용된 workflow 프로필에는 `native_execution: true`가 표시됩니다.
+조건부 source는 `source_compatibility`에 `compatibility_unverified`로 표시되며
+해당 source의 `readiness.real_allocation`은 false를 유지합니다.
 `whole_task_cost_unconfirmed`, `analysis_unverified`는 예상되는 한계입니다.
 `native_source_unqualified`, `native_adapter_not_wired`가 있으면 launch 전에 중단하세요.
 freeze가 실패하면 필수 필드와 모집 시작 전인지 확인하세요.
@@ -294,7 +302,8 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite workflow codex collect \
 자동 발견·`--last`·과거 backfill·자동 재시도는 없습니다.
 native append와 읽기가 겹치면 아무것도 수집하지 않고 다음 poll에서 재시도합니다. 연속 20회 또는 실행 기한까지입니다.
 identity·잘림·prefix 변경은 계속 거부합니다.
-Codex 0.160.0에 일반 `session link`/`collect` 명령으로 대체하지 마세요.
+배정된 workflow 작업에는 `workflow codex`를 유지하세요. 일반 `session link`/`collect`는
+해당 버전이 허용되더라도 범위·신뢰가 다른 파일 파서 경로입니다.
 별도 직계 자식 프로필은 family resume를 지원하지 않습니다. pause 후에는 새 루트/자식 쌍을 사용하세요.
 
 ## 8. 사람이 결과 판정하기
@@ -340,11 +349,11 @@ cutoff가 기한 전이면 완료 작업도 `followup_pending`입니다.
 저장된 version-1 스냅샷은 원래 형식을 유지합니다.
 추가 증거가 도착하면 적절한 revision reason과 새 보고서 ID로 생성하세요. 기존 스냅샷은 바뀌지 않습니다.
 
-명시적 기준 가격으로 같은 작업의 관측 성분을 추정하세요.
+비교에 고정된 가격표로 같은 작업의 관측 성분을 추정하세요:
 
 ```sh
 node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-task task-1 \
-  --price-table prices-1 --cutoff "$reportCutoff" --input-basis output-only-v1
+  --cutoff "$reportCutoff" --input-basis output-only-v1
 ```
 
 입력 비용 가정을 선택하거나 추정값을 비교하기 전에 [비용 안내](observed-cost.ko.md)를 읽으세요.
@@ -408,9 +417,3 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite delete task task-1
 
 설정 계약은 [flexible comparison](flexible-comparison.md), 고급 source/자식 경계는 [native workflow](task-native-workflow.md)를 참고하세요.
 [v1 합성 비교](task-comparison.ko.md), [합성 교환](team-file-exchange.ko.md), [방법 검증](comparison-analysis-validation.md)은 명시된 개발 범위에서만 사용하세요.
-기존 기능 파일럿 준비 안내는 2–5단계와 flexible 설정 참조에 통합했습니다.
-
-영어 절차는 **STE-inspired** 형식을 참고했습니다. ASD-STE100 전체 준수 평가나 ASD 인증을 받지 않았습니다.
-한국어판은 같은 정보 구조·용어를 적용한 대응판이며 ASD-STE100 준수 언어판이 아닙니다.
-[공식 현재 FAQ](https://asd-ste100.org/STE_faq.html)와 [공식 Issue 9 표준](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf)을 참고하세요.
-표준은 무료로 받을 수 있지만 저작권은 복제를 제한합니다. 링크로 안내하고 본문·사전을 여기에 재배포하지 마세요.

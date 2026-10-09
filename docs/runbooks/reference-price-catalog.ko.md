@@ -68,6 +68,8 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
 
 예상 결과: `price_selection`, 카탈로그/가격표 출처, 정확한 토큰 범주 매칭,
 `partial_amount`, null인 `complete_amount`, 사유와 구간/수집 범위 근거입니다.
+`compatibility_unverified_partial_amount`와 `legacy_unverified_partial_amount`는
+verified `partial_amount`와 구분해서 읽으세요. [source 신뢰와 관측 범위](observed-cost.ko.md#4-금액누락관측-범위를-따로-읽기)를 참고하세요.
 배정된 V2 작업은 고정된 비교 기준을, 독립 작업은 현재 카탈로그를 사용합니다.
 과거의 명시적 비교 가격표도 계속 사용할 수 있습니다. 새 V2 비교 CLI 설정은
 `price_table_id`를 생략할 수 있으며 등록 시 한 번 채웁니다. 갱신은 등록된 기준을

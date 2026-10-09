@@ -117,9 +117,12 @@ An output-only estimate is not equivalent to an estimate with assumed input pric
 
 | Field/state | Meaning |
 | --- | --- |
-| `partial_amount` | Sum of eligible priceable components; can contain an explicit input assumption |
-| `partial_amount: "0"` | Eligible priced observations sum to zero |
-| `partial_amount: null` | No eligible priced amount; not zero |
+| `partial_amount` | Eligible priceable components with verified source trust; can contain an explicit input assumption |
+| `compatibility_unverified_partial_amount` | Separate estimate from conditional parser/profile reuse |
+| `legacy_unverified_partial_amount` | Separate estimate for historical native usage without source provenance |
+| `compatibility` | Source/version/parser provenance and trust counts, including invalidated events excluded from amounts |
+| `partial_amount: "0"` | Eligible verified priced observations sum to zero |
+| `partial_amount: null` | No eligible verified priced amount; unverified estimates may still exist |
 | `complete_amount: null` | Complete task cost is unavailable |
 | `unpriced_events` | Recorded events have at least one component without a rate |
 | `unavailable_events` | Events have no priceable partial amount |
@@ -127,7 +130,10 @@ An output-only estimate is not equivalent to an estimate with assumed input pric
 | Missing / error / excluded / unmeasurable | Different reading states; none is observed zero |
 | `observed_components_priced: true` | Eligible observed components are priceable; whole-task coverage is still unknown |
 
-Read the reasons with the amounts. Empty or entirely unavailable observations have null partial cost.
+Read the reasons with each trust bucket. An all-unverified task has null
+`partial_amount`, even when an unverified estimate is available. Empty or entirely
+unpriceable buckets are null, not zero. Frozen historical reports retain their
+original shape; missing provenance is never silently promoted to verified trust.
 Usage absence, unknown attribution/components and missing rates must remain visible.
 Never add cached/reasoning subsets again or infer parent/child completeness from an aggregate.
 

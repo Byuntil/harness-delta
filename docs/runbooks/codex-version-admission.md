@@ -119,6 +119,14 @@ No observations means `missing`, never zero. `complete_tokens` remains null.
 retain `unsupported` or the existing source-error categories. Do not remove a
 blocking history row to salvage usage or backfill excluded intervals.
 
+## Version drift and update controls
+
+For a frozen experiment, verify process-only update controls against the pinned
+binary before execution. Check product version and executable provenance before
+and after the run. On drift, stop measurement and follow the frozen deviation
+policy; do not relink, backfill or rerandomize. Conditional parser reuse does not
+waive R09 exact-version controls or R10 analysis validation.
+
 ## Next exact version
 
 1. Review the version-pinned source/schema against the current candidate's

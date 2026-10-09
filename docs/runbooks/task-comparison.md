@@ -5,7 +5,7 @@
 Contributors can exercise configuration registration, durable allocation, manual
 application evidence, human outcomes and assignment reports using synthetic tasks.
 **V1 real randomized experiment allocation is disabled.** V2 supports the limited
-[Codex 0.160.0 root workflow](task-native-workflow.md) with explicit user inputs and
+[native workflow profiles](task-native-workflow.md) with explicit user inputs and
 partial usage only. Complete cost and inference remain unavailable. The complete team workflow,
 real-data file exchange, method validation and validated inference remain gated.
 Separate [synthetic file exchange](team-file-exchange.md) is implemented. Existing
@@ -316,7 +316,5 @@ Deletion cannot erase exported copies. The separate synthetic exchange path
 provides deletion notices; it does not add live-data sharing to this v1 example.
 
 For the additive v2 flexible model workflow, explicit prices and independent
-readiness gates, see [flexible comparison](flexible-comparison.md). Production
-flexible collection is admitted for exact Codex 0.160.0 root and separate bounded
-direct-child workflow profiles;
-complete cost and inference remain unavailable.
+readiness gates, see [flexible comparison](flexible-comparison.md). See the [native workflow](task-native-workflow.md) for exact admissions and
+conditional versions. Complete cost and inference remain unavailable.

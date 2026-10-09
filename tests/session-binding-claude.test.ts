@@ -175,7 +175,8 @@ describe('Claude family relations', () => {
     const found = await p.discoverChildren(parent);
     expect(found.children.map(c => [c.parentSessionId, c.identity.sessionId, c.identity.parentSessionId, c.identity.createdAt, c.relationEvidenceId === c.identity.identityEvidenceId]))
       .toEqual([[sid, `${sid}:a1`, sid, '2026-10-07T01:05:00.000Z', true]]);
-    expect(found.gaps).toEqual(['binding_ancestry_unverified']);
+    // Empty Start sources now remain explicit unresolved-family gaps.
+    expect(found.gaps).toEqual(['binding_ancestry_unverified', 'source_unavailable']);
     expect(found.children[0]!.identity.nativeMapping).toEqual({ nativeSessionId: sid, processId: null, agentId: 'a1' });
     // a5 has no rows yet; it is linked later with its first own-row time, and a1 stays byte-identical.
     appendFileSync(childPath(sid, 'a5'), lines([childRow(sid, 'a5', '2026-10-07T00:30:00.000Z')]));
@@ -195,12 +196,12 @@ describe('Claude family relations', () => {
     const found = await p.discoverChildren(parent);
     expect(found.children.map(c => c.identity.sessionId)).toEqual([`${sid}:a2`]);
     expect(found.gaps).toEqual(['binding_ancestry_unverified']);
-    // A member whose first line is still being written is deferred without a gap.
+    // A partial source remains a gap; only a fresh Start can enter the coordinator barrier.
     const next = randomUUID(); writeRoot(next); rmSync(join(receipts, 'connect'), { recursive: true }); connect(next);
     const nextParent = await currentIdentity(next, p);
     mkdirSync(join(projectDir, next, 'subagents'), { recursive: true }); writeFileSync(childPath(next, 'a3'), '{"type":"user","sessionId"', { mode: 0o600 });
     subagent(next, 'a3', 'SubagentStart');
-    expect(await p.discoverChildren(nextParent)).toEqual({ children: [], gaps: [] });
+    expect(await p.discoverChildren(nextParent)).toEqual({ children: [], gaps: ['source_unavailable'] });
   });
 
   it('resolves a skill call inside a subagent to the same identity discovery links', async () => {
