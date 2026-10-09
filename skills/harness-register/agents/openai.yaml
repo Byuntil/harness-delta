@@ -1,0 +1,4 @@
+interface:
+  display_name: "Register Harness Version"
+  short_description: "Package selected guidance and supporting files"
+  default_prompt: "Use $harness-register to package my explicitly selected existing harness files."

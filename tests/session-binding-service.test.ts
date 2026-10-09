@@ -1,3 +1,7 @@
+import { writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { hashBytes,registerHarness } from '../src/harness-config.js';
+import { ApplicationCoordinator, requireApplication } from '../src/harness-application.js';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, test, vi } from 'vitest';
 import { localWebFixture } from './helpers/local-web-fixture.js';
@@ -283,3 +287,24 @@ test('legacy bindings accept new optional names without changing UUID aggregatio
   await f.service.tick(f.id); expect(f.store.eventCount()).toBe(2);
   expect(f.store.get<{identity:string}>('SELECT identity FROM session_bindings WHERE session_id=?', [root.sessionId])?.identity).not.toContain('Cedar');
 });
+
+function applySyntheticHarness(f:Awaited<ReturnType<typeof fixture>>) {
+  writeFileSync(join(f.project,'procedure.md'),'Synthetic procedure');writeFileSync(join(f.project,'README.md'),'Synthetic prerequisites');
+  const bundle=registerHarness(f.project,{schema_version:1,harness_id:'synthetic',version:'application-v1',policy_version:'synthetic',readme_path:'README.md',artifacts:[{artifact_id:'instruction',role:'instruction',source_path:'procedure.md',target_path:'harness.md'}]}).manifest;
+  requireApplication(f.store,f.id,{origin:f.project,bundlePath:'harness-config/application-v1/manifest.json',bundleHash:bundle.bundle_hash});
+  const coordinator=new ApplicationCoordinator(f.store);const context=coordinator.prepareHandoff(f.id,{workspace:f.project,workspaceDigest:coordinator.workspace(f.id,f.project).digest,product:'codex'});const identity={...f.current(),parentSessionId:null};coordinator.registerIdentity(f.id,context.attempt_id,identity);const [checkpoint]=coordinator.checkpoint(f.id,{attempt_id:context.attempt_id,paths:['AGENTS.md']});writeFileSync(join(f.project,'AGENTS.md'),'Synthetic applied rules');coordinator.report(f.id,{attempt_id:context.attempt_id,bundle_hash:bundle.bundle_hash,outputs:[{path:'AGENTS.md',checkpoint_id:checkpoint!.checkpoint_id,sha256:hashBytes('Synthetic applied rules')}],checks:[{check_id:'synthetic_script',outcome:'passed'}]});f.setTime(new Date(Date.now()+1000).toISOString());f.setCurrent(f.identity());return coordinator;
+}
+
+test('application output drift denies connect before identity or usage access',async()=>{
+  const f=await fixture();applySyntheticHarness(f);writeFileSync(join(f.project,'AGENTS.md'),'Synthetic drift');const resolves=f.resolves(),reads=f.reads();await expect(f.connect()).rejects.toThrow('application_output_changed');expect(f.resolves()).toBe(resolves);expect(f.reads()).toBe(reads);expect(f.store.eventCount()).toBe(0);
+},15000);
+
+test('application drift after a source read discards the batch and binds the durable epoch',async()=>{
+  const f=await fixture();applySyntheticHarness(f);await f.connect();expect(f.store.get('SELECT epoch FROM harness_application_session_epochs WHERE session_id=?',[f.current().sessionId])).toEqual({epoch:1});f.usage(f.current());const original=f.provider.readUsage.bind(f.provider);
+  f.provider.readUsage=async(...args)=>{const result=await original(...args);writeFileSync(join(f.project,'AGENTS.md'),'Synthetic drift after read');return result;};
+  await expect(f.service.tick(f.id)).rejects.toThrow('application_output_changed');expect(f.store.eventCount()).toBe(0);expect(f.store.get<{cursor:string}>('SELECT cursor FROM session_bindings WHERE session_id=?',[f.current().sessionId])?.cursor).toBe('0');expect(f.store.get<{state:string}>('SELECT state FROM tasks WHERE id=?',[f.id])?.state).toBe('paused');expect(f.store.all('SELECT * FROM observation_gaps WHERE task_id=?',[f.id])).not.toHaveLength(0);
+},15000);
+
+test('application deletion with absent private files still forgets bound identities and prevents queued collection',async()=>{
+  const f=await fixture();applySyntheticHarness(f);f.provider.product='claude_code';f.current().product='claude_code';await f.service.connect(f.id,'claude_code',{receipt:randomUUID()});const forgotten:string[]=[];f.provider.forgetSession=async id=>{forgotten.push(id);await Promise.resolve();};rmSync(join(f.project,`.harness-delta/applications/${f.id}`),{recursive:true});new Deletion(f.store).deleteTask(f.id);await f.service.flushForgotten();expect(forgotten).toEqual([f.current().sessionId]);const reads=f.reads();await expect(f.connect()).rejects.toThrow('unknown_task');expect(f.reads()).toBe(reads);expect(f.store.all('SELECT * FROM harness_application_tasks')).toHaveLength(0);expect(f.store.all('SELECT * FROM harness_application_jobs')).toHaveLength(0);
+},15000);

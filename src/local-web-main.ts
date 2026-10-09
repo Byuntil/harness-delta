@@ -2,12 +2,13 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadSharedStartup } from './local-web-shared.js';
 import { Command } from 'commander';
 import { Store } from './store.js';
-import { createLocalWebDomain, readLocalWebManifest } from './local-web-domain.js';
+import { createLocalWebDomain, readLocalWebManifest, readLocalWebSetupDocument } from './local-web-domain.js';
 import { createLocalWebServer, localWebError } from './local-web-server.js';
 
-interface WebCommandOptions { port: string; metadata?: string; setup?: string; pilotTask?: string; pilotObserve?: boolean; pilotUntilStop?: boolean; }
+interface WebCommandOptions { port: string; metadata?: string; setup?: string; setupBindingRevision?: string; pilotTask?: string; pilotObserve?: boolean; pilotUntilStop?: boolean; }
 export async function startLocalWeb(store: Store, options: WebCommandOptions) {
   if((options.pilotObserve||options.pilotUntilStop)&&!options.pilotTask)throw new Error('binding_pilot_scope_invalid');
   const port = Number(options.port);
@@ -17,7 +18,10 @@ export async function startLocalWeb(store: Store, options: WebCommandOptions) {
   mkdirSync(dirname(metadataFile), { recursive: true, mode: 0o700 });
   if (!existsSync(metadataFile)) writeFileSync(metadataFile, '', { flag: 'wx', mode: 0o600 });
   chmodSync(metadataFile, 0o600);
-  const profiles = options.setup ? readLocalWebManifest(resolve(options.setup)).profiles : [];
+  const selected=options.setup?resolve(options.setup):null;
+  const kind=selected?(readLocalWebSetupDocument(selected) as {kind?:unknown}).kind:null;
+  if(options.setupBindingRevision&&kind!=='harness-delta.comparison')throw new Error('invalid_ui_setup');
+  const profiles = selected ? kind==='harness-delta.comparison'?loadSharedStartup(store,selected,options.setupBindingRevision):readLocalWebManifest(selected).profiles : [];
   const domain = createLocalWebDomain({ store, metadataFile, profiles,
     ...(options.pilotTask ? {nativePilot:{taskId:options.pilotTask,observe:options.pilotObserve===true,untilExplicitStop:options.pilotUntilStop===true}} : {}) });
   const origin = `http://127.0.0.1:${port}`;
@@ -38,7 +42,8 @@ export function registerLocalWebCommand(program: Command, store: () => Store, pr
   program.command('ui').description('Open the local browser workflow; no native agent launcher')
     .option('--port <number>', '127.0.0.1 listen port', '4318')
     .option('--metadata <file>', 'private UI metadata database (separate from measurement data)')
-    .option('--setup <file>', 'existing reviewed local UI setup manifest')
+    .option('--setup <file>', 'reviewed local manifest or portable comparison file')
+    .option('--setup-binding-revision <id>', 'explicit private shared setup revision when ambiguous')
     .option('--pilot-task <id>', 'prepare UI for one unverified native Codex or Claude pilot; no source reads')
     .option('--pilot-until-stop', 'collect until explicit pause, completion or revocation; comparison deadline is retained')
     .option('--pilot-observe', 'authorize the exact pilot task receipt sources after installation/source scope review')
@@ -46,7 +51,7 @@ export function registerLocalWebCommand(program: Command, store: () => Store, pr
 }
 export async function localWebMain(argv: string[]): Promise<number> {
   const program = new Command().name('hm-ui').requiredOption('--db <file>', 'measurement Store')
-    .option('--port <number>', '127.0.0.1 listen port', '4318').option('--metadata <file>').option('--setup <file>')
+    .option('--port <number>', '127.0.0.1 listen port', '4318').option('--metadata <file>').option('--setup <file>').option('--setup-binding-revision <id>')
     .option('--pilot-task <id>').option('--pilot-observe').option('--pilot-until-stop');
   program.exitOverride().configureOutput({ writeErr: () => undefined });
   let store: Store | undefined;

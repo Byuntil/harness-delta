@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -76,4 +77,15 @@ test('cancelled picker has no task transition and unknown failures never expose 
     const failed = await f.app.inject({ method: 'POST', url: '/api/tasks/task-1/pause', headers: { ...f.headers, 'idempotency-key': randomUUID() }, payload: {} });
     expect(failed.statusCode).toBe(400); expect(failed.body).not.toContain('SECRET'); expect(failed.body).not.toContain('/Users');
   } finally { await f.app.close(); }
+});
+
+test('application reviews are transient and deleted tasks cannot replay publication responses',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'application-web-')),path=join(root,'ui.sqlite');const f=await fixture(path);
+ try{f.api.applicationReview=()=>({jobId:'synthetic-job',approvalDigest:'a'.repeat(64),changes:[{path:'AGENTS.md',before:null,after:'SYNTHETIC_PRIVATE_REVIEW'}]});
+ const review=await f.app.inject({url:'/api/tasks/task-1/application-review',headers:{host:f.headers.host}});expect(review.statusCode).toBe(200);expect(review.headers['cache-control']).toBe('no-store');expect(review.body).toContain('SYNTHETIC_PRIVATE_REVIEW');
+ const db=new Database(path);try{expect(db.prepare('SELECT * FROM web_actions').all()).toHaveLength(0);
+ const request={method:'POST' as const,url:'/api/tasks/task-1/application-publish',headers:f.headers,payload:{approvalDigest:'a'.repeat(64)}};expect((await f.app.inject(request)).statusCode).toBe(200);expect(JSON.stringify(db.prepare('SELECT * FROM web_actions').all())).not.toContain('SYNTHETIC_PRIVATE_REVIEW');
+ f.api.task=()=>{throw new Error('unknown_task');};expect((await f.app.inject(request)).statusCode).not.toBe(200);expect(f.calls()).toBe(1);
+ }finally{db.close();}
+ }finally{await f.app.close();rmSync(root,{recursive:true,force:true});}
 });

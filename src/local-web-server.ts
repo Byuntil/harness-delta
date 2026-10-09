@@ -1,7 +1,9 @@
+import type { SharedSetupImportResult } from './local-web-shared.js';
+import {ApplicationSelectionSchema,ApplicationCheckpointSchema,ApplicationReportSchema,ApplicationIdentitySchema} from './harness-application-contract.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import Fastify from 'fastify';
+import Fastify, {type FastifyRequest,type FastifyReply} from 'fastify';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 
@@ -17,7 +19,13 @@ export interface LocalWebDomain {
   taskAction(id: string, action: string, input: Record<string, unknown>): Promise<unknown>;
   refreshPrices(): Promise<unknown>;
   chooseDirectory(): Promise<unknown>;
-  importSetup?(): Promise<LocalWebSetupImportResult>;
+  importSetup?(): Promise<LocalWebSetupImportResult | SharedSetupImportResult>;
+  bindSetup?(input:{token:string;project_id:string;template_id:string}):Promise<unknown>;
+  applicationWorkspace?(taskId:string,directory:string):unknown;
+  applicationContext?(taskId:string,attemptId:string):unknown;
+  applicationLaunchContext?(taskId:string,origin:string):unknown;
+  applicationHandoff?(taskId:string,origin:string):unknown;
+  applicationReview?(taskId:string):unknown;
   chooseSession(taskId: string): Promise<unknown>;
   close?(): Promise<void>;
 }
@@ -27,6 +35,11 @@ const empty = z.strictObject({});
 const createInput = z.strictObject({ name: z.string().trim().min(1).max(200), project_id: id, setup_id: id,
   type: z.enum(['feature', 'fix', 'infra', 'chore', 'docs', 'ci']).optional(), size: z.enum(['small', 'medium', 'large']).optional() });
 const actionSchemas = {
+ 'application-prepare':ApplicationSelectionSchema,'application-open':empty,'application-checkpoint':ApplicationCheckpointSchema,'application-report':ApplicationReportSchema,'application-identity':ApplicationIdentitySchema,
+  'application-start':z.strictObject({workspace:z.string().min(1).max(4096),inputPaths:z.array(z.string().min(1).max(2048)).max(256),outputPaths:z.array(z.string().min(1).max(2048)).min(1).max(256),runner:z.enum(['codex','claude_code','synthetic']),workspaceDigest:z.string().regex(/^[a-f0-9]{64}$/)}),
+  'application-execute':z.strictObject({proposalDigest:z.string().regex(/^[a-f0-9]{64}$/)}),
+  'application-permission-decide':z.strictObject({requestToken:z.uuid(),decision:z.enum(['approve_once','reject_and_stop'])}),
+  'application-recover':empty,'application-cancel':empty,'application-publish':z.strictObject({approvalDigest:z.string().regex(/^[a-f0-9]{64}$/)}),
   prepare: empty, apply: empty, ticket: empty, connect: z.strictObject({ source_handle: id }),
   'session-connect': z.strictObject({ product: z.enum(['codex','claude_code']), receipt: z.uuid() }),
   observe: empty, pause: empty, 'revoke-collection': empty, 'resume-binding': empty, 'emergency-stop': empty, rework: empty, recover: empty,
@@ -34,7 +47,7 @@ const actionSchemas = {
   'finish-failed': empty, 'finish-abandoned': empty,
   release: z.strictObject({ external_session_stopped: z.literal(true) }),
 };
-const safeCodes = new Set(['unknown_task', 'unknown_project', 'unknown_setup', 'invalid_transition', 'task_not_assigned',
+const safeCodes = new Set(['application_cleanup_pending','application_managed_retired','application_attempt_stale','application_product_mismatch','application_checkpoint_invalid','application_report_conflict','application_checks_incomplete','application_identity_unavailable','application_setup_session_excluded','application_fresh_session_required','application_epoch_changed','application_launch_unavailable','application_restart_interrupted','application_abandoned','application_execution_approval_required','application_execution_changed','application_preparation_failed','application_permission_stale','application_permission_decision_invalid','application_permission_outside_ceiling','application_permission_accept_unqualified','application_permission_transport_failed','application_termination_unverified','application_integrity_unverified','application_recovery_required','application_surface_unowned','application_publication_unqualified','application_required','application_confinement_unverified','application_source_unqualified','application_native_loading_unqualified','application_output_changed','application_input_changed','application_review_changed','application_preimage_changed','application_planning_failed','application_workspace_changed','application_workspace_mismatch','application_path_forbidden','application_preview_changed','application_scope_invalid','application_job_active','application_review_required','shared_preview_changed','shared_reference_invalid','invalid_shared_config','shared_path_invalid','shared_content_mismatch','shared_file_unavailable','shared_settings_conflict','shared_registration_required','shared_registration_mismatch','shared_project_required','shared_binding_required','shared_binding_selection_required','shared_binding_changed','shared_tool_mismatch','shared_import_expired','shared_import_limit','unknown_task', 'unknown_project', 'unknown_setup', 'invalid_transition', 'task_not_assigned',
   'external_preparation_required', 'external_source_unsupported', 'external_operation_unsupported', 'external_surface_busy',
   'external_configuration_drift', 'external_stop_acknowledgement_required', 'external_preimage_unapproved', 'external_common_drift',
   'workflow_run_active', 'workflow_scope_revoked', 'native_source_unqualified', 'external_ticket_required', 'external_ticket_expired',
@@ -89,6 +102,12 @@ export function createLocalWebServer(options: LocalWebOptions) {
     const oversized = error instanceof Error && 'statusCode' in error && error.statusCode === 413;
     await reply.code(oversized ? 413 : 400).send({ error: oversized ? 'request_too_large' : localWebError(error) });
   });
+  app.get<{Params:{id:string};Querystring:{directory:string}}>('/api/tasks/:id/application-workspace',(request)=>{const taskId=id.parse(request.params.id);options.domain.task(taskId);if(!options.domain.applicationWorkspace)throw new Error('application_required');return options.domain.applicationWorkspace(taskId,z.string().min(1).max(4096).parse(request.query.directory));});
+  app.get<{Params:{id:string};Querystring:{attempt:string}}>('/api/tasks/:id/application-context',request=>{const taskId=id.parse(request.params.id);options.domain.task(taskId);if(!options.domain.applicationContext)throw new Error('application_required');return options.domain.applicationContext(taskId,z.uuid().parse(request.query.attempt));});
+  app.get<{Params:{id:string}}>('/api/tasks/:id/application-launch-context',request=>{const taskId=id.parse(request.params.id);options.domain.task(taskId);if(!options.domain.applicationLaunchContext)throw new Error('application_required');return options.domain.applicationLaunchContext(taskId,options.origin);});
+  app.get<{Params:{id:string}}>('/api/tasks/:id/application-handoff',request=>{const taskId=id.parse(request.params.id);options.domain.task(taskId);if(!options.domain.applicationHandoff)throw new Error('application_required');return options.domain.applicationHandoff(taskId,options.origin);});
+  for(const retired of ['application-execution-proposal','application-permission'])app.get(`/api/tasks/:id/${retired}`,()=>{throw new Error('application_managed_retired');});
+  app.get<{Params:{id:string}}>('/api/tasks/:id/application-review',(request)=>{const taskId=id.parse(request.params.id);options.domain.task(taskId);if(!options.domain.applicationReview)throw new Error('application_required');return options.domain.applicationReview(taskId);});
   app.get('/api/bootstrap', async () => ({ csrf, data: await options.domain.bootstrap() }));
   app.get<{ Params: { id: string } }>('/api/tasks/:id', (request, reply) => {
     const task = options.domain.task(id.parse(request.params.id)); reply.header('ETag', task.version); return task;
@@ -128,20 +147,23 @@ export function createLocalWebServer(options: LocalWebOptions) {
     async input => options.domain.registerProject((input as { directory: string }).directory));
   addMutation('/api/project-picker', empty, async () => ({ selection: await options.domain.chooseDirectory() }));
   addMutation('/api/setup-picker', empty, async () => { if (!options.domain.importSetup) throw new Error('invalid_ui_setup'); return options.domain.importSetup(); });
+  addMutation('/api/setup-bind', z.strictObject({token:z.uuid(),project_id:id,template_id:id}), async input => {if(!options.domain.bindSetup)throw new Error('invalid_ui_setup');return options.domain.bindSetup(input as {token:string;project_id:string;template_id:string});});
   addMutation('/api/tasks', createInput, async input => options.domain.createTask(createInput.parse(input)));
   addMutation('/api/catalog/refresh', empty, async () => options.domain.refreshPrices());
-  app.post<{ Params: { id: string; action: string } }>('/api/tasks/:id/:action', async (request, reply) => {
-    const taskId = id.parse(request.params.id); const action = request.params.action;
+  const taskMutation=async(request:FastifyRequest<{Params:{id:string;action?:string}}>,reply:FastifyReply,action:string)=>{
+    const taskId = id.parse(request.params.id);
     const schema = action === 'session-picker' ? empty : actionSchemas[action as keyof typeof actionSchemas];
     if (!schema) throw new Error('invalid_ui_request');
     try {
       const value = await mutation(request, input => schema.parse(input), async input => action === 'session-picker'
-        ? { selection: await options.domain.chooseSession(taskId) } : options.domain.taskAction(taskId, action, input as Record<string, unknown>), taskId);
+        ? { selection: await options.domain.chooseSession(taskId) } : options.domain.taskAction(taskId, action, action==='application-open'?{origin:options.origin}:input as Record<string, unknown>), taskId);
       await reply.code(value.status).send(value.result);
     } catch (error) {
       const code = localWebError(error); await reply.code(['ui_state_changed', 'ui_action_conflict', 'ui_action_uncertain'].includes(code) ? 409 : 400).send({ error: code });
     }
-  });
+  };
+  for(const action of ['application-checkpoint','application-report'])app.post<{Params:{id:string}}>(`/api/tasks/:id/${action}`,{bodyLimit:1048576},async(request,reply)=>taskMutation(request,reply,action));
+  app.post<{Params:{id:string;action:string}}>('/api/tasks/:id/:action',async(request,reply)=>taskMutation(request,reply,request.params.action));
   if (options.uiRoot) {
     const root = realpathSync(options.uiRoot);
     app.get('/', (_request, reply) => { reply.type('text/html'); return readFileSync(join(root, 'index.html')); });

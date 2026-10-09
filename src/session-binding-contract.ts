@@ -51,6 +51,8 @@ export interface BindingReadBoundary { baseline: boolean }
 export interface SessionBindingProvider {
   product: BindingProduct;
   capabilities(): BindingCapabilities;
+  /** Root application identity from metadata only; no transcript content access. */
+  resolveApplicationIdentity?(input: CurrentIdentityRequest): Promise<VerifiedSessionIdentity>;
   resolveCurrent(input: CurrentIdentityRequest): Promise<VerifiedSessionIdentity>;
   /** Revalidate a persisted live root; never authorizes a new binding. */
   revalidateBound?(input: CurrentIdentityRequest, expected: VerifiedSessionIdentity): Promise<VerifiedSessionIdentity>;

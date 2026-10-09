@@ -1,3 +1,4 @@
+import { applicationRequired, assertAppliedHarness } from './harness-application.js';
 import { resolveSourceCompatibility, effectiveSourceCompatibility } from './source-compatibility.js';
 import { z } from 'zod';
 import { assignTask } from './allocation.js';
@@ -18,6 +19,7 @@ import { isHumanPilotProtocol } from './session-binding-human-pilot.js';
 
 const artifactSchema = z.strictObject({ artifact_id: IdSchema, path: z.string().min(1).max(4096) });
 export const AssignedWorkflowInputSchema = z.strictObject({ schema_version: z.literal(1),
+  application: z.strictObject({schema_version:z.literal(2),mode:z.literal('agent_applied'),origin:z.string(),bundles:z.array(z.strictObject({variant_id:IdSchema,path:z.string(),bundle_hash:z.string().regex(/^[a-f0-9]{64}$/)})).length(2)}).optional(),
   assignment: FlexibleAssignmentInputSchema, product_version: ProductVersionSchema, confirmation_id: IdSchema,
   artifacts: z.array(z.strictObject({ variant_id: IdSchema, selected_artifacts: z.array(artifactSchema).min(1).max(256) })).length(2)
     .refine(rows => new Set(rows.map(row => row.variant_id)).size === rows.length) });
@@ -97,6 +99,7 @@ export function prepareAssignedWorkflow(store: Store, input: unknown, runtimeInp
 
 function prepareWorkflow(store: Store, input: unknown, runtimeInput: unknown, clock: Clock, activate: boolean) {
   const config = parseComparison(AssignedWorkflowInputSchema, input, 'invalid_workflow_input');
+  if(activate && (config.application || applicationRequired(store,config.assignment.task_id)))assertAppliedHarness(store,config.assignment.task_id);
   const runtime = parseComparison(WorkflowRuntimeSchema, runtimeInput, 'invalid_workflow_runtime');
   const now = clock(); const requested = checkReadiness(store, config.assignment.protocol_id, now, !activate);
   if (config.artifacts.some(row => !requested.variant_ids.includes(row.variant_id)) ||
@@ -134,7 +137,7 @@ function prepareWorkflow(store: Store, input: unknown, runtimeInput: unknown, cl
   const current = life.task(assignment.task_id);
   return { receipt: { ...assignment, confirmation_id: config.confirmation_id, generation: current.generation,
     state: current.state, instruction_manifest_hash: snapshot.hash, harness_application: 'prepared_only' as const,
-    complete_cost: null, inference: false }, instructions: snapshot.instructions, activated };
+    complete_cost: null, inference: false }, instructions: config.application ? [] : snapshot.instructions, activated };
 }
 
 /** No native calls occur unless a matching code-owned real source qualifies.
@@ -145,6 +148,7 @@ export async function runAssignedWorkflow(store: Store, input: unknown, adapter:
   const config = parseComparison(AssignedWorkflowInputSchema, input, 'invalid_workflow_input');
   const existingTaskId=store.get<{task_id:string}>('SELECT task_id FROM comparison_identity_keys WHERE project_id=? AND key_id=?',[config.assignment.project_id,config.assignment.logical_task_id])?.task_id??config.assignment.task_id;
   if (externalContract(store,existingTaskId) && adapter.externalContractCoordinator !== true) throw new Error('timing_contract_mismatch');
+  if(config.application || applicationRequired(store,existingTaskId))throw new Error('application_source_unqualified');
   const runtime = parseComparison(WorkflowRuntimeSchema, runtimeInput, 'invalid_workflow_runtime');
   const protocol = checkReadiness(store, config.assignment.protocol_id, clock());
   const registry = protocol.purpose !== 'synthetic_validation' ? productionSourceEvidence : syntheticSourceEvidence;

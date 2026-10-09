@@ -1,5 +1,12 @@
 import type { ChildReadinessObservation } from './binding-child-readiness.js';
 import { appendFamilyDiagnostic, takeFamilyDiagnostic } from './binding-family-diagnostics.js';
+import {ApplicationSelectionSchema,ApplicationCheckpointSchema,ApplicationReportSchema,ApplicationIdentitySchema} from './harness-application-contract.js';
+import {getApplicationLaunchCapability} from './harness-application-launch.js';
+import { ApplicationCoordinator, applicationRequired, effectiveTaskWorkspace } from './harness-application.js';
+
+import { SharedBindingSchema, assertSharedTask } from './local-web-shared-guard.js';
+import { createSharedSetupManager } from './local-web-shared.js';
+import { externalContract } from './external-session-contract.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { constants, closeSync, fstatSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
@@ -37,6 +44,7 @@ export const LocalWebProfileSchema = z.strictObject({
   execution: z.strictObject({ binary: executionFields.binary, codex_home: executionFields.codex_home,
     hook_recorder: executionFields.hook_recorder, sandbox: executionFields.sandbox,
     timeout_ms: executionFields.timeout_ms, poll_ms: executionFields.poll_ms }),
+  shared_binding: SharedBindingSchema.optional(),
   session_binding: z.discriminatedUnion('product', [
     z.strictObject({ product: z.literal('codex'), receipt_directory: z.string().min(1), source_roots: z.array(z.string().min(1)).min(1).max(16), project_root: z.string().min(1) }),
     z.strictObject({ product: z.literal('claude_code'), receipt_directory: z.string().min(1), claude_projects_directory: z.string().min(1) }),
@@ -71,14 +79,15 @@ export async function nativeLocalPicker(kind: 'project' | 'session' | 'setup'): 
   try { const result = await runFile('/usr/bin/osascript', ['-e', script], { timeout: 120000, maxBuffer: 8192 }); return result.stdout.trim() || null; }
   catch (error) { if (error instanceof Error && 'stderr' in error && String(error.stderr).includes('(-128)')) return null; throw new Error('picker_unavailable', { cause: error }); }
 }
-export function readLocalWebManifest(path: string) {
+export function readLocalWebSetupDocument(path: string): unknown {
   let fd: number | undefined;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = fstatSync(fd); if (!stat.isFile() || stat.size > 1048576) throw new Error('invalid_ui_setup');
-    return LocalWebManifestSchema.parse(JSON.parse(readFileSync(fd, 'utf8')) as unknown);
+    return JSON.parse(readFileSync(fd, 'utf8')) as unknown;
   } finally { if (fd !== undefined) closeSync(fd); }
 }
+export function readLocalWebManifest(path: string) { return LocalWebManifestSchema.parse(readLocalWebSetupDocument(path)); }
 /** Reads the current commit; it never creates a commit or changes the checkout. */
 export function projectBaseline(directory: string): string {
   try {
@@ -113,10 +122,14 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
   })();
   saveProfiles(options.profiles ?? []);
   const profiles = () => (privateDb.prepare('SELECT payload FROM web_profiles ORDER BY rowid').all() as { payload: string }[]).map(p => LocalWebProfileSchema.parse(JSON.parse(p.payload) as unknown));
+  const applications=new ApplicationCoordinator(store,()=>[options.metadataFile,...profiles().flatMap(profile=>[profile.execution.codex_home,...(profile.session_binding?.product==='codex'?[profile.session_binding.receipt_directory,...profile.session_binding.source_roots]:profile.session_binding?[profile.session_binding.receipt_directory,profile.session_binding.claude_projects_directory]:[])])]);
+  const sharedSetups = createSharedSetupManager(store, privateDb, profiles, saveProfiles);
   const row = (id: string) => {
-    life.task(id); // Deletion/CLI changes always win over the private cache.
     const result = privateDb.prepare('SELECT * FROM web_tasks WHERE id=?').get(id) as PrivateTask | undefined;
-    if (!result) throw new Error('unknown_task'); return result;
+    if (!result) throw new Error('unknown_task');
+    if(store.get("SELECT 1 FROM tombstones WHERE kind='task' AND id=?",[id]))throw new Error('unknown_task');
+    if(!store.get('SELECT id FROM tasks WHERE id=?',[id])){const setup=ExternalTaskSetupSchema.parse(JSON.parse(result.setup) as unknown);if(!profileFor(result.profile_id).shared_binding||!store.get('SELECT id FROM projects WHERE id=?',[setup.workflow.assignment.project_id]))throw new Error('unknown_task');}
+    return result;
   };
   const setupFor = (task: PrivateTask) => ExternalTaskSetupSchema.parse(JSON.parse(task.setup) as unknown);
   const profileFor = (id: string) => { const result = profiles().find(p => p.id === id); if (!result) throw new Error('unknown_setup'); return result; };
@@ -125,12 +138,17 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     ...profileFor(task.profile_id).execution, run_id: randomUUID(), operation, session_id: source.session_id, source_path: source.path,
   });
   const running = (id: string) => store.all<{ id: string; stop_requested: number }>("SELECT id,stop_requested FROM codex_workflow_runs WHERE task_id=? AND state='running'", [id]);
+  for (const record of privateDb.prepare('SELECT * FROM web_tasks').all() as PrivateTask[]) {
+    if(store.get("SELECT 1 FROM tombstones WHERE kind='task' AND id=?",[record.id]))continue;
+    const profile=profileFor(record.profile_id);if(!profile.shared_binding)continue;
+    try{const pins=sharedSetups.journalTask(profile,record.id,true)!;store.execute('INSERT OR IGNORE INTO shared_configuration_tasks(task_id,project_id,settings_hash,setup_hash) VALUES(?,?,?,?)',[record.id,setupFor(record).workflow.assignment.project_id,pins.settingsHash,pins.setupHash]);}
+    catch{privateDb.prepare('UPDATE web_tasks SET reason=? WHERE id=?').run('shared_binding_changed',record.id);}
+  }
   const providers = new Map<string, SessionBindingProvider[]>();
   const providersForTask = (id: string, deletedProjectRoot?: string): SessionBindingProvider[] => {
       if (options.bindingProviders) return options.bindingProviders;
       if (providers.has(id)) return providers.get(id)!;
-      const task = deletedProjectRoot ? undefined : life.task(id);
-      const projectRoot = deletedProjectRoot ?? store.get<{local_root: string}>('SELECT local_root FROM projects WHERE id=?', [task!.project_id])?.local_root;
+      const projectRoot = deletedProjectRoot ?? effectiveTaskWorkspace(store,id);
       if (!projectRoot) throw new Error('binding_scope_mismatch');
       if (options.bindingProviderFactory) {
         const result = options.bindingProviderFactory(id, projectRoot); providers.set(id, result); return result;
@@ -139,7 +157,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       if (!record) return [];
       const config = profileFor(record.profile_id).session_binding;
       if (!config) return [];
-      if (config.product === 'codex' && config.project_root !== projectRoot) throw new Error('binding_scope_mismatch');
+      if (config.product === 'codex' && !applicationRequired(store,id) && config.project_root !== projectRoot) throw new Error('binding_scope_mismatch');
       const result = config.product === 'codex'
         ? [new CodexSessionBindingProvider({ receiptDirectory: config.receipt_directory, sourceRoots: config.source_roots, projectRoot, ...(options.qualificationLease || options.nativePilot ? {maxDepth:1,maxFamilyMembers:3} : {}) })]
         : [new ClaudeSessionBindingProvider({ receiptDir: config.receipt_directory, claudeProjectsDir: config.claude_projects_directory, projectRoot, ...(options.nativePilot ? { allowCandidateProfiles: true, maxFamilyMembers: 3, authorizeSource: source => { if (!humanPilot || options.nativePilot?.taskId !== id) throw new Error('binding_source_unqualified'); assertClaudeHumanPilotSource(humanPilot, store, id, source); } } : {}) })];
@@ -188,7 +206,20 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     })();
   };
   const taskDto = (id: string) => {
-    const record = row(id); const setup = setupFor(record); const state = externalTaskState(store, id); const task = life.task(id);
+    const record = row(id); const setup = setupFor(record); const task = store.get('SELECT id FROM tasks WHERE id=?',[id])?life.task(id):{id,project_id:setup.workflow.assignment.project_id,state:'registered' as const};
+    if (!externalContract(store,id) || (task.state!=='finalized' && record.reason?.startsWith('shared_') && externalContract(store,id)?.started_at===null)) {
+      const assignment=store.get<{variant_id:string}>('SELECT variant_id FROM comparison_assignments WHERE task_id=?',[id]);
+      const reason=record.reason??'external_preparation_required';
+      const nativeApplication=!!setup.workflow.application;
+      const blockedApplication=nativeApplication?{state:'blocked_configuration',jobId:null,epoch:0,reason,workspace:null,launchState:'not_requested',identity:'unavailable',capabilities:[getApplicationLaunchCapability('codex'),getApplicationLaunchCapability('claude_code')],baseline:setup.workflow.assignment.code_base_commit}:undefined;
+      return {id,name:record.name,project_id:task.project_id,setup_id:record.profile_id,version:'"'+createHash('sha256').update(JSON.stringify({task,record})).digest('hex')+'"',state:task.state,status:'blocked_configuration',...(blockedApplication?{application:blockedApplication}:{}),
+        measurement:{state:'waiting_connection',active_ms:null,requests:null,window:{started_at:null,ends_at:null}},outcome:null,attempt:1,
+        preparation:{state:'blocked_configuration',configuration_evidence:'unverified',native_context_evidence:'unverified',freshness_evidence:'unverified',tool_use_evidence:'unavailable',assigned_variant_id:assignment?.variant_id??null},
+        price:{partial_amount:null,currency:'USD',unpriced_events:0,basis:null},criteria:setup.workflow.assignment.metadata.criterion_ids,startup:null,source:null,reason,
+        actions:[{code:'prepare',enabled:task.state!=='finalized',reason:null},...(!nativeApplication?[{code:'apply',enabled:task.state!=='finalized',reason:null}]:[])]};
+    }
+    const application=applicationRequired(store,id)?{...applications.status(id),capabilities:[getApplicationLaunchCapability('codex'),getApplicationLaunchCapability('claude_code')],baseline:setup.workflow.assignment.code_base_commit}:undefined;
+    const state = externalTaskState(store, id);
     const result = externalTaskResult(store, id); const runs = running(id); const active = runs.length > 0 || jobs.has(id);
     const finalized = task.state === 'finalized'; const connected = state.window.started_at !== null;
     const supported = setup.workflow.assignment.metadata.product !== 'claude_code';
@@ -210,6 +241,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     const canFinish = !finalized && (!active || explicitStop && binding.roots > 0) && !ownedNativeLive && connected;
     const qualificationActions=new Set(['session-connect','pause','resume-binding','emergency-stop']);
     const actions = [
+      ...(application?[action('application-prepare',!finalized&&!active&&['awaiting_application','failed','abandoned'].includes(application.state),'application_required'),action('application-open',!finalized&&!active&&application.state==='awaiting_session','application_required'),action('application-cancel',!finalized&&!active&&!!application.jobId&&['awaiting_session','applying','applied','failed'].includes(application.state),'application_required')]:[]),
       action('apply', !finalized && !active && !ready, finalized ? 'finalized' : active ? 'workflow_run_active' : 'configuration_ready'),
       action('ticket', !finalized && !active && ready && state.window_status !== 'closed' && supported, !supported ? 'external_collection_unsupported' : finalized ? 'finalized' : active ? 'workflow_run_active' : 'external_preparation_required'),
       action('connect', !finalized && !active && startup !== null && ready && state.window_status !== 'closed' && supported, !supported ? 'external_collection_unsupported' : active ? 'workflow_run_active' : 'external_ticket_required'),
@@ -225,11 +257,11 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       action('finish-abandoned', canFinish, reason),
       action('recover', runs.length > 0 && !jobs.has(id), 'inactive_observation'),
       action('release', !active && state.state !== 'released', 'workflow_run_active'),
-    ].map(a=>options.qualificationLease&&!qualificationActions.has(a.code)?{...a,enabled:false,reason:'binding_qualification_control_only'}:options.nativePilot&&(id!==options.nativePilot.taskId||!['apply','pause','revoke-collection','session-connect','resume-binding','finish-success','finish-failed','finish-abandoned','release'].includes(a.code))?{...a,enabled:false,reason:'binding_pilot_control_only'}:a);
-    const version = '"' + createHash('sha256').update(JSON.stringify({ task, control: { revision: state.revision, window: state.window, configuration_evidence: state.configuration_evidence }, record, collectionControl:bindingCollectionControl(store,id), runs, ownJob: jobs.has(id) })).digest('hex') + '"';
+    ].map(a=>application&&['apply','ticket','connect'].includes(a.code)?{...a,enabled:false,reason:'application_native_loading_unqualified'}:a).map(a=>options.qualificationLease&&!qualificationActions.has(a.code)?{...a,enabled:false,reason:'binding_qualification_control_only'}:options.nativePilot&&(id!==options.nativePilot.taskId||!['apply','pause','revoke-collection','session-connect','resume-binding','finish-success','finish-failed','finish-abandoned','release'].includes(a.code))?{...a,enabled:false,reason:'binding_pilot_control_only'}:a);
+    const version = '"' + createHash('sha256').update(JSON.stringify({ task, application, control: { revision: state.revision, window: state.window, configuration_evidence: state.configuration_evidence }, record, collectionControl:bindingCollectionControl(store,id), runs, ownJob: jobs.has(id) })).digest('hex') + '"';
     const measurementState = finalized ? 'measurement_ended' : active ? (state.state === 'measuring' ? 'active' : 'starting') : task.state === 'active' ? 'connected' : connected ? 'paused' : 'waiting_connection';
     const status = state.outcome ?? (measurementState === 'waiting_connection' ? 'draft' : measurementState);
-    return { id, name: record.name, project_id: task.project_id, setup_id: record.profile_id, version, state: task.state, status,
+    return { id, name: record.name, project_id: task.project_id, setup_id: record.profile_id, version, ...(application?{application}:{}), state: task.state, status,
       measurement: { state: measurementState, active_ms: result.time.active_ms, requests: result.cost?.event_count ?? null, window: state.window, end_condition: state.collection_end_condition },
       outcome: state.outcome === null ? null : { status: state.outcome, assessed_at: result.outcome_at! }, attempt: state.rework_count + 1,
       preparation: { state: state.state, configuration_evidence: state.configuration_evidence, native_context_evidence: state.native_context_evidence,
@@ -252,10 +284,11 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
         const protocol = comparisonProtocol(store, protocolRow(store, p.setup.workflow.assignment.protocol_id));
         const strata = protocol.strata.filter(s => s.assignees.includes(p.setup.workflow.assignment.metadata.assignee));
         return { id: p.id, name: p.name, project_id: p.setup.workflow.assignment.project_id, arm_a: protocol.variant_ids[0], arm_b: protocol.variant_ids[1],
+          ...(p.shared_binding?{shared:{revision_id:p.id,template_id:p.shared_binding.template_id,template_name:profiles().find(row=>row.id===p.shared_binding!.template_id)?.name??p.shared_binding.template_id,runtime:p.setup.runtime}}:{}),
           types: [...new Set(strata.flatMap(s => s.types))], sizes: [...new Set(strata.flatMap(s => s.sizes))], support: p.session_binding ? `${p.session_binding.product} ordinary-session family binding: native qualification pending` : 'Codex 0.160.0 CLI root only; actual tool use unavailable' };
       });
       const tasks = (privateDb.prepare('SELECT id FROM web_tasks ORDER BY rowid DESC').all() as { id: string }[])
-        .filter(t => store.get('SELECT 1 FROM tasks WHERE id=?', [t.id])).map(t => taskDto(t.id));
+        .flatMap(t => {try{return [taskDto(t.id)];}catch{return [];}});
       return { projects, setups, tasks, catalog: readOnlinePriceCatalogStatus(store) };
     },
     task: taskDto,
@@ -276,6 +309,16 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       const setup: ExternalTaskSetup = { ...base, workflow: { ...base.workflow, assignment: { ...base.workflow.assignment,
         code_base_commit: projectBaseline(existing.local_root), metadata: { ...base.workflow.assignment.metadata,
           ...(input.type ? { type: input.type } : {}), ...(input.size ? { expected_size: input.size } : {}) } } } };
+      if (profile.shared_binding) {
+        sharedSetups.assertProfile(profile);
+        const id=randomUUID();const reserved:ExternalTaskSetup={...setup,workflow:{...setup.workflow,confirmation_id:randomUUID(),assignment:{...setup.workflow.assignment,task_id:id,logical_task_id:randomUUID(),alias_ids:[randomUUID()]}}};
+        const pins=sharedSetups.journalTask(profile,id)!;
+        privateDb.prepare('INSERT INTO web_tasks(id,name,profile_id,setup,reason) VALUES (?,?,?,?,?)').run(id,input.name,profile.id,JSON.stringify(reserved),'shared_preparation_pending');
+        store.execute('INSERT INTO shared_configuration_tasks(task_id,project_id,settings_hash,setup_hash) VALUES(?,?,?,?)',[id,input.project_id,pins.settingsHash,pins.setupHash]);
+        try {prepareExternalTask(store,reserved,false);assertSharedTask(store,id,undefined,true);privateDb.prepare('UPDATE web_tasks SET reason=NULL WHERE id=?').run(id);if(profile.session_binding)registerBindingCollectionControl(store,id);}
+        catch(error){privateDb.prepare('UPDATE web_tasks SET reason=? WHERE id=?').run(localWebError(error),id);}
+        return Promise.resolve(taskDto(id));
+      }
       const created = createExternalTask(store, setup, false); const id = created.state.task_id;
       if (profile.session_binding) registerBindingCollectionControl(store,id);
       privateDb.prepare('INSERT INTO web_tasks(id,name,profile_id,setup) VALUES (?,?,?,?)').run(id, input.name, profile.id, JSON.stringify(created.setup));
@@ -284,7 +327,15 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     async chooseDirectory() { if(options.nativePilot)throw new Error('binding_pilot_control_only');
       if(options.qualificationLease)throw new Error('binding_qualification_control_only'); return picker('project'); },
     async importSetup() { if(options.nativePilot)throw new Error('binding_pilot_control_only');
-      if(options.qualificationLease)throw new Error('binding_qualification_control_only'); const path = await picker('setup'); if (path === null) return { cancelled: true }; const saved = saveProfiles(readLocalWebManifest(path).profiles); return { imported: true, added_count: saved.addedCount, existing_count: saved.existingCount }; },
+      if(options.qualificationLease)throw new Error('binding_qualification_control_only'); const path = await picker('setup'); if (path === null) return { cancelled: true };
+      const raw=readLocalWebSetupDocument(path) as {kind?:unknown};if(raw.kind==='harness-delta.comparison')return sharedSetups.preview(path);
+      const saved=saveProfiles(readLocalWebManifest(path).profiles);return {imported:true,added_count:saved.addedCount,existing_count:saved.existingCount}; },
+    bindSetup(input) { if(options.nativePilot)throw new Error('binding_pilot_control_only');if(options.qualificationLease)throw new Error('binding_qualification_control_only');return Promise.resolve(sharedSetups.bind(input)); },
+    applicationWorkspace(taskId,directory){row(taskId);return applications.workspace(taskId,directory);},
+    applicationContext(taskId,attemptId){row(taskId);return applications.context(taskId,attemptId);},
+    applicationLaunchContext(taskId,origin){row(taskId);return applications.launchContext(taskId,origin);},
+    applicationHandoff(taskId,origin){row(taskId);return applications.handoff(taskId,origin);},
+    applicationReview(taskId){row(taskId);return applications.review(taskId);},
     async chooseSession(taskId) {
       if(options.nativePilot)throw new Error('binding_pilot_control_only');
       if(options.qualificationLease)throw new Error('binding_qualification_control_only');
@@ -300,8 +351,28 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       if(options.nativePilot&&(id!==options.nativePilot.taskId||!['prepare','apply','session-connect','pause','revoke-collection','resume-binding','finish-success','finish-failed','finish-abandoned','release'].includes(action)))throw new Error('binding_pilot_control_only');
       if(options.qualificationLease&&(id!==store.get<{task_id:string}>('SELECT task_id FROM binding_qualification WHERE singleton=1')?.task_id||!['session-connect','pause','resume-binding','emergency-stop'].includes(action)))throw new Error('binding_qualification_control_only');
       const record = row(id); const setup = setupFor(record);
-      if (action === 'prepare' || action === 'apply') prepareExternalTask(store, setup, action === 'apply');
-      else if (action === 'ticket') {
+      if(['application-start','application-execute','application-permission-decide','application-recover','application-publish'].includes(action))throw new Error('application_managed_retired');
+      if(action==='application-prepare'){providers.delete(id);applications.prepareHandoff(id,ApplicationSelectionSchema.parse(input));return taskDto(id);}
+      if(action==='application-open'){await applications.open(id,z.string().parse(input.origin));return taskDto(id);}
+      if(action==='application-checkpoint')return applications.checkpoint(id,ApplicationCheckpointSchema.parse(input));
+      if(action==='application-report'){applications.report(id,ApplicationReportSchema.parse(input));return taskDto(id);}
+      if(action==='application-identity'){const request=ApplicationIdentitySchema.parse(input);applications.context(id,request.attempt_id);const provider=providersForTask(id).find(p=>p.product===request.product);if(!provider?.resolveApplicationIdentity||provider.capabilities().currentIdentity==='unavailable')throw new Error('application_identity_unavailable');const identity=await provider.resolveApplicationIdentity({receipt:request.receipt});return applications.registerIdentity(id,request.attempt_id,identity);}
+      if(action==='application-cancel'){applications.cancel(id);return taskDto(id);}
+
+      if (action === 'prepare' || action === 'apply') {
+        if(action==='apply'&&setup.workflow.application)throw new Error('application_required');
+        if(applicationRequired(store,id)){if(action==='apply')throw new Error('application_required');assertSharedTask(store,id,undefined,true);return taskDto(id);}
+        const profile=profileFor(record.profile_id);sharedSetups.assertProfile(profile);
+        if(store.get('SELECT id FROM tasks WHERE id=?',[id]))assertSharedTask(store,id);
+        if(profile.shared_binding){const pins=sharedSetups.journalTask(profile,id,true)!;store.execute('INSERT OR IGNORE INTO shared_configuration_tasks(task_id,project_id,settings_hash,setup_hash) VALUES(?,?,?,?)',[id,setup.workflow.assignment.project_id,pins.settingsHash,pins.setupHash]);}
+        try{prepareExternalTask(store, setup, action === 'apply');assertSharedTask(store,id,undefined,!!setup.workflow.application);if(profile.session_binding)registerBindingCollectionControl(store,id);privateDb.prepare('UPDATE web_tasks SET reason=NULL WHERE id=?').run(id);}
+        catch(error){privateDb.prepare('UPDATE web_tasks SET reason=? WHERE id=?').run(localWebError(error),id);throw error;}
+      }
+      else if (profileFor(record.profile_id).shared_binding && !['pause','release','finish-success','finish-failed','finish-abandoned','rework','recover','revoke-collection'].includes(action)) { assertSharedTask(store,id); return guardedAction(); }
+      else return guardedAction();
+      return taskDto(id);
+      async function guardedAction() {
+      if (action === 'ticket') {
         const ticket = issueExternalStartTicket(store, setup);
         privateDb.prepare('UPDATE web_tasks SET startup=?,reason=NULL WHERE id=?').run(JSON.stringify({ ticket_id: ticket.ticket_id, start_command: ticket.start_command }), id);
       } else if (action === 'connect') {
@@ -364,10 +435,11 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
         recordExternalTaskOutcome(store, id, choice, choice === 'success' ? z.array(identifier).parse(input.criteria ?? setup.workflow.assignment.metadata.criterion_ids) : []);
       } else throw new Error('invalid_ui_request');
       return taskDto(id);
+      }
     },
     async refreshPrices() { if(options.nativePilot)throw new Error('binding_pilot_control_only');
       if(options.qualificationLease)throw new Error('binding_qualification_control_only'); return refreshOnlinePriceCatalog(store); },
-    async close() {
+    async close() { applications.close();
       if(options.qualificationLease)revokeBindingQualification(options.qualificationLease);
       let failure:unknown;const pending=[...jobs.entries()];
       for(const [id,job] of pending){

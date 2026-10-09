@@ -1,0 +1,241 @@
+# Portable harness configuration
+
+[한국어](harness-config.ko.md)
+
+## 1. Prepare selected files
+
+Use Node 24 and a built Harness Delta checkout:
+
+```sh
+npm ci
+npm run build
+```
+
+In the target project, select existing Markdown instructions and only the related
+files you intend to pin. Prepare `harness-notes.md`: purpose, project-root manual
+application, dependencies, selected-file limits and manual verification. Tool
+commands remain manual. Registration copies exact bytes and preserves originals.
+
+Expected layout:
+
+```text
+harness-config/
+├── baseline/
+│   ├── harness.md
+│   ├── README.md
+│   ├── manifest.json
+│   └── scripts/search.py
+├── v2/
+│   ├── harness.md
+│   ├── README.md
+│   ├── manifest.json
+│   └── scripts/search.py
+└── comparisons/baseline-vs-v2.json
+.harness-delta/setup/
+├── baseline-vs-v2-<revision-hash>.json
+└── tasks/<task-id>.json
+```
+
+`harness-config` is suitable for deliberate Git sharing. Inspect selected files
+before publishing them. Private local bindings belong in ignored
+`.harness-delta/setup`; keep that directory out of Git. The revision suffix allows
+multiple reviewed local settings without replacing historical task pins.
+
+## 2. Register baseline and modified versions
+
+Create a selected input file outside the generated version directory:
+
+```json
+{
+  "schema_version": 1,
+  "harness_id": "search",
+  "version": "baseline",
+  "policy_version": "policy-v1",
+  "readme_path": "harness-notes.md",
+  "artifacts": [
+    {"artifact_id":"instruction","role":"instruction","source_path":"policy.md","target_path":"harness.md"},
+    {"artifact_id":"search-tool","role":"tool","source_path":"scripts/search.py","target_path":"scripts/search.py"}
+  ]
+}
+```
+
+Run from the built Harness Delta checkout:
+
+```sh
+node dist/harness-config-main.js register --root /path/to/project --input /path/to/register-input.json
+```
+
+Expected result: `registered`; exact repeats return `already_registered`. To
+register the modified files, change `version` to `v2` and optionally add
+`"base":{"path":"harness-config/baseline/manifest.json"}`. Run the same command.
+An existing version with different bytes fails with `harness_version_conflict`.
+Do not edit a published version; select a new version.
+
+Paths use portable ASCII components within the project. Absolute paths,
+traversal, symlinks, case-folding collisions and Windows device names are rejected.
+The primary instruction targets `harness.md`. Each file is limited to 1 MiB,
+with 256 files and 16 MiB total. Missing selected files and unresolved inline
+local Markdown links block publication. Command strings, reference-style links,
+remote links and dependency closure are not fully validated. Supply missing
+files explicitly or describe unselected prerequisites and limits in the README.
+
+## 3. Generate the portable comparison
+
+Create a comparison input:
+
+```json
+{
+  "schema_version": 1,
+  "id": "baseline-vs-v2",
+  "name": "Baseline vs v2",
+  "arm_a": "baseline",
+  "arm_b": "v2"
+}
+```
+
+```sh
+node dist/harness-config-main.js compare --root /path/to/project --input /path/to/comparison-input.json
+```
+
+Expected result: `generated`; exact repeats return `already_generated`. Different
+contents under an existing ID fail with `shared_settings_conflict`. The pair
+contains relative manifest references and hashes. Baseline is A; modified is B.
+It contains no model/effort, local DB identities or experimental defaults.
+Tool-only changes alter the whole-bundle digest even when instruction hashes
+remain unchanged. Hashes show integrity, not authenticity or actual use.
+
+The optional repository reference packages are
+[harness-register](../../skills/harness-register/SKILL.md) and
+[harness-compare-config](../../skills/harness-compare-config/SKILL.md). Their
+helpers require an explicit `--harness-delta` checkout; no global plugin is
+required. Installing a skill is separate from creating a harness snapshot.
+
+## 4. Connect on each PC
+
+First complete the existing [reviewed local setup prerequisites](local-browser-ui.md)
+and [comparison registration](task-comparison.md): registered project, ordered
+compatible variants, frozen protocol, criteria, price basis and reviewed execution
+settings. This feature does not create or freeze those records. Copy the shared
+harness-config files into the registered project checkout.
+
+1. Open Local UI → Setup and choose the comparison JSON file.
+2. Read snapshot integrity and separate A/B original-tool compatibility.
+3. Select the registered project and reviewed local measurement settings explicitly.
+4. Select **Connect local settings**.
+
+Expected result: private immutable JSON appears in `.harness-delta/setup` and the
+setup is available for new tasks. An exact repeat reports an existing connection.
+Import reads no sessions and starts no task, tool, agent or model. Missing
+registration or an incompatible ordered pair remains blocked. Display names do
+not identify a setup; explicit IDs distinguish equally named entries.
+
+For startup after binding:
+
+```sh
+node dist/cli.js --db /path/to/local.sqlite ui --setup /path/to/project/harness-config/comparisons/baseline-vs-v2.json
+```
+
+No matching revision fails with `shared_binding_required`. Multiple revisions
+fail with `shared_binding_selection_required`; choose one explicitly:
+
+```sh
+node dist/cli.js --db /path/to/local.sqlite ui --setup /path/to/project/harness-config/comparisons/baseline-vs-v2.json --setup-binding-revision shared-<revision-hash>
+```
+
+Use an actual private revision ID. Existing legacy reviewed manifests remain
+supported. Different runtime templates create separate revisions for future
+tasks; they do not update existing task pins.
+
+## 5. Prepare and measure
+
+Create a task using the connected setup. Task and A/B assignment IDs are reserved
+and retained through interruptions. A preparation blocker remains visible;
+correct the original selected files manually, then retry the same task. Never
+restore tools from the snapshot automatically or rerandomize to a matching arm.
+Follow the existing prepare/apply/new-session/connect flow. Start actual work only
+after the current workflow permits observation.
+
+During observation, changed or missing snapshot/private/original-tool files stop
+collection. In-flight uncertain data is discarded; retained observations, partial
+cost, window, assignment and outcomes remain readable. Correction requires an
+explicit continuation/reconnect; no automatic resume or backfill occurs.
+
+Snapshot integrity does not establish native startup order, instruction loading,
+actual tool execution or dependencies. Existing exact-version and forward-version
+labels remain unchanged. See the [current native support limits](task-native-workflow.md)
+and [ADR 014](../decisions/014-portable-harness-config.md). No complete task cost,
+statistical adoption decision or new native admission follows from this feature.
+
+If the selected descriptor changes after preview, Connect fails with `shared_preview_changed`; import it again and review it. Revision IDs and reviewed template/runtime choices distinguish settings in the task chooser. Bindings for a deleted project do not transfer when the same directory is registered again. Private JSON remains local; archive or remove obsolete private files deliberately after historical work is no longer needed.
+
+## 6. Agent application (format 2)
+
+Use format 2 when the assigned bundle contains an application procedure that
+adapts project rules and scripts. Register both versions normally, then generate:
+
+```json
+{
+  "schema_version": 2,
+  "id": "agent-baseline-vs-v2",
+  "name": "Agent baseline vs v2",
+  "arm_a": "baseline",
+  "arm_b": "v2",
+  "application": "agent_applied"
+}
+```
+
+1. Import the comparison, bind a reviewed local template and prepare the task.
+   The UI stores assignment without applying files or starting collection.
+2. Select an existing checkout/worktree and Codex or Claude Code. Inspect its
+   branch and HEAD. Prepare the native session context. Retry preserves assignment;
+   no branch switch or new worktree is automatic.
+3. Request a fresh native session. On macOS with an installed CLI this requests a
+   Terminal interactive session with the prepared prompt. The installed grammar
+   was checked for Codex CLI 0.161.0 and Claude Code 2.1.295; actual native opening
+   and agent acceptance are unverified. Desktop prompt deep links and other
+   platforms are unsupported. If unavailable or failed, open a fresh session in
+   the selected target yourself and paste the copyable application context.
+4. The session's own agent uses harness-apply, reads the assigned bundle,
+   investigates domains and edits target files directly. It discovers output
+   paths as needed and checkpoints each file before editing. Preserve unrelated
+   dirty/untracked files. Decide file and command permissions in the native window.
+5. Inspect actual changes and check outcomes in the UI after editing. File hashes
+   are independently verified for the reported set. Script/check outcomes remain
+   `agent_reported`; missing, refused and failed outcomes are visible. This is not
+   an exhaustive filesystem or tool audit. There is no publish approval.
+6. After verified application, copy the populated working-session guidance. Open
+   a separate fresh session in that target and invoke harness-connect there.
+   File application does not prove generated-instruction loading or measurement
+   readiness. Existing identity/loading/source gates remain in force; these
+   working-session routes are qualification-pending for this feature.
+
+Application helper operations are `context`, `checkpoint`, `identity`, `report`
+and `status`. Use the installed skill path and Node 24. Checkpoints retain actual
+dirty bytes and absent states; a missing baseline is rejected, never replaced with
+Git HEAD. Reports contain hashes and bounded check IDs/outcomes, not source bytes,
+secrets or command output. Hidden paths, symlinks/hardlinks, private DB paths and
+sidecars, registered bundles, node_modules and known secret paths are unsupported.
+Each file is limited to 1 MiB and an attempt to 256 checkpointed paths.
+Checkpoint/report HTTP bodies and helper input files are limited to 1 MiB; other
+mutation routes keep their 16 KiB transport limit.
+
+Copy fallback is not evidence of automatic opening. Opening acknowledgement is
+not evidence that an agent started. Repeated opening clicks do not request another
+window for the same attempt. Abandon an attempt before explicitly retrying opening.
+If current files drift after completion, abandon the old attempt and prepare a
+new one; preserve and inspect those user edits. Abandonment and server restart
+never stop or relaunch the native agent or roll back files. Stop it in its native
+window. Stale helpers and deleted tasks remain fenced. Deletion removes product-owned
+review/launch artifacts while preserving workspace edits and opaque application
+session exclusions. Unsafe/replaced private roots report `application_cleanup_pending`;
+restore the intended private directory and retry deletion. Tasks stay deleted.
+
+Application role registration requires a supported metadata-only identity provider.
+The current Codex root receipt integration retains its exact-version limits.
+Claude's application identity resolver is unavailable; file application remains
+visible, while subsequent connection is blocked. Never identify a session from
+cwd or an agent claim. Do not run harness-connect in the applying session.
+
+See [ADR 015](../decisions/015-agent-harness-application.md). Synthetic tests validate
+wiring and integrity only; separately authorized native acceptance remains required
+for opening, adaptation, scripts, permissions and working-session loading.

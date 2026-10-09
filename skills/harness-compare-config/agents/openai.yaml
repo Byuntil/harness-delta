@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate Harness Comparison"
+  short_description: "Create a portable pair from existing harness versions"
+  default_prompt: "Use $harness-compare-config to generate a portable baseline-versus-modified comparison."
