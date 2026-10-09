@@ -1,3 +1,5 @@
+import type { ChildReadinessObservation } from './binding-child-readiness.js';
+import { appendFamilyDiagnostic, takeFamilyDiagnostic } from './binding-family-diagnostics.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { constants, closeSync, fstatSync, mkdirSync, openSync, readFileSync, realpathSync } from 'node:fs';
@@ -24,7 +26,7 @@ import type { BindingQualificationLease } from './session-binding-qualification-
 import { assertBindingQualification, bindingQualificationOwnerLive, revokeBindingQualification, noteQualificationCollectorError } from './session-binding-qualification-lease.js';
 import { issueCodexHumanPilotScope, assertHumanPilotScope, type HumanPilotScope } from './session-binding-human-pilot.js';
 import type { BindingProduct, SessionBindingProvider } from './session-binding-contract.js';
-import { issueClaudeHumanPilotScope, assertClaudeHumanPilotSource } from './session-binding-claude-human-pilot.js';
+import { issueClaudeHumanPilotScope, assertClaudeHumanPilotSource, isClaudeHumanPilotScope } from './session-binding-claude-human-pilot.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$/);
@@ -54,6 +56,8 @@ export interface LocalWebDomainOptions {
   qualificationLease?: BindingQualificationLease;
   /** Local operator selection only; profiles and browser requests cannot activate it. */
   nativePilot?: { taskId: string; observe: boolean; untilExplicitStop?: boolean };
+  /** Opt-in local pilot instrumentation only; never browser/profile input. */
+  onChildReadiness?: (observation: Readonly<ChildReadinessObservation>) => void;
   /** Trusted fixture injection only; browser/profile flags cannot enable admission. */
   bindingProviderFactory?: (taskId: string, projectRoot: string) => SessionBindingProvider[];
 }
@@ -146,9 +150,11 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
     const scope = provider instanceof ClaudeSessionBindingProvider ? issueClaudeHumanPilotScope(store, options.nativePilot.taskId, provider, { untilExplicitStop: options.nativePilot.untilExplicitStop === true }) : issueCodexHumanPilotScope(store,options.nativePilot.taskId,provider,{untilExplicitStop:options.nativePilot.untilExplicitStop===true});
     if(options.nativePilot.observe)humanPilot=scope;
   }
+  const familyDiagnosticsEnabled = !!humanPilot && isClaudeHumanPilotScope(humanPilot);
+  const writeFamilyDiagnostic = (diagnostic: unknown) => appendFamilyDiagnostic(options.metadataFile + '.family-diagnostics.jsonl',diagnostic);
   const bindings = createSessionBindingService({store,providers:options.bindingProviders??[],setupFor:id=>setupFor(row(id)),providersForTask,
     ...(options.qualificationLease ? {qualificationLease:options.qualificationLease} : {}),
-    ...(humanPilot ? {humanPilot} : {}),
+    ...(humanPilot ? {humanPilot, ...(familyDiagnosticsEnabled ? {onFamilyRejection:writeFamilyDiagnostic, ...(options.onChildReadiness ? {onChildReadiness:options.onChildReadiness} : {})} : {})} : {}),
     syntheticProviderForTask(provider,id){return !!options.bindingProviderFactory&&!!providers.get(id)?.includes(provider);},
   });
   // A newly opened server never resumes an unobserved interval from a persisted
@@ -164,6 +170,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
         }
       } catch (error) {
         if (store.get('SELECT id FROM tasks WHERE id=?', [id])) {
+          const diagnostic = familyDiagnosticsEnabled && options.nativePilot?.taskId === id && !job.pauseRequested ? takeFamilyDiagnostic(error,id,store) : null;
           const expectedPause = job.pauseRequested && error instanceof Error && error.message === 'binding_scope_revoked';
           privateDb.prepare('UPDATE web_tasks SET reason=? WHERE id=?').run(expectedPause ? 'measurement_paused' : localWebError(error), id);
           if (!expectedPause && options.qualificationLease) { noteQualificationCollectorError(options.qualificationLease,error); revokeBindingQualification(options.qualificationLease); }
@@ -171,6 +178,7 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
             // Pause fences are durable even when a clock/gap write fails.
             if(options.qualificationLease)noteQualificationCollectorError(options.qualificationLease,pauseError);
           }
+          if(diagnostic)writeFamilyDiagnostic(diagnostic);
         }
       } finally { jobs.delete(id); }
     })();

@@ -1,3 +1,5 @@
+import { pendingChildReadiness } from './binding-child-readiness.js';
+import { familyDiscovery, familyProviderError } from './binding-family-diagnostics.js';
 import { bindingIdentityKey } from './session-binding-contract.js';
 import { claudeAgentMetadata } from './agent-metadata.js';
 import { execFileSync } from 'node:child_process';
@@ -89,7 +91,7 @@ const CursorSchema = z.strictObject({ v: z.literal(3), source: IdSchema, offset:
   baselineExcluded: z.array(IdSchema).max(recentLimit) });
 type Cursor = z.infer<typeof CursorSchema>;
 
-const fail = (code: string): never => { throw new Error(code); };
+const fail = (code: string): never => { throw familyProviderError(new Error(code), code); };
 /** Synchronous work as a promise; a throw becomes a rejection. */
 const settle = <T>(work: () => T): Promise<T> => new Promise<T>(resolve => { resolve(work()); });
 const sha = (parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -421,7 +423,7 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     this.#assertBoundProcess(parent.nativeMapping?.processId);
     this.#assertProjectScope(parent.sourceRef, parent.cwd);
     const rootStat = this.#rootStat(parent.sourceRef, native);
-    if (this.#sourceIdentity(rootStat, native) !== parent.sourceIdentity) return { children: [], gaps: shared(['source_replaced']) };
+    if (this.#sourceIdentity(rootStat, native) !== parent.sourceIdentity) return familyDiscovery({ children: [], gaps: shared(['source_replaced']) }, ['source_replaced']);
     const gaps: string[] = [];
     const agentsDir = join(this.#options.receiptDir, 'sessions', native, 'agents');
     const names = (() => {
@@ -438,6 +440,7 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
       try { receipt = this.#receipt(join(agentsDir, name)); } catch { gaps.push('child_receipt_invalid'); continue; }
       // Relation proof: same native session and the root transcript this parent was bound with.
       if (receipt.agent_id !== matched[1] || receipt.kind !== matched[2] || receipt.session_id !== native || receipt.transcript_path !== parent.sourceRef) { gaps.push('child_receipt_mismatch'); continue; }
+      try { this.#assertProjectScope(parent.sourceRef, receipt.cwd); } catch { gaps.push('child_receipt_mismatch'); continue; }
       receipts.set(receipt.agent_id, [...(receipts.get(receipt.agent_id) ?? []), receipt]);
     }
     const files = (() => { try { return readdirSync(join(dirname(parent.sourceRef), native, 'subagents')); } catch { return []; } })();
@@ -448,6 +451,9 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
     }
     if (members.size >= this.#options.maxFamilyMembers) fail('claude_family_scope_limit');
     const children: ChildDiscovery['children'] = [];
+    const pending: number[] = [];
+    const pendingStarts: Array<{ receiptId: string; agentId: string; recordedAt: string }> = [];
+    const waitForStart = (start: Receipt) => { pending.push(Date.parse(start.recorded_at) + 2000); pendingStarts.push({ receiptId: start.receipt_id, agentId: start.agent_id!, recordedAt: start.recorded_at }); };
     for (const [agentId, list] of [...receipts.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       const expected = this.#childPath(parent.sourceRef, native, agentId);
       const stop = list.find(r => r.kind === 'subagent_stop');
@@ -455,12 +461,25 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
         const real = (() => { try { return realpathSync(stop.agent_transcript_path!); } catch { return null; } })();
         if (real !== expected) { gaps.push('child_source_mismatch'); continue; }
       }
+      const start = list.find(receipt => receipt.kind === 'subagent_start');
+      const startAt = start ? Date.parse(start.recorded_at) : NaN;
+      const age = this.#options.now() - startAt;
+      const rootPid = Number(parent.nativeMapping?.processId?.split(':')[1]);
+      const canWait = !stop && !!start && start.claude_pid === rootPid && startAt >= Date.parse(parent.createdAt) && age >= 0 && age < 2000;
       let stat: Stats;
+      try { lstatSync(expected); } catch (error) {
+        if (canWait && (error as NodeJS.ErrnoException).code === 'ENOENT') waitForStart(start);
+        gaps.push('child_source_missing'); continue;
+      }
       try { stat = checkedSourceFile(expected); } catch { gaps.push('child_source_missing'); continue; }
-      // A member with no complete line yet is linked on a later poll with a stable creation
-      // time. Complete lines without an attributable own row are reported, never dropped.
+      // A fresh Start may hold family measurement until an attributable own row exists.
+      // Complete lines without that identity remain terminal, never silently dropped.
       const first = this.#firstOwnRow(expected, native, agentId, this.#sourceIdentity(stat, `${native}:${agentId}`), parent.nativeMapping?.processId);
-      if (first.createdAt === null) { if (first.scanned > 0) gaps.push('ownership_unverified'); continue; }
+      if (first.createdAt === null) {
+        if (first.scanned > 0) gaps.push('ownership_unverified');
+        else { gaps.push('child_source_missing'); if (canWait) waitForStart(start); }
+        continue;
+      }
       const identity = this.#identity(native, agentId, parent.sourceRef, expected, stat, parent.productVersion, first.createdAt, (list.find(r => r.kind === 'subagent_start') ?? stop)?.agent_type);
       children.push({ parentSessionId: native, relationEvidenceId: identity.identityEvidenceId, identity });
     }
@@ -470,7 +489,8 @@ export class ClaudeSessionBindingProvider implements SessionBindingProvider {
       const matched = /^agent-([A-Za-z0-9_-]{1,91})\.jsonl$/.exec(file);
       if (matched && !receipts.has(matched[1]!)) gaps.push('child_relation_unverified');
     }
-    return { children, gaps: shared(gaps) };
+    const result = familyDiscovery({ children, gaps: shared(gaps) }, gaps);
+    return pending.length && pending.length === gaps.length ? pendingChildReadiness(result, Math.min(...pending), pendingStarts) : result;
   }
 
   #usage(session: VerifiedSessionIdentity, cursorText: string | null, scope: CandidateScope, baseline: boolean): UsageBatch {

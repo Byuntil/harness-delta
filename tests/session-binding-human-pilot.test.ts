@@ -1,3 +1,4 @@
+import { familyRejection, takeFamilyDiagnostic } from '../src/binding-family-diagnostics.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -134,4 +135,69 @@ test('legacy human-pilot children accept optional display metadata while changed
  await expect(service.tick(f.id)).resolves.toMatchObject({roots:1,children:1});
  expect(service.status(f.id).sessions.find(s=>s.session_id===child.sessionId)?.agent_metadata).toBeNull();
  child.sourceIdentity=randomUUID();await expect(service.tick(f.id)).rejects.toThrow('binding_identity_mismatch');
+});
+
+// Original rejection and pause fences must survive both unknown cause and a failed diagnostic sink.
+test.each(['sink','eligibility'] as const)('baseline diagnostic %s failure preserves rejection and pause without extra reads',async fault=>{
+ const f=fixture();const root=f.identity();const diagnostics: unknown[]=[];
+ vi.spyOn(f.provider,'resolveCurrent').mockResolvedValue(root);vi.spyOn(f.provider,'assertRootReceipt').mockImplementation(()=>{});
+ const discover=vi.spyOn(f.provider,'discoverChildren').mockRejectedValue(new Error('SYNTHETIC-PRIVATE-FAILURE'));
+ const read=vi.spyOn(f.provider,'readUsage');
+ const get=f.store.get.bind(f.store);
+ if(fault==='eligibility')vi.spyOn(f.store,'get').mockImplementation((sql,params)=>{if(sql==='SELECT t.state,t.generation,t.project_id,p.local_root FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?')throw new Error('SYNTHETIC-ELIGIBILITY-FAILURE');return get(sql,params);});
+ const service=createSessionBindingService({store:f.store,providers:[f.provider],setupFor:()=>f.setup,humanPilot:f.scope,onFamilyRejection:diagnostic=>{diagnostics.push(diagnostic);throw new Error('SYNTHETIC-SINK-FAILURE');}});
+ await expect(service.connect(f.id,'codex',{receipt:randomUUID()})).rejects.toThrow('SYNTHETIC-PRIVATE-FAILURE');
+ expect(diagnostics).toEqual(fault==='sink'?[{schema_version:1,phase:'baseline_discovery',reason_codes:[]}]:[]);
+ expect(f.store.get<{state:string}>('SELECT state FROM tasks WHERE id=?',[f.id])?.state).toBe('paused');
+ expect(f.store.all<{state:string}>('SELECT state FROM session_bindings WHERE task_id=?',[f.id]).map(row=>row.state)).toEqual(['stopped']);
+ expect(discover).toHaveBeenCalledTimes(1);expect(read).not.toHaveBeenCalled();expect(f.store.eventCount()).toBe(0);
+ await service.tick(f.id);expect(diagnostics).toHaveLength(fault==='sink'?1:0);expect(discover).toHaveBeenCalledTimes(1);
+});
+
+// Diagnostic eligibility is separate from a previously authorized observer attempt.
+test.each(['once','foreign_task','unlinked','task_state','binding_state','task_generation','binding_generation','identity','root','project_root'] as const)('sealed diagnostic rejects changed %s eligibility or consumes it exactly once',async fault=>{
+ const f=fixture();const root=f.identity();
+ vi.spyOn(f.provider,'resolveCurrent').mockResolvedValue(root);vi.spyOn(f.provider,'assertRootReceipt').mockImplementation(()=>{});
+ vi.spyOn(f.provider,'discoverChildren').mockResolvedValue({children:[],gaps:[]});
+ vi.spyOn(f.provider,'readUsage').mockResolvedValue({records:[],cursor:'0',gaps:[]});
+ const service=createSessionBindingService({store:f.store,providers:[f.provider],setupFor:()=>f.setup,humanPilot:f.scope});
+ await service.connect(f.id,'codex',{receipt:randomUUID()});
+ const task=f.store.get<{generation:number;project_id:string}>('SELECT generation,project_id FROM tasks WHERE id=?',[f.id])!;
+ const binding=f.store.get<{identity:string;root_id:string}>('SELECT identity,root_id FROM session_bindings WHERE session_id=?',[root.sessionId])!;
+ const error=new Error('SYNTHETIC-RAW-ERROR');
+ familyRejection(error,'tick_discovery',{taskId:f.id,projectId:task.project_id,projectRoot:f.project,rootId:binding.root_id,sessionId:root.sessionId,generation:task.generation,identity:binding.identity},undefined,['ownership_unverified','SYNTHETIC-SECRET']);
+ if(fault==='unlinked')f.store.execute('DELETE FROM session_bindings WHERE session_id=?',[root.sessionId]);
+ if(fault==='task_state')f.store.execute("UPDATE tasks SET state='paused' WHERE id=?",[f.id]);
+ if(fault==='binding_state')f.store.execute("UPDATE session_bindings SET state='stopped' WHERE session_id=?",[root.sessionId]);
+ if(fault==='task_generation')f.store.execute('UPDATE tasks SET generation=generation+1 WHERE id=?',[f.id]);
+ if(fault==='binding_generation')f.store.execute('UPDATE session_bindings SET generation=generation+1 WHERE session_id=?',[root.sessionId]);
+ if(fault==='identity')f.store.execute("UPDATE session_bindings SET identity='{}' WHERE session_id=?",[root.sessionId]);
+ if(fault==='root'){
+  const other=randomUUID();f.store.execute('INSERT INTO sessions(id,project_id,task_id,product) VALUES (?,?,?,?)',[other,task.project_id,f.id,'codex']);
+  f.store.execute('UPDATE session_bindings SET root_id=? WHERE session_id=?',[other,root.sessionId]);
+ }
+ if(fault==='project_root')f.store.execute('UPDATE projects SET local_root=? WHERE id=?',[f.root,task.project_id]);
+ const result=takeFamilyDiagnostic(error,fault==='foreign_task'?'another-task':f.id,f.store);
+ expect(result).toEqual(fault==='once'?{schema_version:1,phase:'tick_discovery',reason_codes:['ownership_unverified']}:null);
+ expect(takeFamilyDiagnostic(error,f.id,f.store)).toBeNull();
+});
+
+test.each(['baseline_relation','baseline_descendants','tick_relation'] as const)('records %s at the rejecting service boundary before child usage',async phase=>{
+ const f=fixture();const root=f.identity();const child=f.identity(root.sessionId);const diagnostics:unknown[]=[];
+ vi.spyOn(f.provider,'resolveCurrent').mockResolvedValue(root);vi.spyOn(f.provider,'assertRootReceipt').mockImplementation(()=>{});
+ const read=vi.spyOn(f.provider,'readUsage').mockResolvedValue({records:[],cursor:'0',gaps:[]});
+ const discover=vi.spyOn(f.provider,'discoverChildren').mockResolvedValue({children:[],gaps:[]});
+ const service=createSessionBindingService({store:f.store,providers:[f.provider],setupFor:()=>f.setup,humanPilot:f.scope,onFamilyRejection:value=>{
+  expect(f.store.get<{state:string}>('SELECT state FROM tasks WHERE id=?',[f.id])?.state).toBe('paused');diagnostics.push(value);
+ }});
+ if(phase==='tick_relation')await service.connect(f.id,'codex',{receipt:randomUUID()});
+ discover.mockImplementation(parent=>Promise.resolve({children:parent.sessionId===root.sessionId?[{identity:child,parentSessionId:phase==='baseline_descendants'?root.sessionId:'other-parent',relationEvidenceId:child.identityEvidenceId}]:phase==='baseline_descendants'?[{identity:f.identity(child.sessionId),parentSessionId:child.sessionId,relationEvidenceId:randomUUID()}]:[],gaps:[]}));
+ if(phase==='tick_relation'){
+  let failure:unknown;try{await service.tick(f.id);}catch(error){failure=error;}
+  expect(failure).toBeInstanceOf(Error);expect((failure as Error).message).toBe('binding_relation_invalid');
+  const value=takeFamilyDiagnostic(failure,f.id,f.store);service.pause(f.id);diagnostics.push(value);
+ }else await expect(service.connect(f.id,'codex',{receipt:randomUUID()})).rejects.toThrow('binding_pilot_family_scope');
+ expect(diagnostics).toEqual([{schema_version:1,phase,reason_codes:[phase==='baseline_descendants'?'descendants_present':'relation_mismatch']}]);
+ expect(read.mock.calls.length).toBe(phase==='tick_relation'?1:0);expect(f.store.eventCount()).toBe(0);
+ expect(f.store.get<{count:number}>('SELECT count(*) AS count FROM session_bindings WHERE task_id=?',[f.id])?.count).toBe(1);
 });
