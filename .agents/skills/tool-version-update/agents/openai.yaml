@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update Tool Version Support"
+  short_description: "Verify Codex and Claude release compatibility"
+  default_prompt: "Use $tool-version-update to update this repository's Codex CLI and Claude Code support to the latest stable releases, verify upstream changes and enforce source-specific qualification gates."
