@@ -80,15 +80,19 @@ skill이 생성한 snapshot은 **설정 안내와 입력 검토**로 연결할 �
    `harness-compare-config`로 순서가 고정된 비교를 생성하세요.
    **연결한 프로젝트**에서 해당 Git 프로젝트를 연결하고 프로젝트 상세에서
    등록된 프로젝트 ID를 복사하세요.
-2. 비교 JSON의 절대 로컬 경로를 입력하세요. **검토된 측정 입력 재사용**이
+2. 비교 JSON의 절대 로컬 경로를 입력하세요. **등록된 측정 설정 재사용**이
    가능하면 선택하세요. 서버가 기존 profile·동결 protocol·가격표를 재사용하며
    복제하지 않습니다.
-3. 입력이 없으면 **빠진 검토 입력 제공**을 펼치세요. `LocalWebProfile` 하나
+3. 신규 설정은 **새 측정 설정 제공**을 선택하고 **빠진 검토 입력 제공**을
+   펼치세요. `LocalWebProfile` 하나
    (`profile`), `FlexibleVariantSchema` 객체 배열(`variants`), 완전한
    `FlexibleProtocolSchema` 객체 하나(`protocol`), `PriceTableSchema` 객체
    하나(`price_table`)를 JSON으로 붙여넣거나 파일로 선택하세요. CLI와 같은
-   production 계약이며 새로운 측정 schema가 아닙니다. profile ID와 template
-   ID가 같아야 하며 project/protocol/variant/price 참조도 일치해야 합니다.
+   production 계약이며 새로운 측정 schema가 아닙니다. **측정 설정 식별자**는
+   `profile.id`에서 자동으로 읽으므로 다시 입력하지 마세요. JSON 형식이 잘못되거나
+   문자열 `id`가 없으면 식별자를 비우고 검토를 비활성화합니다. 등록된 설정을 재사용할 때는 선택한 ID를
+   표시하며 남아 있는 profile JSON은 사용하지 않습니다.
+   project/protocol/variant/price 참조가 일치해야 합니다.
    A·B variant의 hash와 policy version은 순서대로 skill manifest와 같아야 합니다.
    미동결 protocol을 동결할 때만 명시적인 UTC `freeze_at` 시각을 제공하세요.
 4. **저장 없이 입력 검토**를 선택하세요. 누락한 필드나 등록을 필드·ID별로

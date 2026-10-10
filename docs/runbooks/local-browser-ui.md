@@ -79,16 +79,20 @@ displayed request manually. Later setup details are available in the disclosure.
 1. Select existing files with `harness-register` for A and B, then create the
    ordered comparison with `harness-compare-config`. Connect that Git project in
    **Connected projects**. Copy its registered project ID from the project details.
-2. Enter the comparison JSON's absolute local path. Reuse **Reviewed measurement
-   inputs** when available; the server resolves the existing profile, frozen
+2. Enter the comparison JSON's absolute local path. Select **Reuse registered
+   measurement settings** when available; the server resolves the existing profile, frozen
    protocol and price table without duplicating them.
-3. If inputs are absent, expand **Supply missing reviewed inputs**. Paste or
+3. For new settings, select **Provide new measurement settings** and expand
+   **Supply missing reviewed inputs**. Paste or
    choose JSON files for one `LocalWebProfile` (`profile`), an array of
    `FlexibleVariantSchema` objects (`variants`), one complete
    `FlexibleProtocolSchema` object (`protocol`) and one `PriceTableSchema`
    object (`price_table`). These are the same production contracts used by the
-   CLI, not new measurement schemas. The profile ID must match the template ID;
-   project/protocol/variant/price references must match. A/B variant hashes and
+   CLI, not new measurement schemas. **Measurement settings identifier** is read
+   automatically from `profile.id`; do not enter it again. Invalid JSON or a
+   missing/non-string `id` clears the identifier and disables review. When reusing registered settings,
+   the selected ID is displayed and retained profile JSON is not used.
+   Project/protocol/variant/price references must match. A/B variant hashes and
    policy versions must match the ordered skill manifests. Supply an explicit
    `freeze_at` UTC timestamp only when freezing an unfrozen protocol.
 4. Select **Review inputs without saving**. Missing fields and registrations

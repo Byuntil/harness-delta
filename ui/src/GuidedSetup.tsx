@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowRight, Check, ClipboardPaste, Copy, Files, GitCompareArrows } from 'lucide-react';
 import type { SetupReviewResult } from '../../src/local-web-setup-review.js';
 import type { SharedSetupImport } from './SharedSetupPreview';
@@ -7,6 +7,18 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+export function measurementSettingIdentifier(selected: string, profileDocument: string | undefined): string {
+  if (selected) return selected;
+  if (!profileDocument?.trim()) return '';
+  try {
+    const profile: unknown = JSON.parse(profileDocument);
+    return typeof profile === 'object' && profile !== null && 'id' in profile && typeof profile.id === 'string' ? profile.id : '';
+  } catch (error) {
+    if (error instanceof SyntaxError) return '';
+    throw error;
+  }
+}
 
 export function GuidedSetup({ locale, setups, busy, perform, onSaved }: {
   locale: Locale; setups: Setup[]; busy: boolean;
@@ -21,9 +33,12 @@ export function GuidedSetup({ locale, setups, busy, perform, onSaved }: {
   const [review, setReview] = useState<SetupReviewResult | null>(null);
   const [inputError, setInputError] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const inputRevision = useRef(0);
   const [copying, setCopying] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [manualPrompt, setManualPrompt] = useState<string | null>(null);
+  const selectedTemplate = setups.find(setup => !setup.shared && setup.id === template);
+  const identifier = measurementSettingIdentifier(selectedTemplate?.id ?? '', documents.profile);
   const skillSteps = [
     { skill: 'harness-register', icon: Files, title: t('Register harnesses', '하네스 등록'),
       description: t('Save the existing and modified harnesses as two versions.', '기존 하네스와 수정한 하네스를 각각 저장하세요.'),
@@ -122,17 +137,22 @@ snapshot은 format 1, agent_applied는 format 2와 application=agent_applied를 
       setManualPrompt(prompt);
     } finally { setCopying(null); }
   }
-  const change = () => { setReview(null); setConfirmed(false); setInputError(false); };
+  const change = () => { inputRevision.current++; setReview(null); setConfirmed(false); setInputError(false); };
   async function inspect() {
     setInputError(false);
     let input: Record<string, unknown>;
     try {
-      input = { comparison_path: path, template_id: template };
-      for (const [key, value] of Object.entries(documents)) if (value.trim()) input[key] = JSON.parse(value) as unknown;
+      input = { comparison_path: path, template_id: identifier };
+      for (const [key, value] of Object.entries(documents)) {
+        if (key === 'profile' && selectedTemplate) continue;
+        if (value.trim()) input[key] = JSON.parse(value) as unknown;
+      }
       if (freezeAt) input.freeze_at = freezeAt;
     } catch { setInputError(true); return; }
     setConfirmed(false);
-    setReview(await perform<SetupReviewResult>('/api/setup-review', input));
+    const revision = inputRevision.current;
+    const result = await perform<SetupReviewResult>('/api/setup-review', input);
+    if (inputRevision.current === revision) setReview(result);
   }
   return <Card data-guided-setup=""><CardHeader><CardTitle>{t('Guided setup and input review', '설정 안내와 입력 검토')}</CardTitle>
     <CardDescription>{t('Create a comparison with the skills, then paste its file path here.', '스킬로 비교 파일을 만든 뒤, 경로를 붙여넣으세요.')}</CardDescription></CardHeader>
@@ -167,28 +187,33 @@ snapshot은 format 1, agent_applied는 format 2와 application=agent_applied를 
           <p>{t('Setup does not start an agent or measurement. harness-apply and harness-connect are later steps with separate support requirements.', '설정만으로 에이전트나 측정이 시작되지는 않습니다. harness-apply와 harness-connect는 이후 단계이며 별도 지원 조건이 있습니다.')}</p>
         </div>
       </details>
-      <div className="space-y-2"><Label htmlFor="guided-template">{t('Reuse reviewed measurement inputs', '검토된 측정 입력 재사용')}</Label>
-        <select id="guided-template" className="w-full rounded border bg-background p-2" disabled={busy} value={setups.some(setup => !setup.shared && setup.id === template) ? template : ''} onChange={event => { change(); setTemplate(event.target.value); }}>
-          <option value="">{t('Supply an explicit template below', '아래에 template을 직접 제공')}</option>
+      <div className="space-y-2"><Label htmlFor="guided-template">{t('Reuse registered measurement settings', '등록된 측정 설정 재사용')}</Label>
+        <select id="guided-template" className="w-full rounded border bg-background p-2" disabled={busy} value={selectedTemplate?.id ?? ''} onChange={event => { change(); setTemplate(event.target.value); }}>
+          <option value="">{t('Provide new measurement settings', '새 측정 설정 제공')}</option>
           {setups.filter(setup => !setup.shared).map(setup => <option key={setup.id} value={setup.id}>{setup.name} · {setup.id}</option>)}
         </select>
-        <Label htmlFor="guided-template-id">{t('Selected / new template ID', '선택한 / 새 template ID')}</Label>
-        <Input id="guided-template-id" value={template} disabled={busy} onChange={event => { change(); setTemplate(event.target.value); }} /></div>
+        <Label htmlFor="guided-template-id">{t('Measurement settings identifier', '측정 설정 식별자')}</Label>
+        <Input id="guided-template-id" value={identifier} readOnly disabled={busy} aria-describedby="guided-identifier-help" />
+        <p id="guided-identifier-help" role="status" className="break-keep text-sm text-muted-foreground">{selectedTemplate
+          ? t('This is the selected registered setting’s identifier. Its existing profile is reused.', '선택한 등록 설정의 식별자입니다. 기존 profile을 재사용합니다.')
+          : documents.profile?.trim() && !identifier.trim()
+            ? t('A string id is required in profile JSON. Check the JSON format and id.', 'profile JSON에 문자열 id가 필요합니다. JSON 형식과 id를 확인하세요.')
+            : t('Read automatically from profile JSON below. You do not need to enter it separately.', '아래 profile JSON의 id를 자동으로 읽습니다. 별도로 입력하지 않아도 됩니다.')}</p></div>
       <details><summary className="cursor-pointer font-medium">{t('Supply missing reviewed inputs (no defaults)', '빠진 검토 입력 제공 (기본값 없음)')}</summary>
-        <p className="my-3 text-sm">{t('Use the production JSON objects: one LocalWebProfile, an ordered array of schema-2 variants, one complete schema-2 protocol and one price table. Existing IDs may be reused; conflicting contents are rejected. The profile ID must equal the selected template ID.', 'production JSON 객체를 사용하세요: LocalWebProfile 하나, schema-2 variant 배열, 완전한 schema-2 protocol 하나, 가격표 하나입니다. 기존 ID는 재사용할 수 있으나 내용 충돌은 거절합니다. profile ID는 선택한 template ID와 같아야 합니다.')}</p>
+        <p className="my-3 break-keep text-pretty text-sm">{t('Use the production JSON objects: one LocalWebProfile, an ordered array of schema-2 variants, one complete schema-2 protocol and one price table. For new settings, the identifier is read from profile.id. When reusing a registered setting, profile JSON is not used. Existing IDs may be reused; conflicting contents are rejected.', 'production JSON 객체를 사용하세요: LocalWebProfile 하나, schema-2 variant 배열, 완전한 schema-2 protocol 하나, 가격표 하나입니다. 신규 설정의 식별자는 profile.id에서 읽습니다. 등록된 설정을 재사용할 때는 profile JSON을 사용하지 않습니다. 기존 ID는 재사용할 수 있으나 내용 충돌은 거절합니다.')}</p>
         <p className="mb-3 text-sm">{t('Ask for criterion IDs, dates, sample plan, stopping/missingness rules, price references and runtime/source scope that are absent. Do not fabricate them. Snapshot hashes and policy versions come from the selected skill manifests.', '빠진 criterion ID·날짜·표본 계획·중단/누락 규칙·가격 참조·실행/원본 범위는 직접 확인하세요. 만들어 넣지 마세요. snapshot hash와 policy version은 선택한 skill manifest에서 가져옵니다.')}</p>
         <div className="space-y-4">{(['profile', 'variants', 'protocol', 'price_table'] as const).map(key => <div key={key} className="space-y-2">
           <Label htmlFor={`guided-${key}`}>{key} JSON</Label>
-          <input type="file" accept=".json,application/json" disabled={busy} aria-label={`${key} JSON file`} onChange={event => {
+          <input type="file" accept=".json,application/json" disabled={busy || (key === 'profile' && !!selectedTemplate)} aria-label={`${key} JSON file`} onChange={event => {
             const file = event.target.files?.[0]; if (!file) return;
             change(); void file.text().then(value => { change(); setDocuments(old => ({ ...old, [key]: value })); });
           }} />
-          <textarea id={`guided-${key}`} className="min-h-32 w-full rounded border bg-background p-3 font-mono text-xs" value={documents[key] ?? ''} disabled={busy} onChange={event => { change(); setDocuments(old => ({ ...old, [key]: event.target.value })); }} />
+          <textarea id={`guided-${key}`} className="min-h-32 w-full rounded border bg-background p-3 font-mono text-xs" value={documents[key] ?? ''} disabled={busy || (key === 'profile' && !!selectedTemplate)} onChange={event => { change(); setDocuments(old => ({ ...old, [key]: event.target.value })); }} />
         </div>)}</div>
         <div className="mt-4 space-y-2"><Label htmlFor="guided-freeze">{t('Explicit freeze timestamp (only for an unfrozen protocol)', '명시적 동결 시각 (미동결 protocol에만 필요)')}</Label>
           <Input id="guided-freeze" value={freezeAt} disabled={busy} onChange={event => { change(); setFreezeAt(event.target.value); }} /></div>
       </details>
-      <Button disabled={busy || !path.trim() || !template.trim()} onClick={() => { void inspect(); }}>{t('Review inputs without saving', '저장 없이 입력 검토')}</Button>
+      <Button disabled={busy || !path.trim() || !identifier.trim()} onClick={() => { void inspect(); }}>{t('Review inputs without saving', '저장 없이 입력 검토')}</Button>
       {inputError && <p role="alert">{t('Invalid JSON. Correct the selected input; nothing was saved.', 'JSON이 올바르지 않습니다. 해당 입력을 수정하세요. 저장하지 않았습니다.')}</p>}
       {review && !review.ready && <div role="status" data-setup-review="blocked"><p>{t('Required inputs or registrations need attention. Supply the named JSON field or connect its project, then review again.', '필수 입력이나 등록을 확인하세요. 표시된 JSON 필드를 제공하거나 프로젝트를 연결한 뒤 다시 검토하세요.')}</p>
         <ul className="list-disc pl-5">{review.issues.map((issue, index) => <li key={index} className="break-all">{issue.field || 'input'}: {issue.code}</li>)}</ul></div>}
