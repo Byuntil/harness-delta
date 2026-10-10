@@ -205,7 +205,10 @@ snapshot 무결성은 네이티브 시작 순서, 지침 로딩, 도구 실제 �
 6. 적용 검증 후 채워진 작업 세션 안내를 복사하세요. 대상에서 별도의 새 세션을
    열고 harness-connect를 사용하세요. 파일 적용은 생성 지침의 로딩이나 측정
    준비를 입증하지 않습니다. 기존 신원·로딩·원본 지원 gate를 유지하며, 이
-   기능의 작업 세션 경로는 지원 검증 대기 중입니다.
+   기능의 작업 세션 경로는 production 지원 검증 대기 중입니다. 명시적인
+   Codex 0.162.0 root-only 로컬 functional pilot은 파일 적용을 완료하고
+   별도 작업·원본 권한을 받은 뒤 연결할 수 있지만, parser 기준값은
+   미검증입니다. [제한된 pilot](harness-connect.ko.md#codex-01620-일반-root-로컬-pilot)을 참고하세요.
 
 적용 helper 동작은 `context`, `checkpoint`, `identity`, `report`, `status`입니다.
 설치된 skill 경로와 Node 24를 사용하세요. checkpoint는 실제 dirty 내용과 파일

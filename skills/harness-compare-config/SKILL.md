@@ -37,9 +37,22 @@ paths, DB identity, model choice or machine binding. Same inputs return
 `shared_settings_conflict`; use a new explicit ID for a different comparison.
 
 To connect on another PC, copy the repository's harness-config files, then use
-Local UI → Setup → choose the comparison JSON. Select the registered local
-project and an existing reviewed measurement template explicitly. Missing local
-registration remains a blocker. The UI writes private immutable JSON under
+Local UI → Setup → Guided setup and input review. Connect the Git project first,
+enter the generated comparison JSON path and explicitly select an existing
+reviewed measurement template. If none exists, ask for the missing local inputs:
+one production LocalWebProfile, the ordered schema-2 variant registrations, a
+complete schema-2 protocol, its price table and an explicit freeze timestamp.
+Use selected manifests for hashes and policy versions; eligibility and all
+measurement choices must be explicitly reviewed, not invented. Individual JSON
+objects can be pasted or chosen as files in the guided form. Reuse registered
+references rather than asking the user to duplicate them.
+
+Review lists missing fields/registrations and performs rollback-only validation.
+The user reviews project, A/B, criterion IDs, runtime/source scope and full frozen
+protocol/price/private configuration before confirming registration. Then select
+the project and template in the comparison preview and confirm the separate
+private binding step. Missing or conflicting registration remains a blocker.
+The UI writes private immutable JSON under
 `.harness-delta/setup`; new tasks pin that revision. Import does not start tasks,
 execute tools, access sessions or launch agents/models. Snapshot integrity,
 registration compatibility and native execution support remain separate facts.
@@ -49,6 +62,25 @@ affect bundle identity even if instruction hashes are unchanged. Original tools
 stay in the project and are checked for the assigned arm before use; this feature
 never installs or restores them. Complete costs and statistical adoption remain
 unavailable under existing support gates.
+
+## Copyable result path
+
+The helper returns `{status, descriptor}`, not a file path. After `generated` or
+`already_generated`, take the returned `descriptor.id` and construct
+`harness-config/comparisons/<descriptor.id>.json`. Resolve this relative path
+against the explicitly selected project root. Verify that the saved JSON exists
+and its descriptor matches the returned result before reporting its absolute path.
+Do not guess a path or show a success result after a failed command.
+
+In the final response, show the actual absolute JSON file path on one line in a
+standalone plain-text code block. Put no command, quotation marks, label, hash or
+other text inside that block. Follow it with a short instruction in the user's
+language: paste this path into **Comparison JSON file path** in the local UI.
+Other result details can follow separately.
+
+This absolute path is only a local copy/paste aid in the response. Keep the saved
+comparison JSON's references relative and portable; do not add an absolute-path
+field or relocate the file. On another PC, verify and show that PC's actual path.
 
 ## Explicit agent application
 

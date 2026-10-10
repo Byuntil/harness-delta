@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { canonicalJson, registerHarness, generateComparison, readComparison, readRepositoryFile, readStrictJson, checkOriginalTools } from '../src/harness-config.js';
+import { canonicalJson, registerHarness, generateComparison, readComparison, readRepositoryFile, readStrictJson, checkOriginalTools, hashBytes } from '../src/harness-config.js';
 const roots: string[] = [];
 function fixture() { const root = mkdtempSync(join(tmpdir(), 'harness-config-synthetic-')); roots.push(root); mkdirSync(join(root,'scripts')); writeFileSync(join(root,'policy.md'),'Synthetic instruction\n'); writeFileSync(join(root,'scripts/tool.py'),'# synthetic supporting tool\n'); writeFileSync(join(root,'readme.md'),'Synthetic configuration and manual verification\n'); return root; }
 const input = (version: string) => ({ schema_version: 1 as const, harness_id: 'search', version, policy_version: 'policy-v1', readme_path: 'readme.md', artifacts: [{artifact_id:'policy',role:'instruction' as const,source_path:'policy.md',target_path:'harness.md'},{artifact_id:'tool',role:'tool' as const,source_path:'scripts/tool.py',target_path:'scripts/tool.py'}] });
@@ -18,6 +18,60 @@ test('rejects duplicate artifacts and portable path collisions', () => { const r
 test('selected local Markdown references must resolve inside the explicit snapshot',()=>{
  const root=fixture();writeFileSync(join(root,'policy.md'),'Synthetic [tool](scripts/tool.py)\n');expect(registerHarness(root,input('baseline')).status).toBe('registered');
  writeFileSync(join(root,'policy.md'),'Synthetic [missing](missing.md)\n');expect(()=>registerHarness(root,input('v2'))).toThrow('shared_reference_invalid');
+});
+test('parent-relative source links preserve exact bytes and selected renamed snapshot mappings',()=>{
+ const root=fixture();mkdirSync(join(root,'docs/harness'),{recursive:true});mkdirSync(join(root,'scripts/repo-map'));
+ const policy=Buffer.from('\uFEFFSynthetic [tool](../../scripts/tool.py#usage)\r\n[guide](../../scripts/repo-map/README.md)\r\n');
+ const guide=Buffer.from('Synthetic [policy](../../docs/harness/POLICY.md)\r\n');
+ const readme=Buffer.from('Synthetic [policy](docs/harness/POLICY.md)\r\n');
+ writeFileSync(join(root,'docs/harness/POLICY.md'),policy);writeFileSync(join(root,'scripts/repo-map/README.md'),guide);writeFileSync(join(root,'readme.md'),readme);
+ const config={...input('baseline'),artifacts:[
+  {artifact_id:'policy',role:'instruction',source_path:'docs/harness/POLICY.md',target_path:'harness.md'},
+  {artifact_id:'tool',role:'tool',source_path:'scripts/tool.py',target_path:'tools/selected.py'},
+  {artifact_id:'guide',role:'documentation',source_path:'scripts/repo-map/README.md',target_path:'docs/guide.md'},
+ ]};
+ const result=registerHarness(root,config);
+ expect(result.status).toBe('registered');
+ for(const row of result.manifest.artifacts) {
+  const original=readFileSync(join(root,row.source_path));
+  expect(readFileSync(join(root,row.path))).toEqual(original);expect(row.sha256).toBe(hashBytes(original));
+ }
+ expect(result.manifest.artifacts).toEqual(expect.arrayContaining([
+  expect.objectContaining({artifact_id:'policy',source_path:'docs/harness/POLICY.md',path:'harness-config/baseline/harness.md',sha256:hashBytes(policy)}),
+  expect.objectContaining({artifact_id:'tool',source_path:'scripts/tool.py',path:'harness-config/baseline/tools/selected.py'}),
+  expect.objectContaining({artifact_id:'guide',source_path:'scripts/repo-map/README.md',path:'harness-config/baseline/docs/guide.md',sha256:hashBytes(guide)}),
+ ]));
+ expect(readFileSync(join(root,'docs/harness/POLICY.md'))).toEqual(policy);expect(readFileSync(join(root,'scripts/repo-map/README.md'))).toEqual(guide);expect(readFileSync(join(root,'readme.md'))).toEqual(readme);
+ expect(registerHarness(root,config).status).toBe('already_registered');
+});
+test.each(['../../../scripts/tool.py','../../scripts/unselected.py','../../scripts/missing.py'])('rejects an escaped, unselected or missing source reference %s',reference=>{
+ const root=fixture();mkdirSync(join(root,'docs/harness'),{recursive:true});writeFileSync(join(root,'scripts/unselected.py'),'Synthetic unselected tool\n');
+ writeFileSync(join(root,'docs/harness/POLICY.md'),`Synthetic [tool](${reference})\n`);
+ const value=input('baseline');
+ expect(()=>registerHarness(root,{...value,artifacts:[{artifact_id:'policy',role:'instruction',source_path:'docs/harness/POLICY.md',target_path:'harness.md'},value.artifacts[1]]})).toThrow('shared_reference_invalid');
+ expect(existsSync(join(root,'harness-config'))).toBe(false);
+});
+test('a matching snapshot path cannot substitute for an unselected source reference',()=>{
+ const root=fixture();writeFileSync(join(root,'policy.md'),'Synthetic [tool](scripts/unselected.py)\n');writeFileSync(join(root,'scripts/unselected.py'),'Synthetic unselected tool\n');
+ const value=input('baseline');
+ expect(()=>registerHarness(root,{...value,artifacts:[value.artifacts[0],{artifact_id:'tool',role:'tool',source_path:'scripts/tool.py',target_path:'scripts/unselected.py'}]})).toThrow('shared_reference_invalid');
+});
+test.each(['./scripts/tool.py','scripts/../scripts/tool.py'])('accepts in-root source navigation %s',reference=>{
+ const root=fixture();writeFileSync(join(root,'policy.md'),`Synthetic [tool](${reference})\n`);
+ expect(registerHarness(root,input('baseline')).status).toBe('registered');
+});
+test.each(['linked/../scripts/tool.py','missing/../scripts/tool.py','policy.md/../scripts/tool.py'])('rejects a non-directory or symbolic traversal hidden by normalization %s',reference=>{
+ const root=fixture();symlinkSync(join(root,'scripts'),join(root,'linked'));writeFileSync(join(root,'policy.md'),`Synthetic [tool](${reference})\n`);
+ expect(()=>registerHarness(root,input('baseline'))).toThrow('shared_reference_invalid');
+});
+test.each(['../harness.md','/harness.md','docs/../harness.md','docs\\harness.md','CON.md'])('keeps portable target path validation strict for %s',targetPath=>{
+ const root=fixture();const value=input('baseline');
+ expect(()=>registerHarness(root,{...value,artifacts:[{artifact_id:'policy',role:'instruction',source_path:'policy.md',target_path:targetPath},value.artifacts[1]]})).toThrow('invalid_shared_config');
+});
+test.each(['linked/tool.py','alias.py'])('rejects selected symlink sources for relative references %s',sourcePath=>{
+ const root=fixture();symlinkSync(join(root,'scripts'),join(root,'linked'));symlinkSync(join(root,'scripts/tool.py'),join(root,'alias.py'));
+ writeFileSync(join(root,'policy.md'),`Synthetic [tool](./${sourcePath})\n`);const value=input('baseline');
+ expect(()=>registerHarness(root,{...value,artifacts:[value.artifacts[0],{artifact_id:'tool',role:'tool',source_path:sourcePath,target_path:'scripts/tool.py'}]})).toThrow('shared_path_invalid');
 });
 test('binary tools may contain NUL bytes and snapshot checks still hash raw bytes',()=>{
  const root=fixture();writeFileSync(join(root,'scripts/tool.py'),Buffer.from([0,1,255]));registerHarness(root,input('baseline'));registerHarness(root,input('v2'));generateComparison(root,{schema_version:1,id:'pair',name:'Pair',arm_a:'baseline',arm_b:'v2'});expect(readComparison(root,'harness-config/comparisons/pair.json').bundles).toHaveLength(2);

@@ -183,3 +183,27 @@ unavailable for those profiles, and frozen real experiments remain exact.
 Verification entry points are `tests/source-compatibility.test.ts`,
 `tests/source-compatibility-cli.test.ts`, `tests/source-trust-report.test.ts`,
 the native workflow adapter/admission tests, and `npm run check` under Node 24.
+
+## Explicit ordinary-root Codex pilot parser reuse
+
+The exact `codex-01620-ordinary-root-human-pilot` profile grants no permission by
+itself. A task-bound local functional-pilot scope, reviewed Codex 0.162.0 receipt
+instrumentation, and explicit observer authority are required. Version selection
+alone remains metadata-only. The provider accepts one fresh root, no descendants;
+a completed agent application also requires unchanged output proofs and a separate
+working identity in its selected checkout.
+
+This route reuses `codex-workflow-own-response-v1` under a code-owned mapping.
+`source: codex_workflow` identifies the inherited parser lineage, not launch
+authority or ordinary-source admission. Persist its existing tuple atomically
+with the binding: `compatibility_unverified`, actual product version `0.162.0`,
+parser version `0.160.0`, the own-response parser/profile revision, and
+`forward-version-v1`. Pinning is required before storing observations.
+
+The UI distinguishes root-only candidate authority from inherited-parser trust.
+Shared lineage invalidation conservatively blocks both collection routes before
+source access; a required parser-contract failure invalidates that tuple. Replay,
+restart baselines and paused intervals retain their original provenance and
+collection fences. Production admission, complete cost, native instruction-loading
+qualification and inference remain closed. Synthetic checks or successful partial
+observation do not qualify those separate contracts.

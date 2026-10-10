@@ -1,4 +1,5 @@
 import type { SharedSetupImportResult } from './local-web-shared.js';
+import type { SetupReviewResult } from './local-web-setup-review.js';
 import {ApplicationSelectionSchema,ApplicationCheckpointSchema,ApplicationReportSchema,ApplicationIdentitySchema} from './harness-application-contract.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -21,6 +22,8 @@ export interface LocalWebDomain {
   chooseDirectory(): Promise<unknown>;
   importSetup?(): Promise<LocalWebSetupImportResult | SharedSetupImportResult>;
   bindSetup?(input:{token:string;project_id:string;template_id:string}):Promise<unknown>;
+  reviewSetup?(input:unknown):Promise<SetupReviewResult>;
+  saveReviewedSetup?(token:string):Promise<SharedSetupImportResult>;
   applicationWorkspace?(taskId:string,directory:string):unknown;
   applicationContext?(taskId:string,attemptId:string):unknown;
   applicationLaunchContext?(taskId:string,origin:string):unknown;
@@ -68,7 +71,7 @@ const safeCodes = new Set(['application_cleanup_pending','application_managed_re
   'claude_scope_mismatch', 'claude_source_missing', 'claude_source_stale', 'claude_source_untrusted',
   'claude_source_version_unobserved', 'claude_source_version_unsupported']);
 export function localWebError(error: unknown): string {
-  return error instanceof Error && safeCodes.has(error.message) ? error.message : 'local_operation_failed';
+  return error instanceof Error && (safeCodes.has(error.message) || ['configuration_conflict', 'protocol_conflict', 'price_table_conflict', 'unknown_protocol', 'unknown_variant', 'unknown_price_table', 'incomplete_protocol', 'registration_too_late', 'ineligible_variant', 'configuration_mismatch', 'invalid_strata', 'overlapping_strata', 'synthetic_only'].includes(error.message)) ? error.message : 'local_operation_failed';
 }
 function sameSecret(input: string | undefined, expected: string): boolean {
   if (!input) return false;
@@ -148,6 +151,15 @@ export function createLocalWebServer(options: LocalWebOptions) {
   addMutation('/api/project-picker', empty, async () => ({ selection: await options.domain.chooseDirectory() }));
   addMutation('/api/setup-picker', empty, async () => { if (!options.domain.importSetup) throw new Error('invalid_ui_setup'); return options.domain.importSetup(); });
   addMutation('/api/setup-bind', z.strictObject({token:z.uuid(),project_id:id,template_id:id}), async input => {if(!options.domain.bindSetup)throw new Error('invalid_ui_setup');return options.domain.bindSetup(input as {token:string;project_id:string;template_id:string});});
+  app.post('/api/setup-review', { bodyLimit: 1048576 }, async (request, reply) => {
+    if (!options.domain.reviewSetup) throw new Error('invalid_ui_setup');
+    const result = await options.domain.reviewSetup(request.body);
+    await reply.send(result);
+  });
+  addMutation('/api/setup-save-reviewed', z.strictObject({token:z.uuid()}), async input => {
+    if (!options.domain.saveReviewedSetup) throw new Error('invalid_ui_setup');
+    return options.domain.saveReviewedSetup(z.strictObject({token:z.uuid()}).parse(input).token);
+  });
   addMutation('/api/tasks', createInput, async input => options.domain.createTask(createInput.parse(input)));
   addMutation('/api/catalog/refresh', empty, async () => options.domain.refreshPrices());
   const taskMutation=async(request:FastifyRequest<{Params:{id:string;action?:string}}>,reply:FastifyReply,action:string)=>{

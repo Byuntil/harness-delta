@@ -59,3 +59,9 @@ included tools are executed from the pinned bundle in a qualified confined draft
 They are not automatically copied back to `source_path`. Registration keeps the
 original files; it does not run the procedure or validate native execution safety.
 Use an explicit version-2 `agent_applied` comparison for this mode.
+
+For initial local UI setup, continue with `harness-compare-config` using these
+two explicitly selected immutable snapshots. Registration here still performs
+no measurement DB writes. The UI's guided input review can reuse reviewed local
+measurement inputs or validate explicit production registration JSON before the
+user confirms it; it does not turn snapshot integrity into source authorization.

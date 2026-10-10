@@ -13,7 +13,7 @@ From the checkout:
 ```sh
 npm ci
 npm run build
-node dist/local-web-main.js --db local.sqlite --setup reviewed-ui-setup.json
+npm start -- --db local.sqlite ui --setup reviewed-ui-setup.json
 ```
 
 After main CLI registration, the equivalent command is:
@@ -25,6 +25,11 @@ hm --db local.sqlite ui --setup reviewed-ui-setup.json
 Open the printed `http://127.0.0.1:4318` address. `--port` changes only the local
 port; no host option exists. Stop the local service with Ctrl+C. Its collectors
 settle and active measurement pauses; the external AI remains under your control.
+
+Select Node 24 and verify `node --version` before installation. The guarded entry
+reports `unsupported_node` (exit 2), `build_required` (exit 3), or
+`dependencies_required` (exit 4) before importing SQLite. Follow its instructions
+in the checkout; it never installs an AI product or switches your global runtime.
 
 ## Measurement criteria for tasks
 
@@ -57,7 +62,54 @@ settings. Cancelling the picker leaves settings unchanged.
 
 ### Prepare a settings file
 
-The UI imports existing files; it has no file creation or editing form.
+For skill-generated snapshots, use **Guided setup and input review** instead of
+assembling and registering every input through separate CLI commands:
+
+The three icon steps show the order, not detected completion. **Copy request**
+on the first two steps provides a prompt with `[input fields]` to fill before
+pasting into your agent. Leave unknown fields unchanged: the request instructs
+the agent to ask and confirm before proceeding. **View request and input fields**
+shows the text that will be copied. The comparison
+skill reports the verified absolute JSON path separately; paste that path into
+**Comparison JSON file path**. If clipboard access fails, select and copy the
+displayed request manually. Later setup details are available in the disclosure.
+
+1. Select existing files with `harness-register` for A and B, then create the
+   ordered comparison with `harness-compare-config`. Connect that Git project in
+   **Connected projects**. Copy its registered project ID from the project details.
+2. Enter the comparison JSON's absolute local path. Reuse **Reviewed measurement
+   inputs** when available; the server resolves the existing profile, frozen
+   protocol and price table without duplicating them.
+3. If inputs are absent, expand **Supply missing reviewed inputs**. Paste or
+   choose JSON files for one `LocalWebProfile` (`profile`), an array of
+   `FlexibleVariantSchema` objects (`variants`), one complete
+   `FlexibleProtocolSchema` object (`protocol`) and one `PriceTableSchema`
+   object (`price_table`). These are the same production contracts used by the
+   CLI, not new measurement schemas. The profile ID must match the template ID;
+   project/protocol/variant/price references must match. A/B variant hashes and
+   policy versions must match the ordered skill manifests. Supply an explicit
+   `freeze_at` UTC timestamp only when freezing an unfrozen protocol.
+4. Select **Review inputs without saving**. Missing fields and registrations
+   are listed by field or ID. Supply the named inputs or connect the project,
+   then review again. Dates, criterion IDs, sample plans, stopping/missingness
+   rules, prices, runtime and source scope require explicit reviewed choices;
+   neither the skills nor the UI invents them.
+5. Review the project, ordered A/B pair, criterion IDs, runtime/source scope,
+   complete protocol, price table and private execution/preparation configuration.
+   Check the confirmation and select **Save reviewed inputs**. Review alone
+   rolls back all tentative DB writes. Confirmation revalidates under writer
+   locks and rejects changed or conflicting inputs; synchronous validation
+   failures roll back the registration batch and profile save.
+6. In the comparison preview below, explicitly select the project and reviewed
+   template, inspect the full configuration and select **Connect local settings**.
+   This is a separate immutable binding step, not a cross-file transaction with
+   the prior registration. Existing hash/idempotency/conflict checks remain in
+   effect. Private JSON is saved under `.harness-delta/setup`; new tasks pin it.
+7. Choose that reusable setup in **New task** and prepare one task. Setup does
+   not activate it, run an AI product or access a session. Later `harness-apply`,
+   `harness-connect`, installation/trust and source admission remain separate.
+
+The file-import and CLI routes also remain available:
 
 1. Follow steps 3–4 of the [workflow quickstart](workflow-quickstart.md) to
    register the reviewed project, price table, A/B variants and schema-2 protocol,
@@ -98,6 +150,17 @@ That path has separate candidate qualification and local pilot authority, includ
 Claude 2.1.291/2.1.293/2.1.294; installing a skill alone does not enable collection.
 File or launch-workflow compatibility windows do not widen either UI source gate.
 
+Setup, task details and Getting started show route-specific descriptions derived
+from the configured product/version and code-owned readiness metadata, not from
+installed-version discovery. Verified exact launch sources and
+`compatibility_unverified` references are separate from candidate ordinary-family
+pilots. Unsupported routes stay unsupported; no description grants collection authority.
+
+Synthetic tasks show **Validation-only context** instead of native-family connection
+instructions. Prepare and inspect the fixture only. Do not launch or connect native
+agents for it; actual work needs a separately reviewed real protocol and route.
+Absent usage/cost remains unavailable, not zero.
+
 ## Prepare, connect and observe
 
 1. In **Tasks**, select **New task**. Enter a recognizable name and project, then
@@ -107,6 +170,12 @@ File or launch-workflow compatibility windows do not widen either UI source gate
    assigned to A/B. Internal IDs are generated; no observation interval starts.
 3. Apply the prepared configuration. Only the reviewed managed instruction file
    can change; unapproved existing contents and common-file drift block writes.
+   The task list and detail show **Waiting for session**, not **Draft**, for real tasks.
+   Synthetic tasks instead show **Validation configuration ready** and a validation-only
+   next action; their outcome blockers do not request a native connection.
+   Next action follows the enabled preparation, ticket or connection step;
+   measurement controls appear after connection. Candidate family pilots use their
+   separate authorized harness-connect path, not an external ticket.
 4. Get new-session instructions. Copy them to your usual terminal and open a
    fresh session yourself. Production handoff requires the reviewed canonical
    Codex 0.160.0 binary hash; it never falls back to an older PATH binary.
@@ -169,6 +238,10 @@ restart does not automatically resume an observer. Explicit recovery fences an
 abandoned collector and records a gap before a new baseline. Confirm the previous
 observer is no longer running before using that action.
 
+The initial render shows loading while bootstrap is pending, with writes disabled.
+Only a successful empty read shows the first-task prompt. A failed read shows the
+service warning; retained results remain stale until a fresh read succeeds.
+
 Task writes check the current control version against concurrent CLI/window
 changes. Usage updates do not invalidate pause controls. Durable action keys
 prevent repeated clicks from performing the same action twice. Ambiguous actions
@@ -186,10 +259,18 @@ Portable harness pairs use the separate [harness configuration workflow](harness
 ## Agent application comparisons
 
 Explicit format-2 `agent_applied` comparisons preserve assignment and select an
-existing checkout/worktree and native product. Prepare context, request a fresh
-interactive native session or copy the fallback, and let its own agent apply the
+existing checkout/worktree and agent. Select **Check current branch/worktree** to
+inspect the branch and path. Select **Apply**, review the branch, worktree, harness
+and agent in the dialog, then confirm with **Apply**. Successful preparation
+requests a fresh application session when automatic opening is supported.
+Otherwise, copy the application context and open the agent yourself. Let its agent apply the
 procedure directly with native permissions. The UI reviews actual files afterward;
 there is no server publish approval or agent execution control.
+Returning from the applying agent immediately refreshes the selected task. The
+working-session dialog opens once per completed attempt; ordinary polling does
+not reopen a dismissed dialog. Its guidance identifies missing application
+identity and qualification before suggesting a connection. File verification
+alone does not enable collection.
 
 macOS Terminal opening with an installed CLI has synthetic wiring coverage and
 unverified native acceptance. Other platforms and desktop prompt deep links are

@@ -8,6 +8,52 @@ const task = { id: 'task-a', project_id: 'project-a', setup_id: 'setup-a', state
  preparation: { assigned_variant_id: 'arm-b' }, actions: [{code:'session-connect',enabled:true}], binding:{support:'synthetic_validation_only',state:'observing',sessions:[{session_id:session,identity_basis:'native_metadata_receipt'}]} };
 const bootstrap = {csrf:'b'.repeat(64),data:{projects:[{id:'project-a'}],tasks:[task],setups:[{id:'setup-a'}]}};
 function transport(reply) { const calls=[]; return {calls,fetch:async(url,options)=> {calls.push({url,options});return new Response(JSON.stringify(url.endsWith('/bootstrap')?bootstrap:url.endsWith('/session-connect')?reply:task));}}; }
+const diagnosticCodes = [
+ 'application_source_unqualified', 'application_setup_session_excluded', 'application_output_changed',
+ 'application_required', 'application_input_changed', 'application_checks_incomplete',
+ 'application_surface_unowned', 'application_identity_unavailable', 'application_fresh_session_required',
+ 'application_native_loading_unqualified', 'application_epoch_changed', 'application_workspace_changed',
+ 'application_cleanup_pending', 'application_managed_retired', 'application_attempt_stale',
+ 'application_product_mismatch', 'application_checkpoint_invalid', 'application_report_conflict',
+ 'application_launch_unavailable', 'application_restart_interrupted', 'application_abandoned',
+ 'application_execution_approval_required', 'application_execution_changed', 'application_preparation_failed',
+ 'application_permission_stale', 'application_permission_decision_invalid', 'application_permission_outside_ceiling',
+ 'application_permission_accept_unqualified', 'application_permission_transport_failed', 'application_termination_unverified',
+ 'application_integrity_unverified', 'application_recovery_required', 'application_publication_unqualified',
+ 'application_confinement_unverified', 'application_review_changed', 'application_preimage_changed',
+ 'application_planning_failed', 'application_workspace_mismatch', 'application_path_forbidden',
+ 'application_preview_changed', 'application_scope_invalid', 'application_job_active', 'application_review_required',
+ 'binding_pilot_scope_invalid', 'binding_pilot_family_scope', 'binding_pilot_control_only', 'binding_family_limit',
+ 'external_preparation_required', 'external_window_closed',
+];
+for (const code of diagnosticCodes) {
+ test(`preserves fixed diagnostic ${code} from disabled action without posting`, async () => {
+  const blocked = {...task, actions:[{code:'session-connect',enabled:false,reason:code}]};
+  const calls=[];
+  const fetch=async(url,options)=>{calls.push(options.method);return new Response(JSON.stringify(url.endsWith('/bootstrap')?bootstrap:blocked));};
+  await assert.rejects(run('connect',{origin,product:'codex',project:'project-a',task:'task-a',receipt},fetch), {message:code});
+  assert.deepEqual(calls,['GET','GET']);
+ });
+ test(`preserves fixed diagnostic ${code} from rejected server connection`, async () => {
+  const calls=[];
+  const fetch=async(url,options)=>{calls.push(options.method);return new Response(JSON.stringify(url.endsWith('/bootstrap')?bootstrap:url.endsWith('/session-connect')?{error:code}:task),{status:url.endsWith('/session-connect')?409:200});};
+  await assert.rejects(run('connect',{origin,product:'codex',project:'project-a',task:'task-a',receipt},fetch), {message:code});
+  assert.deepEqual(calls,['GET','GET','POST']);
+ });
+}
+test('unknown diagnostics remain sanitized at action and server boundaries', async () => {
+ for (const boundary of ['action','server']) {
+  const calls=[];
+  const fetch=async(url,options)=>{
+   calls.push(options.method);
+   return new Response(JSON.stringify(url.endsWith('/bootstrap')?bootstrap:url.endsWith('/session-connect')?{error:'application_PRIVATE_CONTENT'}:
+    boundary==='action'?{...task,actions:[{code:'session-connect',enabled:false,reason:'application_PRIVATE_CONTENT'}]}:task),{status:url.endsWith('/session-connect')?409:200});
+  };
+  await assert.rejects(run('connect',{origin,product:'codex',project:'project-a',task:'task-a',receipt},fetch),
+   {message:boundary==='action'?'binding_provider_unavailable':'local_ui_request_failed'});
+  assert.deepEqual(calls,boundary==='action'?['GET','GET']:['GET','GET','POST']);
+ }
+});
 test('opaque native receipt uses shared server binding and starts observation without picker or ticket', async()=>{
  const f=transport({...task,connection:{status:'connected',project_id:'project-a',task_id:'task-a',session_id:session,assigned_variant_id:'arm-b',identity_basis:'native_metadata_receipt',evidence:'server_verified_identity_source_and_relations',collection_active:true,cost_coverage:'partial',automatic_children:true}});
  const result=await run('connect',{origin,product:'codex',project:'project-a',task:'task-a',receipt},f.fetch);

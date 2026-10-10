@@ -15,10 +15,12 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts/hm.mjs"
   ],
   "scripts": {
     "prepare": "husky",
+    "start": "node scripts/hm.mjs",
     "commitlint": "commitlint",
     "lint": "eslint . --max-warnings 0 && npm --workspace harness-delta-local-ui run lint",
     "lint:fix": "npm run lint -- --fix",
@@ -55,7 +57,7 @@
     "vitest": "5.0.2"
   },
   "bin": {
-    "hm": "dist/cli.js"
+    "hm": "scripts/hm.mjs"
   },
   "workspaces": [
     "ui"

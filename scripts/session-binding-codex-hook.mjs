@@ -9,13 +9,14 @@ const id = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,1
 const path = value => typeof value === 'string' && value.length <= 4096 && isAbsolute(value);
 const inside = (root, target) => { const r = relative(root, target); return r !== '' && r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
 try {
-  const args = process.argv.slice(2); let directory; const roots = [];
+  const args = process.argv.slice(2); let directory; let productVersion = '0.160.0'; const roots = [];
   for (let i = 0; i < args.length; i += 2) {
     if (args[i] === '--receipt-directory') directory = args[i + 1];
     else if (args[i] === '--source-root') roots.push(args[i + 1]);
+    else if (args[i] === '--product-version') productVersion = args[i + 1];
     else throw new Error('invalid');
   }
-  if (!path(directory) || roots.length === 0 || roots.some(root => !path(root))) throw new Error('invalid');
+  if (!['0.160.0', '0.162.0'].includes(productVersion) || !path(directory) || roots.length === 0 || roots.some(root => !path(root))) throw new Error('invalid');
   let bytes = 0; const chunks = [];
   for await (const chunk of process.stdin) { bytes += chunk.length; if (bytes > 65536) throw new Error('invalid'); chunks.push(chunk); }
   const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -38,7 +39,8 @@ try {
     directoryStat.uid !== process.getuid?.()) throw new Error('invalid');
   const receipt = randomUUID();
   // Deliberately no object spread: arbitrary native hook fields never persist.
-  const record = { schemaVersion: 1, receipt, productVersion: '0.160.0', event,
+  // Version comes from reviewed hook configuration, never an unverified input field or environment.
+  const record = { schemaVersion: 1, receipt, productVersion, event,
     sessionId: event === 'SessionStart' ? input.session_id : input.agent_id,
     // Native session_id is the shared family root, not the immediate parent.
     // The authorized provider resolves parentage from this exact source's header.

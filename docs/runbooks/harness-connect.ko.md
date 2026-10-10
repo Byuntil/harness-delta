@@ -174,6 +174,34 @@ Claude 기준선의 제외 own request ID는 실시간 replay 목록과 별도�
 
 격리 qualification UI는 부모·자식별 자체 요청, 입력·출력, 부분 비용과 관측 합계를 표시합니다. 같은 살아 있는 부모의 측정 재개와 소유 AI 긴급 중단을 분리하며, 기존 기한·안전 카운터는 초기화하지 않습니다. pause 중 원본 카운터는 미확인입니다. [제한된 실행 절차](../validation/codex-ordinary-binding-qualification.md)를 참조하세요.
 
+## Codex 0.162.0 일반 root 로컬 pilot
+
+검토된 `functional_pilot`에서 정확한
+`codex-01620-ordinary-root-human-pilot` source profile만 사용합니다.
+일반 서버는 계속 차단됩니다. 운영자가 정확한 작업을 지정하고 관측을 별도로
+승인해야 합니다.
+
+```sh
+npm start -- --db "$DB" ui --pilot-task "$TASK_ID" --pilot-observe --pilot-until-stop
+```
+
+provider와 검토된 SessionStart hook 제안에는 독립적으로 확인한 제품 버전
+`0.162.0`을 동일하게 지정합니다. metadata-only 적용 신원은 transcript 읽기
+권한이 아닙니다. native 시작 전에 프로젝트 로컬 hook 설치/trust와 정확한
+receipt/source 디렉터리를 검토합니다. receipt를 임의로 만들면 안 됩니다.
+새 root 하나만 허용하며 자식 세션은 미지원입니다.
+
+`agent_applied`라면 먼저 별도 적용 세션을 완료하고 실제 파일과 검사를 검토한 뒤,
+선택한 checkout의 새 작업 root에서 `harness-connect`를 호출합니다.
+적용 세션 신원 재사용, 미완료 적용, 파일 변경, 이전 root는 계속 차단됩니다.
+
+자체 응답 관측은 0.160.0 파서를 재사용하며 immutable `codex_workflow` parser
+lineage와 `compatibility_unverified`를 표시합니다. 이 표시는 launch 권한이나
+production admission이 아닙니다. 계약 실패는 다음 source 읽기 전에 공통
+parser tuple을 무효화합니다. 비용은 부분 기준가격 추정이며 전체 합계,
+native 지침 로딩 증명이나 추론이 아닙니다.
+[ADR 013](../decisions/013-forward-version-compatibility.md)을 참고하세요.
+
 ## Claude 사용자 조작 UI pilot
 
 로컬 운영자는 ordinary provider에 나열된 정확한 후보 버전(현재 2.1.291,

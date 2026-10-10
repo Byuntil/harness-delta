@@ -9,6 +9,7 @@ import { buildExternalTaskSetup } from './external-session-service.js';
 import type { Store } from './store.js';
 import { comparisonRelativePath, ensureRepositoryDirectory, hashBytes, readComparison, readRepositoryFile, readStrictJson, checkOriginalTools } from './harness-config.js';
 import { checkSharedBinding } from './local-web-shared-guard.js';
+import { readPriceTable } from './pricing.js';
 // Private path strings retain their exact filesystem spelling.
 function privateJson(value:unknown):string {
  if(Array.isArray(value))return '['+value.map(privateJson).join(',')+']';
@@ -62,9 +63,19 @@ export function createSharedSetupManager(store:Store,privateDb:Database.Database
     return {project,template,protocol,pair};
   }
   return {
+    discardPreview(token:string){tokens.delete(token);},
     preview(path:string){
       const raw=readStrictJson(readRepositoryFile(dirname(path),basename(path))) as {kind?:unknown};if(raw.kind!=='harness-delta.comparison')fail('invalid_shared_config');
-      const possible=projects().flatMap(project=>{try{const relative=comparisonRelativePath(project.local_root,path);const pair=readComparison(project.local_root,relative);return [{project_id:project.id,name:basename(project.local_root),pair:pair.descriptor,original_tools:pair.bundles.map(bundle=>checkOriginalTools(project.local_root,bundle)),templates:profiles().filter(profile=>!profile.shared_binding&&profile.setup.workflow.assignment.project_id===project.id).map(profile=>{let blocker:string|null=null;try{eligible(project.id,profile.id,path);}catch(error){blocker=error instanceof Error&&/^(?:shared_|unknown_|protocol_|workflow_)/.test(error.message)?error.message:'shared_registration_required';}return {id:profile.id,name:profile.name,runtime:profile.setup.runtime,blocker};})}];}catch{return [];}});
+      const possible=projects().flatMap(project=>{try{const relative=comparisonRelativePath(project.local_root,path);const pair=readComparison(project.local_root,relative);return [{project_id:project.id,name:basename(project.local_root),pair:pair.descriptor,original_tools:pair.bundles.map(bundle=>checkOriginalTools(project.local_root,bundle)),templates:profiles().filter(profile=>!profile.shared_binding&&profile.setup.workflow.assignment.project_id===project.id).map(profile=>{
+        let blocker:string|null=null;
+        let review:{profile:LocalWebProfile;protocol:ReturnType<typeof comparisonProtocol>;price_table:ReturnType<typeof readPriceTable>}|undefined;
+        try{
+          const selected=eligible(project.id,profile.id,path);
+          if(selected.protocol.schema_version!==2)fail('shared_registration_mismatch');
+          review={profile,protocol:selected.protocol,price_table:readPriceTable(store,selected.protocol.price_table_id)};
+        }catch(error){blocker=error instanceof Error&&/^(?:shared_|unknown_|protocol_|workflow_)/.test(error.message)?error.message:'shared_registration_required';}
+        return {id:profile.id,name:profile.name,runtime:profile.setup.runtime,blocker,...(review?{review}:{})};
+      })}];}catch{return [];}});
       if(!possible.length)fail('shared_project_required');for(const [key,value] of tokens)if(value.expires<Date.now())tokens.delete(key);if(tokens.size>=64)fail('shared_import_limit');const token=randomUUID();tokens.set(token,{path,expires:Date.now()+300000,projects:Object.fromEntries(possible.map(project=>[project.project_id,{settingsHash:project.pair.settings_hash,templates:Object.fromEntries(project.templates.map(template=>[template.id,hashBytes(JSON.stringify(profiles().find(profile=>profile.id===template.id)))]))}]))});return {shared:true,token,projects:possible};
     },
     bind(input:{token:string;project_id:string;template_id:string}){
