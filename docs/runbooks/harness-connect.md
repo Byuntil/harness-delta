@@ -169,7 +169,10 @@ npm start -- --db "$DB" ui --pilot-task "$TASK_ID" --pilot-observe --pilot-until
 ```
 
 Configure the provider and reviewed SessionStart hook proposal with the independently
-verified `0.162.0` product version. Metadata-only application identity does not
+verified `0.162.0` or `0.162.1` product version. Use the same actual version in the
+task's workflow and frozen protocol. The existing profile ID also covers the
+0.162.1 candidate; it does not alias the executable or receipt to 0.162.0.
+Metadata-only application identity does not
 authorize transcript reading. Review project-local hook installation/trust and
 the exact receipt/source directories before native startup; never fabricate receipts.
 Only one fresh root is eligible; child sessions are unsupported.
@@ -186,11 +189,17 @@ the shared parser tuple before another source read. Costs remain partial referen
 estimates, not complete totals, native-loading proof, or inference. See
 [ADR 013](../decisions/013-forward-version-compatibility.md).
 
+The [0.162.1 release](https://github.com/openai/codex/releases/tag/rust-v0.162.1)
+fixes TUI questions and startup feature compatibility. Synthetic checks cover
+versioned receipts, selected-checkout application identity, root-only observation,
+pause/resume and contract invalidation. They do not qualify native hook loading
+or latest counter semantics; those still require an approved native trial.
+
 ## Claude human-operated UI pilot
 
 The local operator may select one prepared `functional_pilot` task using the
 `claude-ordinary-human-pilot` source profile, with an exact candidate version
-listed by the ordinary provider (currently 2.1.291, 2.1.293 or 2.1.294). Existing file and
+listed by the ordinary provider (currently 2.1.291, 2.1.293, 2.1.294 or 2.1.296). Existing file and
 launch-workflow version compatibility does not qualify ordinary family sources.
 The profile, binary version, project source directory and receipt directory must
 be reviewed before installation or native observation. A browser or manifest
@@ -226,7 +235,12 @@ transcript fields, command-hook loading or counter compatibility. The ordinary
 parser is unchanged; 2.1.294 has synthetic candidate coverage for connection,
 family usage, pause/resume and human completion.
 
-This preparation has synthetic evidence only. Actual 2.1.293 or 2.1.294 skill loading,
+The [2.1.296 change record](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21296)
+includes managed-hook and token-count fixes, but does not qualify the ordinary
+source. The unchanged parser has synthetic 2.1.296 identity, own-request replay,
+baseline exclusion, family-ceiling and pilot-gate coverage.
+
+This preparation has synthetic evidence only. Actual 2.1.293, 2.1.294 or 2.1.296 skill loading,
 family counters, pause/resume and human completion still need an explicitly
 approved native trial. Ordinary production admission, full task cost and
 inferential decisions remain unavailable.

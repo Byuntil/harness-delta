@@ -19,8 +19,12 @@ test.each([
   { version: '0.162.0', boundary: 'contract' },
   { version: '0.162.0', boundary: 'header' },
   { version: '0.162.0', boundary: 'replacement' },
+  { version: '0.162.1', boundary: 'drift' },
+  { version: '0.162.1', boundary: 'contract' },
+  { version: '0.162.1', boundary: 'header' },
+  { version: '0.162.1', boundary: 'replacement' },
 ])('application pilot %j preserves source authority and lifecycle fences', async ({ version, boundary }) => {
-  const f = localWebFixture(version === '0.162.0' ? codexRootHumanPilotProfileId : codexHumanPilotProfileId, { product: 'codex', productVersion: version });
+  const f = localWebFixture(version === '0.160.0' ? codexHumanPilotProfileId : codexRootHumanPilotProfileId, { product: 'codex', productVersion: version });
   try {
     const setup = ExternalTaskSetupSchema.parse({
       workflow: f.input, runtime: { model: null, effort: null },
@@ -47,8 +51,8 @@ test.each([
     let now = new Date().toISOString();
     const provider = new CodexSessionBindingProvider({
       receiptDirectory: journal, sourceRoots: [join(f.home, 'sessions')], projectRoot: f.project,
-      maxDepth: 1, maxFamilyMembers: version === '0.162.0' ? 1 : 3, clock: () => now,
-      productVersion: version, ...(version === '0.162.0' ? { ordinaryRootPilot: true } : {}),
+      maxDepth: 1, maxFamilyMembers: version === '0.160.0' ? 3 : 1, clock: () => now,
+      productVersion: version, ...(version === '0.160.0' ? {} : { ordinaryRootPilot: true }),
     });
     const scope = issueCodexHumanPilotScope(f.store, taskId, provider);
     const receiptFor = (root: ReturnType<typeof f.newRoot>) => {
@@ -109,7 +113,7 @@ test.each([
     await service.tick(taskId);
     expect(service.status(taskId)).toMatchObject({ state: 'observing', roots: 1, children: 0, requests: 1, complete_cost: null, inference: false });
     expect(f.store.all('SELECT * FROM comparison_assignments')).toHaveLength(1);
-    if (version === '0.162.0') {
+    if (version !== '0.160.0') {
       const pin = f.store.get<{ payload: string }>('SELECT payload FROM session_source_compatibility WHERE session_id=?', [working.id]);
       if (!pin) throw new Error('missing_fixture_compatibility');
       expect(JSON.parse(pin.payload)).toMatchObject({ state: 'compatibility_unverified', product_version: version, parser_version: '0.160.0', source: 'codex_workflow' });

@@ -110,7 +110,7 @@ test.each(['source', 'process', 'revoked', 'deleted', 'expired-new'] as const)('
   } finally { await domain.close?.(); f.cleanup(); }
 });
 
-test.each(['2.1.293', '2.1.294'])('Claude %s pilot preparation does not admit direct native execution or real allocation', productVersion => {
+test.each(['2.1.293', '2.1.294', '2.1.296'])('Claude %s pilot preparation does not admit direct native execution or real allocation', productVersion => {
   const f = localWebFixture('claude-ordinary-human-pilot', { product: 'claude_code', productVersion });
   try {
     expect(() => assignTask(f.store, f.input.assignment)).toThrow('real_experiment_disabled');

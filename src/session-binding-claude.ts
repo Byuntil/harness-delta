@@ -44,6 +44,7 @@ export interface ClaudeTranscriptProfile { readonly version: string; readonly st
 /** Exact versions only. A candidate profile is synthetic-fixture evidence: production
  * binding stays closed until an approved native qualification promotes it. */
 export const claudeBindingProfiles: readonly ClaudeTranscriptProfile[] = Object.freeze([
+  Object.freeze({ version: '2.1.296', status: 'candidate' as const, evidence: 'official-changelog-2.1.296;synthetic-fixtures;native-qualification-pending' }),
   Object.freeze({ version: '2.1.294', status: 'candidate' as const, evidence: 'official-changelog-2.1.294;synthetic-fixtures;native-qualification-pending' }),
   Object.freeze({ version: '2.1.293', status: 'candidate' as const, evidence: 'synthetic-fixtures;native-qualification-pending' }),
   Object.freeze({ version: '2.1.291', status: 'candidate' as const, evidence: 'official-docs-2026-10-07;synthetic-fixtures;native-qualification-pending' }),

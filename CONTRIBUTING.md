@@ -108,8 +108,11 @@ The accepted [forward-version compatibility policy](docs/decisions/013-forward-v
 allows conditional reuse of a verified parser for newer releases within declared
 source-specific windows, with unverified estimates kept separate and incompatible
 data invalidated. Runtime rules live in `src/source-compatibility.ts`; exact profiles
-remain the evidence boundary for verified support. Codex CLI 0.161.0 and Claude
-Code 2.1.293 use conditional parser reuse, not new exact admissions.
+remain the evidence boundary for verified support. The current stable Codex CLI
+0.162.1 and Claude Code 2.1.296 use conditional parser reuse, not new exact
+admissions. Ordinary binding separately permits the exact Codex 0.162.0/0.162.1
+root-only and Claude 2.1.291/2.1.293/2.1.294/2.1.296 candidates under explicit
+local human-pilot authority; see [Harness Connect](docs/runbooks/harness-connect.md).
 
 Registered file adapters live in `src/adapter-profiles.ts`. Verified registration is an exact `(product, version)` allowlist. Conditional parser selection is separate. A new version whose semantics are unchanged is data, fixtures, and evidence. A semantic change is a named code variant plus tests; the old variant is not edited to fit the new version. Codex 0.158.0 uses the checkpoint variant and a historical exact-version admission. See the [admission workflow](docs/runbooks/codex-version-admission.md) and [current offline readiness limits](docs/validation/codex-01580-offline-readiness.md). The archived live report does not qualify the current source identity or establish whole-task completeness. The conformance runner is manual. `npm test` runs offline synthetic unit tests of the report projector, the candidate parser, and the confirmation helpers. It does not run the conformance runner, spawn product CLIs, or open real sessions. See [ADR 007](docs/decisions/007-adapter-version-profiles.md).
 

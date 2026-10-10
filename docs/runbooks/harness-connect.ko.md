@@ -170,7 +170,10 @@ npm start -- --db "$DB" ui --pilot-task "$TASK_ID" --pilot-observe --pilot-until
 ```
 
 provider와 검토된 SessionStart hook 제안에는 독립적으로 확인한 제품 버전
-`0.162.0`을 동일하게 지정합니다. metadata-only 적용 신원은 transcript 읽기
+`0.162.0` 또는 `0.162.1`을 동일하게 지정합니다. 작업의 workflow와 동결한
+protocol에도 실제 버전을 동일하게 넣으세요. 기존 profile ID는 0.162.1 후보에도
+사용하지만 executable이나 receipt의 버전을 0.162.0으로 바꾸지는 않습니다.
+metadata-only 적용 신원은 transcript 읽기
 권한이 아닙니다. native 시작 전에 프로젝트 로컬 hook 설치/trust와 정확한
 receipt/source 디렉터리를 검토합니다. receipt를 임의로 만들면 안 됩니다.
 새 root 하나만 허용하며 자식 세션은 미지원입니다.
@@ -186,10 +189,16 @@ parser tuple을 무효화합니다. 비용은 부분 기준가격 추정이며 �
 native 지침 로딩 증명이나 추론이 아닙니다.
 [ADR 013](../decisions/013-forward-version-compatibility.md)을 참고하세요.
 
+[0.162.1 릴리스](https://github.com/openai/codex/releases/tag/rust-v0.162.1)는
+TUI 질문과 시작 시 feature 호환성을 수정합니다. 합성 검사는 버전별 receipt,
+선택 checkout의 적용 신원, root-only 관측, pause/resume과 계약 무효화를 다룹니다.
+native hook 로딩이나 최신 counter 의미를 검증하지는 않으며 별도로 승인된
+native 시험이 계속 필요합니다.
+
 ## Claude 사용자 조작 UI pilot
 
 로컬 운영자는 ordinary provider에 나열된 정확한 후보 버전(현재 2.1.291,
-2.1.293 또는 2.1.294)과 `claude-ordinary-human-pilot` source profile을 사용한 준비된
+2.1.293, 2.1.294 또는 2.1.296)과 `claude-ordinary-human-pilot` source profile을 사용한 준비된
 `functional_pilot` 작업 하나를 선택할 수 있습니다. 기존 file·실행 workflow의
 버전 호환성은 일반 가족 원본의 지원 검증이 아닙니다. 설치·실제 관측 전에
 profile, binary 버전, 프로젝트 원본 디렉터리와 receipt 디렉터리를 검토하세요.
@@ -225,6 +234,11 @@ command hook 로딩이나 counter 호환성을 증명하지 않습니다. ordina
 변경하지 않았으며, 2.1.294 후보는 연결, 가족 usage, pause/resume과 사용자 완료의
 합성 검증 범위를 갖습니다.
 
-이 준비는 합성 증거만 갖습니다. 실제 2.1.293 또는 2.1.294 skill 로딩, 가족 counter,
+[2.1.296 변경 기록](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21296)은
+managed hook과 token count 수정을 포함하지만 일반 원본의 지원을 검증하지는 않습니다.
+변경하지 않은 파서는 2.1.296 신원, 자체 요청 replay, 기준선 제외, 가족 수 한도와
+pilot gate의 합성 검증 범위를 갖습니다.
+
+이 준비는 합성 증거만 갖습니다. 실제 2.1.293, 2.1.294 또는 2.1.296 skill 로딩, 가족 counter,
 pause/resume과 사용자 완료는 별도로 승인된 native 시험이 필요합니다.
 일반 제품 수집 지원, 전체 작업 비용과 추론 결정은 아직 사용할 수 없습니다.

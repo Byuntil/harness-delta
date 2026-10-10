@@ -56,7 +56,7 @@ test('native receipt is the identity proof and producer retains only allowlisted
   await expect(f.provider.resolveCurrent({ receipt: randomUUID() })).rejects.toThrow('binding_identity_unavailable');
 });
 
-test.each([undefined, '0.160.0', '0.162.0'])('reviewed hook configuration %s supplies metadata-only root application identity', async productVersion => {
+test.each([undefined, '0.160.0', '0.162.0', '0.162.1'])('reviewed hook configuration %s supplies metadata-only root application identity', async productVersion => {
   const f = fixture(productVersion); writeFileSync(f.path('root'), 'NOT A TRANSCRIPT');
   const proposal = proposeCodexSessionBindingHooks({ receiptDirectory: f.journal, sourceRoots: [f.dir], projectRoot: f.dir,
     nodeExecutable: process.execPath, scriptPath: resolve('scripts/session-binding-codex-hook.mjs'),
@@ -75,7 +75,7 @@ test.each([undefined, '0.160.0', '0.162.0'])('reviewed hook configuration %s sup
   expect(f.provider.capabilities().productionSupported).toBe(false);
 });
 
-test.each(['', '0.162', '0.0162.0', '0.162.0-beta.1', '0.161.0', '0.163.0', '0.164.0', '1.0.0'])(
+test.each(['', '0.162', '0.0162.0', '0.162.0-beta.1', '0.162.1-rc.1', '0.162.2', '0.161.0', '0.163.0', '0.164.0', '1.0.0'])(
   'unreviewed or malformed configured version %s fails before source access', productVersion => {
     const options = { receiptDirectory: '/synthetic/absent/receipts', sourceRoots: ['/synthetic/absent/sources'],
       projectRoot: '/synthetic/absent/project', productVersion };
@@ -91,6 +91,7 @@ test.each(['', '0.162', '0.0162.0', '0.162.0-beta.1', '0.161.0', '0.163.0', '0.1
 
 test.each([
   ['0.160.0', '0.162.0'], ['0.162.0', '0.160.0'], ['0.162.0', '0.162'], ['0.162.0', '0.164.0'],
+  ['0.162.0', '0.162.1'], ['0.162.1', '0.162.0'],
 ])('provider %s rejects receipt version %s before source access', async (productVersion, receiptVersion) => {
   const f = fixture(productVersion); const receipt = f.receipt('root');
   const path = join(f.journal, `${receipt}.json`);
@@ -100,8 +101,8 @@ test.each([
   await expect(f.provider.resolveCurrent({ receipt })).rejects.toThrow('binding_identity_unavailable');
 });
 
-test('default provider does not opt into reviewed candidate receipts', async () => {
-  const f = fixture('0.162.0'); const receipt = f.receipt('root');
+test.each(['0.162.0', '0.162.1'])('default provider does not opt into %s candidate receipts', async productVersion => {
+  const f = fixture(productVersion); const receipt = f.receipt('root');
   const provider = new CodexSessionBindingProvider({ receiptDirectory: f.journal, sourceRoots: [f.dir], projectRoot: f.dir });
   await expect(provider.resolveCurrent({ receipt })).rejects.toThrow('binding_identity_unavailable');
 });
@@ -114,22 +115,24 @@ test.each(['0.160.0', '0.162.0'])('application identity for %s retains strict re
   expect(() => f.provider.resolveApplicationIdentity({ receipt: childReceipt })).toThrow('binding_qualification_live_root_required');
 });
 
-test('root-only candidate source requires explicit authority and rejects child receipts before opening their headers', async () => {
-  const f = fixture('0.162.0');
+test.each(['0.162.0', '0.162.1'])('root-only candidate %s requires explicit authority and rejects child receipts before opening their headers', async productVersion => {
+  const f = fixture(productVersion);
   const provider = new CodexSessionBindingProvider({
     receiptDirectory: f.journal, sourceRoots: [f.dir], projectRoot: f.dir,
-    productVersion: '0.162.0', ordinaryRootPilot: true, maxDepth: 1, maxFamilyMembers: 1, clock: () => at(10),
+    productVersion, ordinaryRootPilot: true, maxDepth: 1, maxFamilyMembers: 1, clock: () => at(10),
   });
   const root = await provider.resolveCurrent({ receipt: f.receipt('root') });
   f.write('root', [f.meta('root'), f.context(), f.usage()]);
-  expect((await provider.readUsage(root, null, f.scope([{ id: 'root', parent: null }]))).records[0]?.payload.product_version).toBe('0.162.0');
+  expect((await provider.readUsage(root, null, f.scope([{ id: 'root', parent: null }]))).records[0]?.payload).toMatchObject({
+    product_version: productVersion, input_total: { value: 100 }, output_total: { value: 20 },
+  });
   f.write('child', [f.meta('child', 'root', 1)]);
   f.receipt('child', 'root');
   writeFileSync(f.path('child'), 'PRIVATE_SYNTHETIC_UNREADABLE_HEADER\n');
   expect(await provider.discoverChildren(root)).toMatchObject({ children: [], gaps: ['binding_family_limit'] });
 });
 
-test.each([{ productVersion: '0.160.0', maxDepth: 1, maxFamilyMembers: 1 }, { productVersion: '0.162.0', maxDepth: 1, maxFamilyMembers: 3 }])(
+test.each([{ productVersion: '0.160.0', maxDepth: 1, maxFamilyMembers: 1 }, { productVersion: '0.162.0', maxDepth: 1, maxFamilyMembers: 3 }, { productVersion: '0.162.1', maxDepth: 1, maxFamilyMembers: 3 }])(
   'candidate source rejects broadened configuration %j', options => {
     const f = fixture();
     expect(() => new CodexSessionBindingProvider({

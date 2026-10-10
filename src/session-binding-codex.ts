@@ -11,7 +11,8 @@ import { bindingIdentityKey, CurrentIdentityRequestSchema, VerifiedSessionIdenti
   type SessionBindingProvider, type UsageBatch, type VerifiedSessionIdentity } from './session-binding-contract.js';
 
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
-const receiptVersionSchema = z.enum(['0.160.0', '0.162.0']);
+export const codexRootPilotVersions = Object.freeze(['0.162.0', '0.162.1'] as const);
+const receiptVersionSchema = z.enum(['0.160.0', ...codexRootPilotVersions]);
 const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), receipt: z.uuid(), productVersion: receiptVersionSchema,
   event: z.enum(['SessionStart', 'SubagentStart']), sessionId: IdSchema, parentSessionId: IdSchema.nullable(), turnId: IdSchema.nullable(),
   nativeRootSessionId: IdSchema.optional(),
@@ -96,7 +97,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.maxDepth = options.maxDepth ?? 8; this.maxReceipts = options.maxReceipts ?? 1024; this.maxSourceBytes = options.maxSourceBytes ?? 8 * 1024 * 1024;
     this.maxFamilyMembers = options.maxFamilyMembers ?? 32;
-    if(this.ordinaryRootPilot&&(this.productVersion!=='0.162.0'||this.maxDepth!==1||this.maxFamilyMembers!==1))throw new Error('binding_configuration_invalid');
+    if(this.ordinaryRootPilot&&(!codexRootPilotVersions.some(version=>version===this.productVersion)||this.maxDepth!==1||this.maxFamilyMembers!==1))throw new Error('binding_configuration_invalid');
     for (const [value, limit] of [[this.maxFamilyMembers, 32], [this.maxDepth, 31], [this.maxReceipts, 65536], [this.maxSourceBytes, 8 * 1024 * 1024]] as const) {
       if (!Number.isSafeInteger(value) || value < 1 || value > limit) throw new Error('binding_configuration_invalid');
     }
@@ -113,7 +114,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     if(projectRoot!==this.projectRoot)throw new Error('binding_pilot_scope_invalid');
   }
   assertPilotVersion(version: string): void {
-    if(version!==this.productVersion||this.maxDepth!==1||version==='0.162.0'&&this.maxFamilyMembers!==1)throw new Error('binding_pilot_scope_invalid');
+    if(version!==this.productVersion||this.maxDepth!==1||codexRootPilotVersions.some(candidate=>candidate===version)&&this.maxFamilyMembers!==1)throw new Error('binding_pilot_scope_invalid');
   }
   private checkDirectory(): void {
     let stat: ReturnType<typeof lstatSync>;
@@ -388,7 +389,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
   async readUsage(session: VerifiedSessionIdentity, cursor: string | null, inputScope: CandidateScope, boundary?: BindingReadBoundary): Promise<UsageBatch> {
     let scope: CandidateScope;
     try { scope = checkedCandidateScope(inputScope); } catch { throw new Error('binding_scope_mismatch'); }
-    const compatibility = this.ordinaryRootPilot ? resolveSourceCompatibility('codex','0.162.0','codex_workflow','codex-workflow-own-response-v1') : null;
+    const compatibility = this.ordinaryRootPilot ? resolveSourceCompatibility('codex',this.productVersion,'codex_workflow','codex-workflow-own-response-v1') : null;
     if(this.ordinaryRootPilot&&(scope.sessions.length!==1||session.parentSessionId!==null||!compatibility))throw new Error('binding_pilot_family_scope');
     const record = this.verified(session);
     const mapping = scope.sessions.find(s => s.nativeSessionId === session.sessionId);

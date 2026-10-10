@@ -38,6 +38,12 @@ Use [CONTRIBUTING](CONTRIBUTING.md) for Node 24 setup, checks, Git hooks and con
 Agents use [AGENTS.md](AGENTS.md) and the [development workflow](docs/development/workflow.md).
 The [product requirements](docs/requirements.md) define collection and acceptance gates.
 
+For recurring native-version support updates, use the project-local
+[tool-version-update skill](.claude/skills/tool-version-update/SKILL.md):
+`$tool-version-update` in Codex or `/tool-version-update` in Claude Code.
+It checks upstream contract changes and requires actual-binary qualification at
+source-specific version boundaries or earlier semantic changes before expanding support.
+
 SQL migrations live under `src/migrations` and are copied to `dist/migrations`.
 `src/index.ts` exports `Store` and strict metadata schemas.
 `Store.putEvent` inserts once per source key: identical replay returns false;

@@ -117,7 +117,7 @@ the generated report if you need a historical snapshot after deletion or new dat
 Implemented 2026-10-08: [ADR 013](../decisions/013-forward-version-compatibility.md)
 enables automatic conditional parser reuse for stable releases inside finite windows.
 File collection uses Codex 0.158.0 for newer versions below 0.164.0, and Claude Code
-2.1.283 for newer versions below 2.2.0. Codex CLI 0.161.0 and Claude Code 2.1.293/2.1.294
+2.1.283 for newer versions below 2.2.0. Current stable Codex CLI 0.162.1 and Claude Code 2.1.296
 therefore enroll by default with `compatibility_unverified` trust. Exact registered
 versions remain verified; prereleases, suffixes, old unregistered versions and
 out-of-window releases fail before source access.
@@ -131,9 +131,9 @@ An all-unverified task has a null verified total, not a false zero. All data sta
 
 ```sh
 node dist/cli.js --db ./local.db compatibility status
-node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.161.0 --source file
-node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.293 --source file
-node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.161.0 --source file --reason semantic_incompatibility
+node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.162.1 --source file
+node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.296 --source file
+node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.162.1 --source file --reason semantic_incompatibility
 ```
 
 Expected: inspect returns actual version, selected parser and trust; invalidate

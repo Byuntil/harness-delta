@@ -40,7 +40,7 @@ blockers; a writable configuration flag cannot admit a source.
 
 ## Conditional forward versions
 
-Stable Codex releases newer than 0.160.0 and below 0.164.0, including 0.161.0,
+Stable Codex releases newer than 0.160.0 and below 0.164.0, including 0.162.1,
 can reuse `codex-workflow-own-response-v1` or the separate
 `codex-workflow-direct-child-v1` profile in a `functional_pilot`.
 Set execution JSON `product_version` to the actual Codex version; the workflow
@@ -50,7 +50,7 @@ The adapter checks both executable bytes and `--version`; the exact 0.160.0
 path retains its existing pinned identity. Root/direct-child scope and permissions
 remain unchanged; a compatibility rule does not admit broader binding families.
 
-Claude Code releases newer than 2.1.291 and below 2.2.0, including 2.1.293 and 2.1.294, can
+Claude Code releases newer than 2.1.291 and below 2.2.0, including 2.1.296, can
 reuse `claude-workflow-own-trace-v1` for a fresh parent-only functional launch.
 Set `binary.version`, configuration `product_version`, and protocol profile version
 to the actual version; supply the executable SHA-256. Runtime checks remain active.

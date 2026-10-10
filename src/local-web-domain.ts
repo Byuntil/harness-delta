@@ -29,7 +29,7 @@ import { readOnlinePriceCatalogStatus, refreshOnlinePriceCatalog } from './price
 import { localWebError, type LocalWebDomain } from './local-web-server.js';
 import { createSessionBindingService } from './session-binding-service.js';
 import { ClaudeSessionBindingProvider } from './session-binding-claude.js';
-import { CodexSessionBindingProvider } from './session-binding-codex.js';
+import { CodexSessionBindingProvider, codexRootPilotVersions } from './session-binding-codex.js';
 import { resolveSourceCompatibility, effectiveSourceCompatibility } from './source-compatibility.js';
 import { functionalWorkflowEligible, comparisonReadiness } from './readiness-store.js';
 import { parseProtocol } from './flexible-contracts.js';
@@ -63,7 +63,7 @@ export function localWebSupport(store: Store, profile: LocalWebProfile) {
   const synthetic = workflow.assignment.metadata.product === 'synthetic' || protocol.schema_version === 2 && protocol.purpose === 'synthetic_validation';
   const familyPilot = protocol.schema_version === 2 && isHumanPilotProtocol(protocol);
   const rootPilot = familyPilot && protocol.schema_version === 2 && protocol.source_profiles[0]?.profile_id === codexRootHumanPilotProfileId;
-  const parserCompatibility = rootPilot ? resolveSourceCompatibility('codex', '0.162.0', 'codex_workflow', 'codex-workflow-own-response-v1') : null;
+  const parserCompatibility = rootPilot ? resolveSourceCompatibility('codex', workflow.product_version, 'codex_workflow', 'codex-workflow-own-response-v1') : null;
   const launchAllowed = protocolRecord.status === 'frozen' && protocol.schema_version === 2 && (functionalWorkflowEligible(store, protocol) || comparisonReadiness(store, protocol.id).real_allocation);
   const launch = protocol.schema_version === 2 ? protocol.source_profiles.map(source => {
     const compatibility = source.product === 'synthetic' ? null : resolveSourceCompatibility(source.product, source.product_version,
@@ -191,8 +191,8 @@ export function createLocalWebDomain(options: LocalWebDomainOptions): LocalWebDo
       const result = config.product === 'codex'
         ? [new CodexSessionBindingProvider({ receiptDirectory: config.receipt_directory, sourceRoots: config.source_roots, projectRoot,
           ...(setupFor(record).workflow.assignment.metadata.product==='synthetic' ? {} : {productVersion:setupFor(record).workflow.product_version}),
-          ...(options.qualificationLease || options.nativePilot ? {maxDepth:1,maxFamilyMembers:setupFor(record).workflow.product_version==='0.162.0'?1:3} : {}),
-          ...(options.nativePilot?.observe && options.nativePilot.taskId===id && setupFor(record).workflow.product_version==='0.162.0' ? {ordinaryRootPilot:true} : {}) })]
+          ...(options.qualificationLease || options.nativePilot ? {maxDepth:1,maxFamilyMembers:codexRootPilotVersions.some(version=>version===setupFor(record).workflow.product_version)?1:3} : {}),
+          ...(options.nativePilot?.observe && options.nativePilot.taskId===id && codexRootPilotVersions.some(version=>version===setupFor(record).workflow.product_version) ? {ordinaryRootPilot:true} : {}) })]
         : [new ClaudeSessionBindingProvider({ receiptDir: config.receipt_directory, claudeProjectsDir: config.claude_projects_directory, projectRoot, ...(options.nativePilot ? { allowCandidateProfiles: true, maxFamilyMembers: 3, authorizeSource: source => { if (!humanPilot || options.nativePilot?.taskId !== id) throw new Error('binding_source_unqualified'); assertClaudeHumanPilotSource(humanPilot, store, id, source); } } : {}) })];
       providers.set(id, result); return result;
 
