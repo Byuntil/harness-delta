@@ -116,6 +116,13 @@ node dist/cli.js --db team.db team report team-report-1 --format markdown
 node dist/cli.js --db team.db team report team-report-1 --format markdown-readable
 ```
 
+`json`이 기본값입니다. 기존 `json`·`markdown` 출력과 고정 스냅샷 바이트는
+바뀌지 않습니다. V1의 `markdown-readable`은 기존 스냅샷의 원래 가져온 그룹,
+성분별 관측 작업 수, 품질, 재작업, 추적 기간, 설정 이탈과 source revision vector를
+표로 표시합니다. 추가 측정이나 집계를 하지 않습니다. 관측 상태 수는 이벤트 수이며,
+성분별 관측 수는 해당 값이 관측된 작업 수입니다. V2 `markdown-readable`은
+현재 이 표 대신 보고서를 JSON 블록으로 표시합니다.
+
 같은 ID·요청은 같은 고정 결과를 반환합니다. 갱신된 자료에는 새 snapshot ID가 필요합니다.
 cutoff_mismatch이면 원본에서 공통 cutoff로 다시 스냅샷을 만드세요.
 snapshot_as_of_unavailable은 현재 자료가 as_of 뒤에 도착했다는 뜻입니다. 더 늦은
@@ -141,9 +148,6 @@ node dist/cli.js --db team.db team report team-report-1 --format json
 보고서는 과거 과제·합계·입력·hash·출처를 제거한 무효화 표식만 반환합니다.
 비교에 속한 모든 writer가 대상입니다. 수신 측 개별 삭제·보존기간·프로젝트 삭제도
 같은 경로를 사용하며 오래된 파일이나 새 package/snapshot ID로 복구할 수 없습니다.
-
-`markdown-readable`은 기존 스냅샷의 표를 표시하며 추가 측정·집계를 하지 않습니다.
-기존 JSON/Markdown과 고정 스냅샷 바이트는 유지됩니다.
 
 ## 재현 가능한 오프라인 검증
 

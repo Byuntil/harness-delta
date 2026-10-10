@@ -119,11 +119,12 @@ node dist/cli.js --db team.db team report team-report-1 --format markdown-readab
 ```
 
 `json` remains the default. Existing `json` and `markdown` output and frozen
-snapshot bytes are unchanged. `markdown-readable` adds tables from the existing
+snapshot bytes are unchanged. For V1, `markdown-readable` adds tables from the existing
 snapshot, including original imported cohorts, component-specific observed task n,
 quality, rework, follow-up, configuration deviations and the source revision vector.
 It performs no new measurement or aggregation. Reading-state counts are event
-counts; component n counts tasks with an observed value.
+counts; component n counts tasks with an observed value. V2 `markdown-readable`
+currently embeds the report as a JSON block rather than these tables.
 
 An identical snapshot request returns the same frozen result. Use a new snapshot
 ID for updated evidence. `cutoff_mismatch` requires new source snapshots with a

@@ -66,8 +66,10 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
   --cutoff "$reportCutoff"
 ```
 
-예상 결과: `price_selection`, 카탈로그/가격표 출처, 정확한 토큰 범주 매칭,
+예상 결과: `price_selection`, 가격표 출처,
 `partial_amount`, null인 `complete_amount`, 사유와 구간/수집 범위 근거입니다.
+카탈로그 기반 결과에는 카탈로그 출처와 정확한 토큰 범주 매칭도 포함됩니다.
+명시적 가격표 결과는 명시적 가격표 보고서 형식을 유지합니다.
 `compatibility_unverified_partial_amount`와 `legacy_unverified_partial_amount`는
 verified `partial_amount`와 구분해서 읽으세요. [source 신뢰와 관측 범위](observed-cost.ko.md#4-금액누락관측-범위를-따로-읽기)를 참고하세요.
 배정된 V2 작업은 고정된 비교 기준을, 독립 작업은 현재 카탈로그를 사용합니다.
@@ -141,7 +143,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table snapshot-com
   --id comparison-cost-input-1
 ```
 
-예상 결과: 입력 ID/해시와 원래 가격표/마감 시각입니다. 작업과 비교의 구간은 다를 수
+예상 결과: 작업 입력 보존은 `input_id`, `snapshot_hash`, `original_table_id`,
+`cutoff`를 반환하고, 비교 입력 보존은 `input_id`, `snapshot_hash`,
+`base_report_id`, `cutoff`를 반환합니다. 작업과 비교의 구간은 다를 수
 있으므로 해당 입력을 선택하세요. 두 명령 모두 세션 내용을 읽지 않습니다.
 승인된 갱신 후 해당 입력에서 별도 결과를 만드세요.
 

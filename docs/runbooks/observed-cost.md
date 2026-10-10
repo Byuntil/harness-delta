@@ -124,7 +124,7 @@ An output-only estimate is not equivalent to an estimate with assumed input pric
 | `partial_amount: "0"` | Eligible verified priced observations sum to zero |
 | `partial_amount: null` | No eligible verified priced amount; unverified estimates may still exist |
 | `complete_amount: null` | Complete task cost is unavailable |
-| `unpriced_events` | Recorded events have at least one component without a rate |
+| `unpriced_events` | Events with a component withheld from pricing because a rate is missing or required pricing-condition evidence is unavailable or unsupported |
 | `unavailable_events` | Events have no priceable partial amount |
 | `excluded_event_count` | Stored candidates excluded by the observation-window policy |
 | Missing / error / excluded / unmeasurable | Different reading states; none is observed zero |

@@ -10,7 +10,7 @@ adoption decision. Read [ADR 007](../decisions/007-adapter-version-profiles.md).
 [ADR 013](../decisions/013-forward-version-compatibility.md) changes the operating
 policy to conditional forward-version parser reuse with compatibility-unverified
 estimates. Conditional runtime reuse is implemented; the commands below still require
-exact registered versions. This admission procedure remains the path to verified
+exact source-reviewed entries in `conformanceCandidates`. This admission procedure remains the path to verified
 support, rather than a prerequisite for every future in-window reference estimate.
 
 ## Current support

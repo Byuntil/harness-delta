@@ -3,8 +3,10 @@
 [English](local-browser-ui.md)
 
 Node.js 24와 비공개 `hm` 체크아웃을 사용하세요. UI는 CLI와 같은 Store 및
-외부 작업 coordinator를 사용합니다. 에이전트 실행, 인증 변경, 커밋 생성,
-서비스 외부 공개는 하지 않습니다.
+외부 작업 coordinator를 사용합니다. 일반 측정 흐름은 에이전트를 실행하지 않습니다.
+Format-2 적용에서는 새 macOS Terminal 세션 열기를 명시적으로 요청할 수 있습니다.
+`open_requested`는 에이전트 시작의 증거가 아니며 native acceptance는 미검증입니다.
+UI는 인증 변경, 커밋 생성, 서비스 외부 공개를 하지 않습니다.
 
 ## 로컬 서비스 시작
 

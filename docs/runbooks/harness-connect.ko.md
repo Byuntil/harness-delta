@@ -84,18 +84,38 @@ native 연결을 다시 읽습니다. 안전한 ID, arm, 증거, 수집 활성 �
 보고합니다. instrumentation 미설치, 미지원 source, identity 충돌은 고정 blocker와
 exit 1을 반환합니다. 읽기 전용 inspect는 연결 성공이 아닙니다. 서버에 지원 Claude
 provider가 있을 때만 `claude_code`와 `.claude/skills`를 사용합니다. 기본
-Claude candidate는 qualification 차단 상태입니다. 아래 Claude 경계를 참고하세요.
+Claude candidate는 qualification 차단 상태입니다. 승인된 프로젝트 로컬 Claude
+설치에서는 connect 명령에 receipt 인수를 넣지 않습니다. PreToolUse hook이 현재
+metadata를 기록하며 helper는 같은 Bash 호출의 OS process ancestry로 receipt를
+찾습니다. `${CLAUDE_SKILL_DIR}`의 hook 명령 치환은 문서화되어 있지 않으므로
+패키지 hooks는 `CLAUDE_PROJECT_DIR`의 프로젝트 설치 경로를 사용합니다.
+승인된 설정에서 receipt 디렉토리를 명시적으로 선택하고 서버 설정과 일치시키세요.
+없거나 모호한 receipt는 차단하며 source 조회 범위를 넓히지 않습니다.
+[Claude skill hooks](https://code.claude.com/docs/en/skills)와
+[hook 환경](https://code.claude.com/docs/en/hooks)의 공식 경계를 따릅니다.
 
 ```sh
 node .claude/skills/harness-connect/scripts/connect.mjs inspect --origin http://127.0.0.1:PORT --product claude_code
 node .claude/skills/harness-connect/scripts/connect.mjs connect --origin http://127.0.0.1:PORT --product claude_code --project PROJECT_ID --task TASK_ID
 ```
 
-UI는 가족 수와 부분 사용량을 갱신합니다. pause/서버 재시작은 수집을 멈추며 부모에서
-같은 살아 있는 부모의 허용된 UI 재개 또는 부모에서 다시 한 번 호출하면 새 baseline을
-잡습니다. 새 부모도 기존 open task의 arm/가격을
-유지할 수 있습니다. 이전/미관측 구간은 소급 수집하지 않습니다. 미지원 descendants와
-누락 사용량은 zero가 아닌 gap입니다. 전체 비용과 통계 판정은 사용할 수 없으며
+Claude는 SubagentStart/Stop hooks로 이후 멤버를 기록하고 각 transcript의 소유권을
+검증합니다. 공식 fields로 중첩 멤버의 직접 부모를 증명할 수 없어 확인된 모든
+멤버를 root 아래에 평탄화합니다. 자식 재호출은 활성 family에서 독립적으로
+발견된 연결만 확인합니다. 중지된 family는 아래의 코드 소유 사용자 UI pilot
+권한으로 같은 살아 있는 부모를 재개할 수 있으면 UI 재개를 사용하고,
+그 외에는 부모에서 다시 연결해야 합니다. Native profile·counter·source 형식은
+candidate 상태이며 model이나 effort 설정을 강제하지 않습니다.
+
+UI는 가족 수와 부분 사용량을 갱신합니다. pause/서버 재시작은 수집을 멈춥니다.
+같은 살아 있는 부모의 허용된 UI 재개 또는 부모에서 다시 한 번 호출하면 새
+baseline을 잡습니다. 새 부모도 기존 open task의 arm/가격을 유지할 수 있습니다.
+이전/미관측 구간은 소급 수집하지 않습니다. 뒤늦게 발견된 멤버는
+`late_linked_member`를 기록합니다. 미지원 descendants와 누락 사용량은 zero가
+아닌 gap입니다. 전체 비용과 추론은 사용할 수 없습니다. Pause 중에도 metadata
+hooks는 계속될 수 있지만 transcript 수집은 하지 않습니다. 삭제 시 durable queue가
+metadata receipt만 잊고 서버 재시작 후에도 해당 family의 이후 receipt를 차단합니다.
+Native transcript는 삭제하지 않습니다. 수집 완료와 hook 제거는 별개이며,
 완료는 사람이 결과를 확인해야 합니다.
 
 ## 기존 ticket 호환 경로
@@ -110,7 +130,7 @@ node .agents/skills/harness-connect/scripts/connect.mjs connect --origin http://
 확인한 정확한 source를 native picker에서 선택합니다. helper는 source, context,
 freshness, window 증거를 다시 읽습니다. 최근 선택 source만 확인하며 UI에서 별도로
 관측을 시작합니다. 이 legacy 경로는 가족 자동 상속을 지원하지 않습니다.
-[수동 UI](local-browser-ui.md)와 [native workflow gates](task-native-workflow.md)를 참고하세요.
+[수동 UI](local-browser-ui.ko.md)와 [native workflow gates](task-native-workflow.md)를 참고하세요.
 세션을 임의로 다시 열거나 과거 harness 적용을 주장하지 않습니다.
 
 ## 로컬 검증
@@ -128,42 +148,6 @@ node --test skills/harness-connect/tests/*.mjs
 호출하거나 사용자 기록/DB를 읽거나 실제 hook trust/source qualification을 수행하지
 않습니다. 집중/전체 로컬 검사와 독립 리뷰는 remote CI와 구분해 보고합니다. 정확한
 adapter 계약은 [session-binding-contract.ts](../../src/session-binding-contract.ts)입니다.
-
-## Claude 통합 상태와 승인 경계
-
-Claude provider와 휴대 가능한 metadata recorder, 호출 후 세션 hooks,
-같은 Bash 호출의 receipt 조회를 통합했습니다. 합성 fixture만 검증했으며,
-일반 native 세션은 서버의 qualification gate로 계속 차단됩니다.
-
-프로젝트 `.claude/skills/harness-connect` 패키지를 검토하고 설치와 workspace
-trust를 승인한 다음 명시적으로 호출할 때 hooks가 등록됩니다. 복사 자체는
-전역 설정이나 인증을 바꾸지 않습니다. 이 작업에서는 설치·trust·native 호출을
-수행하지 않았습니다. Hooks 명령은 `CLAUDE_PROJECT_DIR`의 프로젝트 설치 경로를
-사용하며 `${CLAUDE_SKILL_DIR}`의 hook 명령 치환을 가정하지 않습니다.
-승인된 설정에서 receipt directory와 서버의 명시적 경로를 일치시켜야 합니다.
-
-
-
-PreToolUse는 해당 Bash 호출의 native metadata만 기록합니다. Helper는 같은
-호출에서 OS process ancestry와 새 receipt를 확인하고, 세션 환경변수는 조회
-범위를 좁히는 hint로만 사용합니다. 없거나 여러 멤버 receipt가 섞이면 차단합니다.
-[Claude skill hooks](https://code.claude.com/docs/en/skills)와
-[hook 환경](https://code.claude.com/docs/en/hooks)의 공식 경계를 따릅니다.
-실제 skill 등록·로그 형식·카운터·source mapping은 아직 실측하지 않았습니다.
-
-부모 호출 이후 SubagentStart/Stop으로 확인한 멤버와 지원되는 하위 멤버를
-자동 관측합니다. 공식 fields로 중첩 멤버의 직접 부모를 증명할 수 없어 모든
-멤버를 root 아래에 평탄화하며 실제 nested parent라고 표시하지 않습니다.
-자식 재호출은 활성 family의 독립적으로 확인된 기존 연결을 확인합니다.
-중지된 family는 아래 사용자 UI pilot 권한으로 같은 살아 있는 부모를 재개할 수 있으면
-UI 재개를 사용하고, 그 외에는 부모에서 다시 연결해야 합니다. 이전 멤버의 누락 구간은
-`late_linked_member`로 표시하고 과거 사용량을 backfill하지 않습니다.
-
-Pause/완료 후에도 세션 metadata hooks는 계속될 수 있지만 collector는 로그를
-읽지 않습니다. 삭제 시 durable queue가 metadata receipt만 잊고 이후 해당
-family의 receipt를 차단합니다. 서버 재시작에도 정리를 재시도하며 native
-transcript는 삭제하지 않습니다. 모델·effort나 특정 버전 설치를 강제하지 않습니다.
-관측 합산은 부분 사용량이며 전체 비용·통계 효과 판정은 계속 범위 밖입니다.
 
 Claude 기준선의 제외 own request ID는 실시간 replay 목록과 별도로 최대 1,024개를
 보존합니다. 한도 초과(`claude_baseline_limit`)나 부분/해석 불가능한 기준선

@@ -41,7 +41,8 @@ blockers; a writable configuration flag cannot admit a source.
 ## Conditional forward versions
 
 Stable Codex releases newer than 0.160.0 and below 0.164.0, including 0.161.0,
-can reuse the existing own-response native profile in a `functional_pilot`.
+can reuse `codex-workflow-own-response-v1` or the separate
+`codex-workflow-direct-child-v1` profile in a `functional_pilot`.
 Set execution JSON `product_version` to the actual Codex version; the workflow
 configuration and protocol `source_profiles` must use that same version. Keep the
 same `profile_id`. Supply the actual executable SHA-256 under `binary.sha256`.
@@ -136,7 +137,8 @@ does not imply human success or complete cost.
 
 ## Codex launch, resume, link and collection
 
-The implemented profile is `codex-workflow-own-response-v1` for Codex 0.160.0.
+The exact admitted profile is `codex-workflow-own-response-v1` for Codex 0.160.0;
+newer in-window versions use the conditional rules above, not a new exact admission.
 It supports sequential independent root sessions. Forked histories, compaction,
 child sessions and mismatched identities fail closed. Production source admission
 is code-owned; there is no CLI flag to enable a synthetic or unqualified source.
@@ -162,10 +164,13 @@ editing the file. [Example files](../../examples/workflow/) match these schemas:
 }
 ```
 
-Paths must be absolute and canonical. The native binary must match the pinned
-SHA-256; the metadata-only recorder must match its code-owned content hash.
-These file checks, plus the prompt file and Codex home, run as a preflight before
-assignment or task activation. A failure prints a fixed code (for example
+Paths must be absolute and canonical. For launch/resume, the native binary must
+match `binary.sha256` and report the selected `product_version`; exact 0.160.0
+requires the code-owned pin. Conditional versions require their reviewed actual
+hash. The metadata-only recorder must match its code-owned content hash.
+Launch/resume check these files, the prompt and Codex home before assignment or
+task activation. Link/collect check the home but do not invoke the binary or read
+the recorder or prompt. A preflight failure prints a fixed code (for example
 `binary_mismatch`) and leaves no assignment, active interval or run journal row.
 The binary is checked again immediately before spawn and is re-hashed unless the
 file identity hashed by preflight is unchanged. If a launch still fails before any
@@ -265,6 +270,12 @@ the frozen v2 protocol's source profiles:
 ```json
 {"product":"codex","product_version":"0.160.0","profile_id":"codex-workflow-direct-child-v1"}
 ```
+
+For a conditional functional pilot, use the same profile ID with the actual
+in-window version in the protocol, workflow configuration and execution JSON.
+Supply that binary's reviewed SHA-256. The read-only, macOS arm64/Node24 launch
+boundary and fresh-root/single-child limits still apply; its estimates remain
+`compatibility_unverified`, not exactly admitted.
 
 Use the same `workflow codex launch` command and common configuration/runtime files.
 Add `child_runtime` to the launch execution JSON and require `sandbox: "read-only"`:

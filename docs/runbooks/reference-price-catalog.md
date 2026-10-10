@@ -67,8 +67,10 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table estimate-tas
   --cutoff "$reportCutoff"
 ```
 
-Expected: `price_selection`, catalog/table provenance, exact component matches,
+Expected: `price_selection`, table provenance,
 `partial_amount`, null `complete_amount`, reasons and window/coverage evidence.
+Catalog-backed results additionally include catalog provenance and exact component
+matches. Explicit-table results retain the explicit-table report shape.
 Read `compatibility_unverified_partial_amount` and `legacy_unverified_partial_amount`
 separately from verified `partial_amount`; see [source trust and coverage](observed-cost.md#4-read-amount-missingness-and-coverage-separately).
 An assigned V2 task uses its frozen comparison reference; a standalone task uses
@@ -142,7 +144,9 @@ node dist/cli.js --db .harness-delta/pilot/local.sqlite price-table snapshot-com
   --id comparison-cost-input-1
 ```
 
-Expected: input ID/hash and original table/cutoff. Task and comparison windows can
+Expected: task capture returns `input_id`, `snapshot_hash`, `original_table_id`
+and `cutoff`; comparison capture returns `input_id`, `snapshot_hash`,
+`base_report_id` and `cutoff`. Task and comparison windows can
 differ; choose the corresponding capture. Neither command reads session contents.
 After an approved refresh, create a separate result from that input:
 
