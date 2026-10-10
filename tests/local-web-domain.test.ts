@@ -1,11 +1,57 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { localWebFixture } from './helpers/local-web-fixture.js';
 import { projectBaseline } from '../src/local-web-domain.js';
 import { createLocalWebServer } from '../src/local-web-server.js';
 import { Lifecycle } from '../src/lifecycle.js';
 import { Deletion } from '../src/deletion.js';
 import { selectTaskPriceTable } from '../src/price-catalog-selection.js';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { createLocalWebDomain } from '../src/local-web-domain.js';
+import { codexHumanPilotProfileId } from '../src/session-binding-human-pilot.js';
+
+test.each([
+  ['finalized', false, 'finalized'],
+  ['unprepared', false, 'external_preparation_required'],
+  ['released', false, 'external_preparation_required'],
+  ['closed', false, 'external_window_closed'],
+  ['missing-provider', false, 'binding_provider_unavailable'],
+  ['unqualified', false, 'binding_source_unqualified'],
+  ['ready', true, null],
+] as const)('session-connect diagnostic selects %s prerequisite without changing eligibility', async (condition, enabled, reason) => {
+  const f = localWebFixture(codexHumanPilotProfileId, { product: 'codex', productVersion: '0.160.0' });
+  const profile = { ...f.profile,
+    ...(condition === 'missing-provider' ? {} : { session_binding: { product: 'codex' as const, receipt_directory: f.root, source_roots: [join(f.home, 'sessions')], project_root: f.project } }),
+  };
+  let domain = createLocalWebDomain({ store: f.store, metadataFile: f.metadataFile, profiles: [profile] });
+  try {
+    const { id } = z.object({ id: z.string() }).parse(await domain.createTask({ name: 'Synthetic diagnostic task', project_id: 'project-1', setup_id: f.profile.id }));
+    if (condition !== 'unprepared') await domain.taskAction(id, 'apply', {});
+    // Deadline-based tasks predate the explicit-stop collection control.
+    if (condition === 'closed') f.store.execute('DELETE FROM binding_collection_controls WHERE task_id=?', [id]);
+    await domain.close?.();
+    domain = createLocalWebDomain({
+      store: f.store, metadataFile: f.metadataFile, profiles: [profile],
+      ...(['missing-provider', 'unqualified'].includes(condition) ? {} : { nativePilot: { taskId: id, observe: true } }),
+    });
+    if (condition === 'finalized') f.store.execute("UPDATE tasks SET state='finalized' WHERE id=?", [id]);
+    if (condition === 'released') f.store.execute("UPDATE external_preparations SET state='released' WHERE task_id=?", [id]);
+    if (condition === 'closed') {
+      const life = new Lifecycle(f.store); life.start(id); life.pause(id);
+      const startedAt = life.task(id).started_at;
+      if (!startedAt) throw new Error('invalid_fixture_window');
+      const endsAt = new Date(Date.parse(startedAt) + 3600000).toISOString();
+      f.store.execute('UPDATE external_task_contracts SET started_at=?,ends_at=? WHERE task_id=?', [startedAt, endsAt, id]);
+      vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(endsAt));
+    }
+    const snapshot = z.object({ actions: z.array(z.object({ code: z.string(), enabled: z.boolean(), reason: z.string().nullable() })) }).parse(domain.task(id));
+    expect(snapshot.actions.find(action => action.code === 'session-connect')).toEqual({ code: 'session-connect', enabled, reason });
+    expect(f.store.all('SELECT * FROM session_bindings')).toHaveLength(0);
+    expect(f.store.eventCount()).toBe(0);
+    expect(f.store.all('SELECT * FROM active_intervals WHERE ended_at IS NULL')).toHaveLength(0);
+  } finally { vi.useRealTimers(); await domain.close?.(); f.cleanup(); }
+});
 
 test('real Store bridge prepares inactive, persists labels, reads HEAD, respects CLI pause and deleted scope', async () => {
   const f = localWebFixture(); let domain = f.create();
@@ -20,6 +66,10 @@ test('real Store bridge prepares inactive, persists labels, reads HEAD, respects
     await domain.close?.(); domain = f.create();
     expect(domain.task(task.id)).toMatchObject({ name: 'Synthetic visible task', version: task.version });
     await domain.taskAction(task.id, 'apply', {});
+    expect(domain.task(task.id)).toMatchObject({ status: 'validation_ready', binding: { support: 'synthetic_validation_only' } });
+    expect(domain.task(task.id)).toMatchObject({ price: { partial_amount: null }, measurement: { requests: null, window: { started_at: null } }, support_details: { context: 'synthetic_validation_only', product: 'synthetic', complete_cost: false, inference: false } });
+    expect(domain.task(task.id).binding).not.toHaveProperty('product');
+    expect(await domain.bootstrap()).toMatchObject({ tasks: [domain.task(task.id)] });
     await domain.taskAction(task.id, 'ticket', {});
     const ticket = domain.task(task.id).startup as { ticket_id: string }; const source = f.sourceFor(ticket.ticket_id); f.appendUsage(source);
     f.pick(source.path); const selected = await domain.chooseSession(task.id) as { handle: string };
@@ -30,6 +80,43 @@ test('real Store bridge prepares inactive, persists labels, reads HEAD, respects
     new Deletion(f.store).deleteTask(task.id);
     expect(() => domain.task(task.id)).toThrow('unknown_task');
     expect(await domain.bootstrap()).toMatchObject({ tasks: [] });
+  } finally { await domain.close?.(); f.cleanup(); }
+});
+
+test.each([
+  ['codex-workflow-own-response-v1', 'codex', '0.160.0', 'verified', 'exact_version_only', 'qualification_required'],
+  ['codex-workflow-own-response-v1', 'codex', '0.161.0', 'compatibility_unverified', 'unsupported', 'qualification_required'],
+  ['claude-workflow-own-trace-v1', 'claude_code', '2.1.291', 'verified', 'unsupported', 'qualification_required'],
+  ['claude-workflow-own-trace-v1', 'claude_code', '2.1.294', 'compatibility_unverified', 'unsupported', 'qualification_required'],
+  ['codex-01600-ordinary-human-pilot', 'codex', '0.160.0', 'unsupported', 'exact_version_only', 'candidate_pilot'],
+  ['claude-ordinary-human-pilot', 'claude_code', '2.1.294', 'unsupported', 'unsupported', 'candidate_pilot'],
+] as const)('support keeps %s %s %s route boundaries separate', async (profileId, product, productVersion, launch, ticket, family) => {
+  const f = localWebFixture(profileId, { product, productVersion }); const domain = f.create();
+  try {
+    const snapshot = await domain.bootstrap();
+    expect(snapshot).toMatchObject({ setups: [{ support_details: {
+      context: 'real', product, product_version: productVersion,
+      launch: [{ profile_id: profileId, state: launch }], ticket, family, complete_cost: false, inference: false,
+    } }] });
+    expect(f.store.eventCount()).toBe(0);
+    expect(f.store.all('SELECT * FROM active_intervals')).toHaveLength(0);
+  } finally { await domain.close?.(); f.cleanup(); }
+});
+
+test('configuration-ready real tasks retain session waiting while synthetic tasks use validation readiness', async () => {
+  const f = localWebFixture('codex-workflow-own-response-v1', { product: 'codex', productVersion: '0.160.0' });
+  const domain = f.create();
+  try {
+    const created = await domain.createTask({ name: 'Synthetic native-route test', project_id: 'project-1', setup_id: f.profile.id }) as { id: string };
+    expect(domain.task(created.id)).toMatchObject({ status: 'draft' });
+    await domain.taskAction(created.id, 'apply', {});
+    expect(domain.task(created.id)).toMatchObject({
+      status: 'waiting_for_session', state: 'registered',
+      measurement: { state: 'waiting_connection', window: { started_at: null } },
+      support_details: { context: 'real' },
+    });
+    expect(f.store.eventCount()).toBe(0);
+    expect(f.store.all('SELECT * FROM active_intervals')).toHaveLength(0);
   } finally { await domain.close?.(); f.cleanup(); }
 });
 

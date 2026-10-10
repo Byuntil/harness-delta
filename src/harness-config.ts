@@ -96,13 +96,20 @@ export function ensureRepositoryDirectory(root: string, relativePath: string): s
   return current;
 }
 function writeDurable(path:string,bytes:Buffer|string,mode:number) {const fd=openSync(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,mode);try{writeFileSync(fd,bytes);fsyncSync(fd);}finally{closeSync(fd);}}
-function validateReferences(files:{path:string;bytes:Buffer}[]) {
- const paths=new Set(files.map(file=>file.path));
- for(const file of files.filter(file=>file.path.endsWith('.md'))) {
+function validateReferences(root:string,files:{path:string;sourcePath:string;bytes:Buffer}[]) {
+ const anchor=realpathSync(root),paths=new Set(files.map(file=>file.sourcePath));
+ for(const file of files.filter(file=>file.sourcePath.endsWith('.md')||file.path.endsWith('.md'))) {
   for(const match of file.bytes.toString('utf8').matchAll(/!?\[[^\]\n]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)/g)) {
    const target=match[1]!;if(target.startsWith('#')||/^[a-z][a-z0-9+.-]*:/i.test(target))continue;
-   const relative=target.split('#')[0]!;const resolved=posix.normalize(posix.join(posix.dirname(file.path),relative));
-   if(!safeRelativePath(relative)||!safeRelativePath(resolved)||!paths.has(resolved))fail('shared_reference_invalid');
+   const relative=target.split('#')[0]!,components=relative.split('/');const resolved=posix.join(posix.dirname(file.sourcePath),relative);
+   if(relative.length>2048||components.some(part=>part!=='.'&&part!=='..'&&!safeRelativePath(part))||!safeRelativePath(resolved)||!paths.has(resolved))fail('shared_reference_invalid');
+   let directory=posix.dirname(file.sourcePath);
+   for(const component of components.slice(0,-1)) {
+    directory=posix.join(directory,component);
+    if(directory!=='.'&&!safeRelativePath(directory))fail('shared_reference_invalid');
+    try { const stat=lstatSync(join(anchor,directory));if(stat.isSymbolicLink()||!stat.isDirectory())fail('shared_reference_invalid'); }
+    catch { fail('shared_reference_invalid'); }
+   }
   }
  }
 }
@@ -131,13 +138,13 @@ function asReference(manifest: HarnessManifest) { return {harness_id:manifest.ha
 export function registerHarness(root: string, input: unknown) {
   const config=parse(RegistrationSchema,input);if(config.version==='comparisons')fail(); const base=config.base ? asReference(readHarness(root,config.base.path)) : null;
   if(base?.version===config.version || base && base.harness_id!==config.harness_id) fail();
-  const files: {path:string;bytes:Buffer}[]=[];
-  const rows: HarnessManifest['artifacts']=config.artifacts.map(row=>{ const bytes=readRepositoryFile(root,row.source_path); const path=`harness-config/${config.version}/${row.target_path}`; if(row.target_path==='manifest.json'||row.target_path==='README.md'||row.source_path.startsWith('harness-config/')) fail(); files.push({path:row.target_path,bytes}); return {artifact_id:row.artifact_id,role:row.role,path,source_path:row.source_path,sha256:hashBytes(bytes)}; });
-  const readme=readRepositoryFile(root,config.readme_path); files.push({path:'README.md',bytes:readme}); rows.push({artifact_id:'readme',role:'documentation',path:`harness-config/${config.version}/README.md`,source_path:config.readme_path,sha256:hashBytes(readme)});
+  const files: {path:string;sourcePath:string;bytes:Buffer}[]=[];
+  const rows: HarnessManifest['artifacts']=config.artifacts.map(row=>{ const bytes=readRepositoryFile(root,row.source_path); const path=`harness-config/${config.version}/${row.target_path}`; if(row.target_path==='manifest.json'||row.target_path==='README.md'||row.source_path.startsWith('harness-config/')) fail(); files.push({path:row.target_path,sourcePath:row.source_path,bytes}); return {artifact_id:row.artifact_id,role:row.role,path,source_path:row.source_path,sha256:hashBytes(bytes)}; });
+  const readme=readRepositoryFile(root,config.readme_path); files.push({path:'README.md',sourcePath:config.readme_path,bytes:readme}); rows.push({artifact_id:'readme',role:'documentation',path:`harness-config/${config.version}/README.md`,source_path:config.readme_path,sha256:hashBytes(readme)});
   rows.sort((a,b)=>a.artifact_id<b.artifact_id?-1:a.artifact_id>b.artifact_id?1:0); validateArtifacts(rows,config.version);
   if(files.reduce((n,file)=>n+file.bytes.length,0)>16*1048576) fail();
   for(const row of rows.filter(row=>row.role==='instruction')) { const bytes=files.find(file=>`harness-config/${config.version}/${file.path}`===row.path)!.bytes; if(!Buffer.from(bytes.toString('utf8')).equals(bytes)||bytes.includes(0)) fail(); }
-  validateReferences(files);
+  validateReferences(root,files);
   const data={kind:'harness-delta.harness' as const,schema_version:1 as const,harness_id:config.harness_id,version:config.version,policy_version:config.policy_version,base,artifacts:rows,instruction_manifest_hash:instructionHash(rows)};
   const manifest={...data,bundle_hash:documentHash('bundle',data)};
   const parent=ensureRepositoryDirectory(root,'harness-config'); const target=join(parent,config.version);

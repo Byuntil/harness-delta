@@ -24,8 +24,9 @@ import type { CandidateScope } from './nested-candidate.js';
 import type { Store } from './store.js';
 import { assertBindingQualification, bindingQualificationOwnerLive, noteBindingQualificationTransition, checkBindingQualificationIdentity, checkBindingQualificationRecord, type BindingQualificationLease } from './session-binding-qualification-lease.js';
 import type { ExternalTaskSetup } from './external-session-service.js';
-import { assertHumanPilotScope, checkHumanPilotIdentity, type HumanPilotScope } from './session-binding-human-pilot.js';
+import { assertHumanPilotScope, checkHumanPilotIdentity, humanPilotCompatibility, type HumanPilotScope } from './session-binding-human-pilot.js';
 import { isClaudeHumanPilotScope } from './session-binding-claude-human-pilot.js';
+import { assertCompatibilityAllowed, pinSessionCompatibility, invalidateCompatibility } from './source-compatibility.js';
 
 interface BindingRow { session_id: string; task_id: string; root_id: string; identity: string;
   relation_evidence_id: string | null; connect_receipt: string | null; cursor: string | null; observed_since: string; generation: number; state: string; gaps: string }
@@ -111,7 +112,8 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     if (store.get("SELECT 1 FROM tombstones WHERE (kind='task' AND id=?) OR (kind='project' AND id=?)", [taskId, task.project_id])) throw new Error('deleted_identifier');
     if (task.state === 'finalized' || active && task.state !== 'active' || generation !== undefined && task.generation !== generation) throw new Error('binding_scope_revoked');
     const setup = options.setupFor(taskId);
-    if(applicationRequired(store,taskId)&&setup.workflow.assignment.metadata.product!=='synthetic')throw new Error('application_source_unqualified');
+    if(applicationRequired(store,taskId)&&setup.workflow.assignment.metadata.product!=='synthetic'&&
+      (!options.humanPilot||!humanPilotCompatibility(options.humanPilot,store,taskId)))throw new Error('application_source_unqualified');
     assertExternalPrepared(store, taskId, setup.workflow, setup.preparation, clock);
     const contract = externalContract(store, taskId);
     if (!contract) throw new Error('external_contract_required');
@@ -121,6 +123,8 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     if (options.qualificationLease) assertBindingQualification(options.qualificationLease, store, taskId);
     else if(options.humanPilot)assertHumanPilotScope(options.humanPilot,store,taskId,providerFor(parseTaskMetadata(JSON.parse(life.task(taskId).metadata) as unknown).product as BindingProduct,taskId));
     else if (!bindingSourceSupported(store, taskId)) throw new Error('binding_source_unqualified');
+    const compatibility=options.humanPilot?humanPilotCompatibility(options.humanPilot,store,taskId):null;
+    if(compatibility)assertCompatibilityAllowed(store,compatibility);
     return task;
   };
   const authorizeConnection = (taskId:string,generation?:number) => {
@@ -155,6 +159,8 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     if (!confirmation) throw new Error('configuration_confirmation_required');
     store.execute('INSERT INTO sessions(id,project_id,task_id,parent_id,source_path,product,product_version) VALUES (?,?,?,?,?,?,?)',
       [value.sessionId, task.project_id, taskId, value.parentSessionId, null, parseTaskMetadata(JSON.parse(task.metadata) as unknown).product === 'synthetic' ? 'synthetic' : value.product, value.productVersion]);
+    const compatibility=options.humanPilot?humanPilotCompatibility(options.humanPilot,store,taskId):null;
+    if(compatibility)pinSessionCompatibility(store,value.sessionId,compatibility);
     bindConfigurationToSession(store, confirmation.id, value.sessionId);
     bindApplicationEpoch(store,taskId,value.sessionId);
     store.execute("INSERT INTO session_bindings(session_id,task_id,root_id,identity,relation_evidence_id,observed_since,generation,state) VALUES (?,?,?,?,?,?,?,'observing')",
@@ -203,12 +209,17 @@ export function createSessionBindingService(options: SessionBindingServiceOption
     // A callback may deliberately pause; this is a normal fence, not diagnostics.
     if (deliveredRow) authorizeObservation(taskId, deliveredRow);
   };
+  const invalidateSourceContract = (taskId: string, error: unknown) => {
+    const compatibility=options.humanPilot?humanPilotCompatibility(options.humanPilot,store,taskId):null;
+    if(compatibility&&error instanceof Error&&['candidate_invalid_metadata','candidate_scope_mismatch','candidate_conflict','binding_metadata_unavailable','binding_source_changed','binding_scope_mismatch'].includes(error.message))invalidateCompatibility(store,compatibility,'contract_failed');
+  };
   const discoverFamily = async (taskId: string, row: BindingRow, value: VerifiedSessionIdentity, at: FamilyPhase) => {
     try {
       const context = readiness.get(taskId);
       for (;;) {
         authorizeObservation(taskId, row);
         const result = await providerFor(value.product, taskId).discoverChildren(value);
+        for(const reason of result.gaps)invalidateSourceContract(taskId,new Error(reason));
         authorizeObservation(taskId, row);
         const deadline = childReadinessDeadline(result);
         if (value.product !== 'claude_code' || !context) return result;
@@ -235,7 +246,7 @@ export function createSessionBindingService(options: SessionBindingServiceOption
         }
         await delay(Math.min(20, remaining));
       }
-    } catch (error) { throw noteFamilyError(taskId,row,error,at); }
+    } catch (error) { invalidateSourceContract(taskId,error);throw noteFamilyError(taskId,row,error,at); }
   };
   const rejectFamily = (taskId: string, row: BindingRow, at: FamilyPhase, discovery?: Awaited<ReturnType<SessionBindingProvider['discoverChildren']>>, extra: string[] = []): never => {
     throw noteFamilyError(taskId,row,new Error('binding_pilot_family_scope'),at,discovery,extra);
@@ -256,7 +267,12 @@ export function createSessionBindingService(options: SessionBindingServiceOption
         if(descendants.children.length||descendants.gaps.length)rejectFamily(taskId,row,'baseline_descendants',descendants,descendants.children.length ? ['descendants_present'] : []);
       }
     }
-    const batch = await provider.readUsage(value, baseline ? null : row.cursor, scopeFor(taskId, row.root_id), { baseline });
+    let batch: Awaited<ReturnType<SessionBindingProvider['readUsage']>>;
+    try { batch = await provider.readUsage(value, baseline ? null : row.cursor, scopeFor(taskId, row.root_id), { baseline }); }
+    catch(error) {
+      invalidateSourceContract(taskId,error);
+      throw error;
+    }
     authorizeObservation(taskId,row);
     if (typeof batch.cursor !== 'string' || batch.cursor.length > 6 * 1024 * 1024 || batch.records.length > 65536 || (batch.excludedRecords?.length ?? 0) > 65536) throw new Error('binding_usage_invalid');
     const records = batch.records.map(record => BindingUsageRecordSchema.parse(record));

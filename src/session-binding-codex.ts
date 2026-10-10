@@ -6,18 +6,20 @@ import { metadataName, type AgentMetadata } from './agent-metadata.js';
 import { IdSchema, TimestampSchema } from './contracts.js';
 import { parseCodexCandidateRollout, type CodexCandidateSnapshot } from './codex-candidate-rollout.js';
 import { checkedCandidateScope, type CandidateScope } from './nested-candidate.js';
+import { resolveSourceCompatibility } from './source-compatibility.js';
 import { bindingIdentityKey, CurrentIdentityRequestSchema, VerifiedSessionIdentitySchema, type BindingCapabilities, type BindingReadBoundary, type ChildDiscovery,
   type SessionBindingProvider, type UsageBatch, type VerifiedSessionIdentity } from './session-binding-contract.js';
 
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
-const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), receipt: z.uuid(), productVersion: z.literal('0.160.0'),
+const receiptVersionSchema = z.enum(['0.160.0', '0.162.0']);
+const receiptSchema = z.strictObject({ schemaVersion: z.literal(1), receipt: z.uuid(), productVersion: receiptVersionSchema,
   event: z.enum(['SessionStart', 'SubagentStart']), sessionId: IdSchema, parentSessionId: IdSchema.nullable(), turnId: IdSchema.nullable(),
   nativeRootSessionId: IdSchema.optional(),
   sourceRef: z.string().min(1).max(4096), sourceIdentity: IdSchema, cwd: z.string().min(1).max(4096), createdAt: TimestampSchema });
 type Receipt = z.infer<typeof receiptSchema>;
 const headerSchema = z.object({ type: z.literal('session_meta'), payload: z.object({ id: IdSchema, session_id: IdSchema,
   agent_nickname: z.unknown().optional(), agent_role: z.unknown().optional(),
-  parent_thread_id: IdSchema.nullish(), cli_version: z.literal('0.160.0'), cwd: z.string(),
+  parent_thread_id: IdSchema.nullish(), cli_version: receiptVersionSchema, cwd: z.string(),
   source: z.union([z.enum(['cli', 'exec', 'vscode', 'mcp']), z.object({ subagent: z.object({ thread_spawn:
     z.object({ parent_thread_id: IdSchema, depth: z.number().int().positive() }) }) })]) }) });
 const cursorSchema = z.strictObject({ session: IdSchema, sourceIdentity: IdSchema, scope: z.string().length(64),
@@ -34,6 +36,10 @@ export interface CodexSessionBindingOptions {
   /** Exact approved transcript directories; never defaults to the user's home. */
   sourceRoots: string[];
   projectRoot: string;
+  /** Reviewed hook configuration must match the independently verified native binary. Not source qualification. */
+  productVersion?: string;
+  /** Trusted local operator's exact root-only pilot; never profile/browser authority. */
+  ordinaryRootPilot?: boolean;
   clock?: () => string;
   maxDepth?: number;
   maxReceipts?: number;
@@ -43,14 +49,17 @@ export interface CodexSessionBindingOptions {
 /** Returns a proposed hooks.json value; does not create config, trust hooks, or
  * override any existing hook definitions. Merge/review remains a human action.
  * Official lifecycle shape: https://learn.chatgpt.com/docs/hooks . */
-export function proposeCodexSessionBindingHooks(options: Pick<CodexSessionBindingOptions, 'receiptDirectory' | 'sourceRoots' | 'projectRoot'> & {
+export function proposeCodexSessionBindingHooks(options: Pick<CodexSessionBindingOptions, 'receiptDirectory' | 'sourceRoots' | 'projectRoot' | 'productVersion'> & {
   nodeExecutable: string; scriptPath: string;
 }) {
   const paths = [options.nodeExecutable, options.scriptPath, options.receiptDirectory, options.projectRoot, ...options.sourceRoots];
   if (!options.sourceRoots.length || paths.some(path => !isAbsolute(path) || path.length > 4096 || path.includes(String.fromCharCode(0)) || /[\r\n]/.test(path))) throw new Error('binding_configuration_invalid');
+  const version = receiptVersionSchema.safeParse(options.productVersion ?? '0.160.0');
+  if (!version.success) throw new Error('binding_configuration_invalid');
   const quote = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`;
   const command = [options.nodeExecutable, options.scriptPath, '--receipt-directory', options.receiptDirectory,
-    ...options.sourceRoots.flatMap(root => ['--source-root', root])].map(quote).join(' ');
+    ...options.sourceRoots.flatMap(root => ['--source-root', root]),
+    ...(options.productVersion === undefined ? [] : ['--product-version', version.data])].map(quote).join(' ');
   const handler = { type: 'command' as const, command, timeout: 5, additionalContextLimit: 256 };
   return { destination: join(options.projectRoot, '.codex', 'hooks.json'), productionSupported: false as const,
     configuration: { description: 'Metadata-only session binding receipt proposal. Requires project and exact hook trust.',
@@ -67,6 +76,8 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
   private readonly directory: string;
   private readonly roots: string[];
   private readonly projectRoot: string;
+  private readonly productVersion: z.infer<typeof receiptVersionSchema>;
+  private readonly ordinaryRootPilot: boolean;
   private readonly clock: () => string;
   private readonly maxDepth: number;
   private readonly maxReceipts: number;
@@ -74,6 +85,10 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
   private readonly maxFamilyMembers: number;
   private readonly cursorKey = randomBytes(32);
   constructor(options: CodexSessionBindingOptions) {
+    const version = receiptVersionSchema.safeParse(options.productVersion ?? '0.160.0');
+    if (!version.success) throw new Error('binding_configuration_invalid');
+    this.productVersion = version.data;
+    this.ordinaryRootPilot = options.ordinaryRootPilot === true;
     this.directory = realpathSync(options.receiptDirectory);
     this.projectRoot = realpathSync(options.projectRoot);
     this.roots = options.sourceRoots.map(root => realpathSync(root));
@@ -81,6 +96,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.maxDepth = options.maxDepth ?? 8; this.maxReceipts = options.maxReceipts ?? 1024; this.maxSourceBytes = options.maxSourceBytes ?? 8 * 1024 * 1024;
     this.maxFamilyMembers = options.maxFamilyMembers ?? 32;
+    if(this.ordinaryRootPilot&&(this.productVersion!=='0.162.0'||this.maxDepth!==1||this.maxFamilyMembers!==1))throw new Error('binding_configuration_invalid');
     for (const [value, limit] of [[this.maxFamilyMembers, 32], [this.maxDepth, 31], [this.maxReceipts, 65536], [this.maxSourceBytes, 8 * 1024 * 1024]] as const) {
       if (!Number.isSafeInteger(value) || value < 1 || value > limit) throw new Error('binding_configuration_invalid');
     }
@@ -95,6 +111,9 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
   /** Metadata-only pilot scope check before any receipt/source access. */
   assertProjectRoot(projectRoot: string): void {
     if(projectRoot!==this.projectRoot)throw new Error('binding_pilot_scope_invalid');
+  }
+  assertPilotVersion(version: string): void {
+    if(version!==this.productVersion||this.maxDepth!==1||version==='0.162.0'&&this.maxFamilyMembers!==1)throw new Error('binding_pilot_scope_invalid');
   }
   private checkDirectory(): void {
     let stat: ReturnType<typeof lstatSync>;
@@ -129,7 +148,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
         bytes = Buffer.alloc(stat.size); if (readSync(fd, bytes, 0, bytes.length, 0) !== bytes.length) throw new Error('invalid');
       } finally { closeSync(fd); }
       const record = receiptSchema.parse(JSON.parse(bytes.toString('utf8')) as unknown);
-      if (record.receipt !== receipt ||
+      if (record.productVersion !== this.productVersion || record.receipt !== receipt ||
         (record.event === 'SessionStart' ? record.parentSessionId !== null || record.turnId !== null || record.nativeRootSessionId !== undefined : record.turnId === null || (record.nativeRootSessionId === undefined ? record.parentSessionId === null || record.parentSessionId === record.sessionId : record.parentSessionId !== null || record.nativeRootSessionId === record.sessionId))) throw new Error('invalid');
       return record;
     } catch { throw new Error('binding_identity_unavailable'); }
@@ -280,8 +299,13 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     } finally { closeSync(fd); }
   }
   private readHeader(record: Receipt): z.infer<typeof headerSchema>['payload'] {
+    if(record.productVersion!=='0.160.0'&&!this.ordinaryRootPilot)throw new Error('binding_source_unqualified');
     const bytes = this.readSource(record, true);
-    try { return headerSchema.parse(JSON.parse(bytes.toString('utf8')) as unknown).payload; }
+    try {
+      const header = headerSchema.parse(JSON.parse(bytes.toString('utf8')) as unknown).payload;
+      if (header.cli_version !== record.productVersion) throw new Error('invalid');
+      return header;
+    }
     catch { throw new Error('binding_metadata_unavailable'); }
   }
   /** Qualification-only explicit connect: root hook metadata before any source read. */
@@ -364,6 +388,8 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
   async readUsage(session: VerifiedSessionIdentity, cursor: string | null, inputScope: CandidateScope, boundary?: BindingReadBoundary): Promise<UsageBatch> {
     let scope: CandidateScope;
     try { scope = checkedCandidateScope(inputScope); } catch { throw new Error('binding_scope_mismatch'); }
+    const compatibility = this.ordinaryRootPilot ? resolveSourceCompatibility('codex','0.162.0','codex_workflow','codex-workflow-own-response-v1') : null;
+    if(this.ordinaryRootPilot&&(scope.sessions.length!==1||session.parentSessionId!==null||!compatibility))throw new Error('binding_pilot_family_scope');
     const record = this.verified(session);
     const mapping = scope.sessions.find(s => s.nativeSessionId === session.sessionId);
     if (!mapping || mapping.product !== 'codex' || mapping.parentSessionId !== session.parentSessionId || mapping.sessionId !== session.sessionId) throw new Error('binding_scope_mismatch');
@@ -411,7 +437,7 @@ export class CodexSessionBindingProvider implements SessionBindingProvider {
     // missing runtime. No request can be attributed via this sentinel permission.
     scope = { ...scope, allowedRootTurnIds: rootTurns.size ? [...rootTurns] : ['binding-observation'] };
     let snapshot: CodexCandidateSnapshot; let historyGap = false;
-    try { snapshot = parseCodexCandidateRollout(bytes.toString('utf8'), scope, mapping.sourceId, this.projectRoot, now); }
+    try { snapshot = parseCodexCandidateRollout(bytes.toString('utf8'), scope, mapping.sourceId, this.projectRoot, now, compatibility ?? undefined); }
     catch (error) {
       if (!(error instanceof Error) || error.message !== 'candidate_unsupported_history') throw error;
       snapshot = { records: [], hasGap: false }; historyGap = true;

@@ -210,7 +210,10 @@ adapts project rules and scripts. Register both versions normally, then generate
    a separate fresh session in that target and invoke harness-connect there.
    File application does not prove generated-instruction loading or measurement
    readiness. Existing identity/loading/source gates remain in force; these
-   working-session routes are qualification-pending for this feature.
+   working-session routes remain production-qualification-pending. The explicit
+   Codex 0.162.0 root-only local functional pilot can connect after completed file
+   application under separate task/source authority; its parser references remain
+   unverified. See [the bounded pilot](harness-connect.md#codex-01620-ordinary-root-local-pilot).
 
 Application helper operations are `context`, `checkpoint`, `identity`, `report`
 and `status`. Use the installed skill path and Node 24. Checkpoints retain actual

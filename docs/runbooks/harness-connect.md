@@ -158,6 +158,34 @@ For the isolated ordinary Codex CLI qualification runner and its explicit native
 
 For the isolated qualification runner, the UI also shows parent/child own request, input/output and partial cost rows with an observed sum. Its same-live-root resume and separate owned-AI emergency stop preserve the original deadline and safety counters; paused source counters remain unverified. See [the bounded procedure](../validation/codex-ordinary-binding-qualification.md).
 
+## Codex 0.162.0 ordinary-root local pilot
+
+Use only the exact `codex-01620-ordinary-root-human-pilot` source profile in a
+reviewed `functional_pilot`. The normal service remains closed. An operator must
+select the exact task and separately authorize observation:
+
+```sh
+npm start -- --db "$DB" ui --pilot-task "$TASK_ID" --pilot-observe --pilot-until-stop
+```
+
+Configure the provider and reviewed SessionStart hook proposal with the independently
+verified `0.162.0` product version. Metadata-only application identity does not
+authorize transcript reading. Review project-local hook installation/trust and
+the exact receipt/source directories before native startup; never fabricate receipts.
+Only one fresh root is eligible; child sessions are unsupported.
+
+For `agent_applied`, first complete the separate application session, review file
+outputs and checks, then start a fresh working root in the selected checkout and
+invoke `harness-connect`. Applying-session identity reuse, incomplete application,
+file drift and old roots remain blocked.
+
+Own-response observations reuse the 0.160.0 parser and are labeled
+`compatibility_unverified`, with immutable `codex_workflow` parser lineage; this
+label is not launch permission or production admission. Contract failure invalidates
+the shared parser tuple before another source read. Costs remain partial reference
+estimates, not complete totals, native-loading proof, or inference. See
+[ADR 013](../decisions/013-forward-version-compatibility.md).
+
 ## Claude human-operated UI pilot
 
 The local operator may select one prepared `functional_pilot` task using the
