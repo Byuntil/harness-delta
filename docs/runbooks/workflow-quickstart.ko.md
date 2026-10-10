@@ -21,8 +21,8 @@ Claude Code 2.1.291 부모 전용 launch(`claude-workflow-own-trace-v1`)와
 | 작업 전체 비용, 실제 청구액, 절감·도입 추론 | 제공하지 않음 |
 | 팀 파일 교환 | 합성 검증 전용; 기능 파일럿 결과는 이 경로로 교환할 수 없음 |
 
-정규 Codex 버전 `>0.160.0`, `<0.164.0`과 Claude Code 버전 `>2.1.291`,
-`<2.2.0`(2.1.293/2.1.294 포함)은 `functional_pilot`에서 workflow 프로필을
+정규 Codex 버전 `>0.160.0`, `<0.164.0`(0.162.1 포함)과 Claude Code 버전 `>2.1.291`,
+`<2.2.0`(2.1.296 포함)은 `functional_pilot`에서 workflow 프로필을
 재사용할 수 있습니다. 신뢰 상태는 `compatibility_unverified`이며 기준 추정액을
 별도로 표시합니다. 이 범위가 티켓 연결이나 일반 세션 가족의 검증을 대신하지는
 않습니다. [버전 설정과 검사](task-native-workflow.md#conditional-forward-versions)를 참고하세요.

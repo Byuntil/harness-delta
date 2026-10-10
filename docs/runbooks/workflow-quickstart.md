@@ -21,8 +21,8 @@ Choose model and effort per invocation; a new session does not change the assign
 | Complete task cost, actual billing, savings or adoption inference | Unavailable |
 | Team file exchange | Synthetic validation only; functional-pilot results cannot use that exchange |
 
-Stable Codex versions `>0.160.0` and `<0.164.0`, and Claude Code versions
-`>2.1.291` and `<2.2.0` (including 2.1.293/2.1.294), may reuse their workflow
+Stable Codex versions `>0.160.0` and `<0.164.0` (including 0.162.1), and Claude Code versions
+`>2.1.291` and `<2.2.0` (including 2.1.296), may reuse their workflow
 profiles in a `functional_pilot`. They remain `compatibility_unverified`, with
 separate reference estimates. These windows do not qualify ticket connections or
 ordinary session families. See [version configuration and checks](task-native-workflow.md#conditional-forward-versions).

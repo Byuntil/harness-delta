@@ -10,8 +10,8 @@ import { comparisonVariant } from '../src/comparison.js';
 import { codexRootHumanPilotProfileId } from '../src/session-binding-human-pilot.js';
 import { createHash } from 'node:crypto';
 
-test('reviewed 0.162 root pilot uses the selected application checkout and metadata-only versioned identity', async () => {
-  const f = localWebFixture(codexRootHumanPilotProfileId, { product: 'codex', productVersion: '0.162.0' });
+test.each(['0.162.0', '0.162.1'])('reviewed %s root pilot uses the selected application checkout and metadata-only versioned identity', async productVersion => {
+  const f = localWebFixture(codexRootHumanPilotProfileId, { product: 'codex', productVersion });
   const journal = join(f.root, 'root-pilot-receipts');
   mkdirSync(journal, { mode: 0o700 });
   writeFileSync(join(f.project, 'README.md'), 'Synthetic application prerequisites');
@@ -38,7 +38,7 @@ test('reviewed 0.162 root pilot uses the selected application checkout and metad
     const task = z.object({ id: z.string(), support_details: z.unknown() }).parse(await domain.createTask({ name: 'Synthetic root pilot', project_id: 'project-1', setup_id: bound.profile_id }));
     expect(task.support_details).toMatchObject({
       family: 'candidate_root_pilot',
-      family_parser_compatibility: { state: 'compatibility_unverified', product_version: '0.162.0', parser_version: '0.160.0' },
+      family_parser_compatibility: { state: 'compatibility_unverified', product_version: productVersion, parser_version: '0.160.0' },
     });
     const workspace = join(f.root, 'selected-checkout');
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
@@ -51,7 +51,7 @@ test('reviewed 0.162 root pilot uses the selected application checkout and metad
       writeFileSync(source.path, 'PRIVATE_SYNTHETIC_HEADER_MUST_NOT_BE_OPENED\n');
       const raw: unknown = JSON.parse(execFileSync(process.execPath, [
         resolve('scripts/session-binding-codex-hook.mjs'), '--receipt-directory', journal,
-        '--source-root', join(f.home, 'sessions'), '--product-version', '0.162.0',
+        '--source-root', join(f.home, 'sessions'), '--product-version', productVersion,
       ], { input: JSON.stringify({ hook_event_name: 'SessionStart', session_id: source.id, source: 'startup', cwd, transcript_path: source.path }), encoding: 'utf8' }));
       if (!raw || typeof raw !== 'object' || !('hookSpecificOutput' in raw)) throw new Error('invalid_fixture_receipt');
       const value = raw.hookSpecificOutput;

@@ -126,7 +126,7 @@ DB 데이터·설정·보고 기준시각이 같으면 같은 기간 보고서�
 명시된 유한 범위의 안정 릴리스에 기존 파서를 자동으로 조건부 재사용합니다.
 파일 수집은 Codex 0.158.0 이후 0.164.0 미만 버전에 0.158.0 파서를 사용하고,
 Claude Code 2.1.283 이후 2.2.0 미만 버전에 2.1.283 파서를 사용합니다.
-따라서 Codex CLI 0.161.0과 Claude Code 2.1.293/2.1.294은 기본적으로
+따라서 현재 안정 버전 Codex CLI 0.162.1과 Claude Code 2.1.296은 기본적으로
 `compatibility_unverified` 신뢰 상태로 등록됩니다. 등록된 정확한 버전은 검증 상태를
 유지합니다. 사전 릴리스, 접미사, 등록되지 않은 이전 버전, 범위 밖 릴리스는
 원본 접근 전에 거부됩니다.
@@ -141,9 +141,9 @@ native 사용량은 `usage.legacy_unverified`에 표시됩니다. 비용 보고�
 
 ```sh
 node dist/cli.js --db ./local.db compatibility status
-node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.161.0 --source file
-node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.293 --source file
-node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.161.0 --source file --reason semantic_incompatibility
+node dist/cli.js --db ./local.db compatibility inspect --product codex --version 0.162.1 --source file
+node dist/cli.js --db ./local.db compatibility inspect --product claude_code --version 2.1.296 --source file
+node dist/cli.js --db ./local.db compatibility invalidate --product codex --version 0.162.1 --source file --reason semantic_incompatibility
 ```
 
 예상 결과: inspect는 실제 버전, 선택된 파서, 신뢰 상태를 반환합니다. invalidate는

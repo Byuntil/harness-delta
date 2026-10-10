@@ -211,7 +211,7 @@ adapts project rules and scripts. Register both versions normally, then generate
    File application does not prove generated-instruction loading or measurement
    readiness. Existing identity/loading/source gates remain in force; these
    working-session routes remain production-qualification-pending. The explicit
-   Codex 0.162.0 root-only local functional pilot can connect after completed file
+   Codex 0.162.0/0.162.1 root-only local functional pilot can connect after completed file
    application under separate task/source authority; its parser references remain
    unverified. See [the bounded pilot](harness-connect.md#codex-01620-ordinary-root-local-pilot).
 

@@ -155,8 +155,8 @@ recovery procedure. Exact admission still requires separate reviewed evidence.
 | Codex workflow | 0.160.0 own responses | >0.160.0 and <0.164.0 | Existing root operations and read-only direct-child profile |
 | Claude workflow | 2.1.291 own trace | >2.1.291 and <2.2.0 | Fresh parent-only launch |
 
-As of 2026-10-08 the official stable releases are [Codex 0.161.0](https://github.com/openai/codex/releases/tag/rust-v0.161.0)
-and [Claude Code 2.1.293](https://github.com/anthropics/claude-code/releases/tag/v2.1.293).
+As of 2026-10-10 the official stable releases are [Codex 0.162.1](https://github.com/openai/codex/releases/tag/rust-v0.162.1)
+and [Claude Code 2.1.296](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md#21296).
 Both fall within the implemented windows. Their exact counter/native semantics
 remain unverified; synthetic tests establish conditional behavior, not new live admission.
 
@@ -187,7 +187,7 @@ the native workflow adapter/admission tests, and `npm run check` under Node 24.
 ## Explicit ordinary-root Codex pilot parser reuse
 
 The exact `codex-01620-ordinary-root-human-pilot` profile grants no permission by
-itself. A task-bound local functional-pilot scope, reviewed Codex 0.162.0 receipt
+itself. A task-bound local functional-pilot scope, reviewed Codex 0.162.0 or 0.162.1 receipt
 instrumentation, and explicit observer authority are required. Version selection
 alone remains metadata-only. The provider accepts one fresh root, no descendants;
 a completed agent application also requires unchanged output proofs and a separate
@@ -198,7 +198,8 @@ This route reuses `codex-workflow-own-response-v1` under a code-owned mapping.
 authority or ordinary-source admission. Persist its existing tuple atomically
 with the binding: `compatibility_unverified`, actual product version `0.162.0`,
 parser version `0.160.0`, the own-response parser/profile revision, and
-`forward-version-v1`. Pinning is required before storing observations.
+`forward-version-v1`. The 0.162.1 candidate uses the same tuple with actual product
+version `0.162.1`, never an alias to 0.162.0. Pinning is required before storing observations.
 
 The UI distinguishes root-only candidate authority from inherited-parser trust.
 Shared lineage invalidation conservatively blocks both collection routes before

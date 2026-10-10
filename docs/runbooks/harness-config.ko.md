@@ -209,7 +209,7 @@ snapshot 무결성은 네이티브 시작 순서, 지침 로딩, 도구 실제 �
    열고 harness-connect를 사용하세요. 파일 적용은 생성 지침의 로딩이나 측정
    준비를 입증하지 않습니다. 기존 신원·로딩·원본 지원 gate를 유지하며, 이
    기능의 작업 세션 경로는 production 지원 검증 대기 중입니다. 명시적인
-   Codex 0.162.0 root-only 로컬 functional pilot은 파일 적용을 완료하고
+   Codex 0.162.0/0.162.1 root-only 로컬 functional pilot은 파일 적용을 완료하고
    별도 작업·원본 권한을 받은 뒤 연결할 수 있지만, parser 기준값은
    미검증입니다. [제한된 pilot](harness-connect.ko.md#codex-01620-일반-root-로컬-pilot)을 참고하세요.
 

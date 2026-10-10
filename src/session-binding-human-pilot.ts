@@ -1,7 +1,7 @@
 import { Lifecycle } from './lifecycle.js';
 import { comparisonProtocol, protocolRow } from './comparison.js';
 import { parseTaskMetadata } from './flexible-contracts.js';
-import { CodexSessionBindingProvider } from './session-binding-codex.js';
+import { CodexSessionBindingProvider, codexRootPilotVersions } from './session-binding-codex.js';
 import { bindingIdentityKey, VerifiedSessionIdentitySchema, type SessionBindingProvider, type VerifiedSessionIdentity } from './session-binding-contract.js';
 import type { Store } from './store.js';
 import type { FlexibleProtocol } from './flexible-contracts.js';
@@ -17,7 +17,7 @@ export interface CodexHumanPilotScope { readonly taskId: string; }
 interface Scope { store: Store; taskId: string; provider: CodexSessionBindingProvider; metadata: string; protocol: string; projectRoot: string; collection: string; openedAt: string; version: string; }
 const scopes = new WeakMap<CodexHumanPilotScope, Scope>();
 export function isCodexHumanPilotProtocol(protocol: FlexibleProtocol): boolean {
- return protocol.purpose==='functional_pilot'&&protocol.source_profiles.length===1&&protocol.source_profiles.every(p=>p.product==='codex'&&(p.product_version==='0.160.0'&&p.profile_id===codexHumanPilotProfileId||p.product_version==='0.162.0'&&p.profile_id===codexRootHumanPilotProfileId));
+ return protocol.purpose==='functional_pilot'&&protocol.source_profiles.length===1&&protocol.source_profiles.every(p=>p.product==='codex'&&(p.product_version==='0.160.0'&&p.profile_id===codexHumanPilotProfileId||codexRootPilotVersions.some(version=>version===p.product_version)&&p.profile_id===codexRootHumanPilotProfileId));
 }
 function context(store: Store, taskId: string) {
  const task=new Lifecycle(store).task(taskId);
@@ -54,7 +54,7 @@ export function checkCodexHumanPilotIdentity(scope: CodexHumanPilotScope, store:
  const members=store.all<{identity:string}>('SELECT identity FROM session_bindings WHERE task_id=?',[taskId]).map(r=>VerifiedSessionIdentitySchema.parse(JSON.parse(r.identity) as unknown));
  const root=members.find(m=>m.parentSessionId===null);const existing=members.find(m=>m.sessionId===identity.sessionId);
  if(identity.product!=='codex'||identity.productVersion!==value.version||identity.cwd!==value.projectRoot||
-  value.version==='0.162.0'&&identity.parentSessionId!==null||
+  codexRootPilotVersions.some(version=>version===value.version)&&identity.parentSessionId!==null||
   existing&&bindingIdentityKey(existing)!==bindingIdentityKey(identity)||
   identity.parentSessionId===null&&(root?root.sessionId!==identity.sessionId:Date.parse(identity.createdAt)<Date.parse(value.openedAt))||
   identity.parentSessionId!==null&&(!root||identity.parentSessionId!==root.sessionId||Date.parse(identity.createdAt)<Date.parse(root.createdAt))||
@@ -78,7 +78,7 @@ export function humanPilotCompatibility(scope: HumanPilotScope, store: Store, ta
  if(isClaudeHumanPilotScope(scope))return null;
  const value=scopes.get(scope);
  if(!value||value.store!==store||value.taskId!==taskId)throw new Error('binding_pilot_scope_invalid');
- if(value.version!=='0.162.0')return null;
+ if(!codexRootPilotVersions.some(version=>version===value.version))return null;
  // The ordinary task authority is separate from the inherited parser lineage.
- return resolveSourceCompatibility('codex','0.162.0','codex_workflow','codex-workflow-own-response-v1');
+ return resolveSourceCompatibility('codex',value.version,'codex_workflow','codex-workflow-own-response-v1');
 }

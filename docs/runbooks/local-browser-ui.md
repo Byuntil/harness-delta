@@ -149,7 +149,8 @@ gates remain separate checks when choosing and preparing a task.
 The steps below describe the exact Codex 0.160.0 ticket path. For ordinary
 terminal sessions and family collection, use [Harness Connect](harness-connect.md).
 That path has separate candidate qualification and local pilot authority, including
-Claude 2.1.291/2.1.293/2.1.294; installing a skill alone does not enable collection.
+Codex 0.162.0/0.162.1 roots and Claude 2.1.291/2.1.293/2.1.294/2.1.296 families;
+installing a skill alone does not enable collection.
 File or launch-workflow compatibility windows do not widen either UI source gate.
 
 Setup, task details and Getting started show route-specific descriptions derived

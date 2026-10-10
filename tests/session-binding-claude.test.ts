@@ -480,13 +480,54 @@ describe('Claude bound-session authorization', () => {
     expect(authorizeSource).toHaveBeenLastCalledWith(expect.objectContaining({ nativeSessionId: sid, agentId: 'denied', sourceRef: childPath(sid, 'denied') }));
   });
 
-  it.each(['2.1.293', '2.1.294'])('keeps Claude %s a code-owned synthetic candidate', async version => {
+  it.each(['2.1.293', '2.1.294', '2.1.296'])('keeps Claude %s a code-owned synthetic candidate', async version => {
     const sid = randomUUID(); writeRoot(sid);
     writeFileSync(rootPath(sid), lines([userRow(sid, '2026-10-07T00:59:00.000Z', { version })]));
     connect(sid); const receipt = locate(sid).receipt!;
     expect((await provider().resolveCurrent({ receipt })).productVersion).toBe(version);
     await expect(provider({ allowCandidateProfiles: false }).resolveCurrent({ receipt })).rejects.toThrow('claude_source_version_unsupported');
     expect(claudeBindingProfiles.find(profile => profile.version === version)?.status).toBe('candidate');
+  });
+
+  it('collects latest candidate own usage once and excludes the prior baseline', async () => {
+    const sid = randomUUID(); const version = '2.1.296';
+    writeFileSync(rootPath(sid), lines([
+      userRow(sid, '2026-10-07T00:59:00.000Z', { version }),
+      assistant(sid, 'old', [10, 2, 3, 4], { version }),
+    ]), { mode: 0o600 });
+    connect(sid);
+    const p = provider(); const identity = await currentIdentity(sid, p); const scope = scopeFor([identity]);
+    const baseline = await p.readUsage(identity, null, scope, { baseline: true });
+    appendFileSync(rootPath(sid), lines([
+      assistant(sid, 'new', [20, 4, 6, 8], { version }),
+      userRow(sid, '2026-10-07T01:01:00.000Z', { version }),
+    ]));
+    const batch = await p.readUsage(identity, baseline.cursor, scope);
+    expect(ids(batch.records)).toEqual(['new']);
+    expect(batch.records[0]?.payload).toMatchObject({ product_version: version, input_total: { value: 30 }, output_total: { value: 8 } });
+    expect((await p.readUsage(identity, batch.cursor, scope)).records).toEqual([]);
+    expect(JSON.stringify(batch)).not.toContain(privateText);
+  });
+
+  it('keeps latest candidate family requests separate under the three-member ceiling', async () => {
+    const sid = randomUUID(); const version = '2.1.296';
+    writeFileSync(rootPath(sid), lines([userRow(sid, '2026-10-07T00:59:00.000Z', { version })]), { mode: 0o600 });
+    connect(sid); const p = provider({ maxFamilyMembers: 3 }); const parent = await currentIdentity(sid, p);
+    for (const agent of ['one', 'two']) {
+      writeChild(sid, agent, [
+        childRow(sid, agent, '2026-10-07T01:00:00.000Z'),
+        assistant(sid, agent, [10, 2, 3, 4], { version, agentId: agent, isSidechain: true }),
+        userRow(sid, '2026-10-07T01:01:00.000Z', { version, agentId: agent, isSidechain: true }),
+      ].map(row => ({ ...row, version })));
+      subagent(sid, agent, 'SubagentStart');
+    }
+    const discovered = await p.discoverChildren(parent);
+    const children = discovered.children.map(child => child.identity); const scope = scopeFor([parent, ...children]);
+    expect(children.map(child => child.productVersion)).toEqual([version, version]);
+    const batches = await Promise.all(children.map(child => p.readUsage(child, null, scope, { baseline: false })));
+    expect(batches.flatMap(batch => ids(batch.records)).sort()).toEqual(['one', 'two']);
+    writeChild(sid, 'extra', []); subagent(sid, 'extra', 'SubagentStart');
+    await expect(p.discoverChildren(parent)).rejects.toThrow('claude_family_scope_limit');
   });
 
   it('keeps packaged hook root and Unicode agent-type projection synchronized', () => {

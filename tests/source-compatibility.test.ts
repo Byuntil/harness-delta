@@ -5,7 +5,7 @@ import { expect, test } from 'vitest';
 import { Lifecycle } from '../src/lifecycle.js';
 import { Store } from '../src/store.js';
 
-test.each([['codex', '0.161.0'], ['claude_code', '2.1.292'], ['claude_code', '2.1.293']])('recent regular %s can enroll without opening its source', (product, version) => {
+test.each([['codex', '0.161.0'], ['codex', '0.162.1'], ['claude_code', '2.1.292'], ['claude_code', '2.1.293'], ['claude_code', '2.1.296']])('recent regular %s can enroll without opening its source', (product, version) => {
   const root = mkdtempSync(join(tmpdir(), 'compatibility-'));
   const store = new Store(':memory:');
   try {
@@ -20,7 +20,7 @@ test.each([['codex', '0.161.0'], ['claude_code', '2.1.292'], ['claude_code', '2.
 import { collectionFixture, products } from './helpers/collection-fixture.js';
 
 test.each(products)('%s latest stable reuses its parser, counts only new turns and persists trust', product => {
-  const version = product === 'codex' ? '0.161.0' : '2.1.293';
+  const version = product === 'codex' ? '0.162.1' : '2.1.296';
   const f = collectionFixture(product, version);
   try {
     f.life.start('t1');
